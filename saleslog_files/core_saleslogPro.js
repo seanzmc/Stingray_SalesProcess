@@ -15,6 +15,46 @@
  * - Auto-recovery system for incomplete operations
  */
 
+/**
+ * ============================================================================
+ * CDK MERGE TOOL INTEGRATION
+ * ============================================================================
+ *
+ * This system includes a CDK data merge tool that allows merging financial data
+ * from CDK system exports with the Sales Log MONTHLY data.
+ *
+ * Key Features:
+ * - Stock number-based matching with fuzzy logic (3-phase algorithm)
+ * - Gross profit data integration (Front GP, Back GP, Total GP)
+ * - Automatic unmatched records reporting
+ * - Configuration save/load for recurring monthly use
+ *
+ * Access: Sales Tools menu > Merge CDK Data
+ *
+ * Modules:
+ * - merge_controller.js: Main orchestration and UI
+ * - stock_matcher.js: 3-phase matching algorithm
+ * - data_merger.js: Record merging and validation
+ * - output_generator.js: Sheet writing and formatting
+ * - config_manager.js: Configuration management
+ * - file_processor.js: Excel file reading (via SheetJS)
+ *
+ * Data Flow:
+ * 1. User uploads CDK Excel file via sidebar
+ * 2. System reads MONTHLY sheet data
+ * 3. Matches records by stock number (fuzzy matching)
+ * 4. Merges gross profit data into matched records
+ * 5. Writes results to MERGED_DATA sheet
+ * 6. Logs unmatched records to MERGE_LOG sheet
+ *
+ * Integration Notes:
+ * - Read-only access to MONTHLY sheet (no modifications)
+ * - All output goes to new sheets (MERGED_DATA, MERGE_LOG)
+ * - Reuses existing error logging and utilities
+ * - Non-breaking addition to Sales Log Pro
+ * ============================================================================
+ */
+
 // Import error logging utility
 // Note: In Apps Script, all files are automatically available in global scope
 
@@ -1745,6 +1785,8 @@ function onOpen() {
         .addItem("Recalculate MTD & Check Formats", "recalcMtdFromMonthly")
         .addSeparator()
         .addItem("Start New Month (Rollover)", "rolloverMonth")
+        .addSeparator()
+        .addItem("📊 Merge CDK Data", "showMergeSidebar")  // CDK Merge Tool Integration
         .addSeparator()
         .addItem("⚙️ Settings", "openConfigurationSidebar")
         .addToUi();

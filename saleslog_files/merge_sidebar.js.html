@@ -1,0 +1,811 @@
+<script>
+  // ========================================================================
+  // CDK MERGE TOOL CLIENT-SIDE JAVASCRIPT
+  // Handles UI interactions, file upload, and server communication
+  // ========================================================================
+
+  'use strict';
+
+  console.log('[Merge Tool] Initializing merge sidebar...');
+
+  // Global state
+  let currentStep = 1;
+  let uploadedFileId = null;
+  let uploadedFileName = null;
+  let mergeResults = null;
+  let progressInterval = null;
+  let startTime = null;
+
+  // Initialize on load
+  window.addEventListener('DOMContentLoaded', function() {
+    initializeMergeTool();
+  });
+
+  /**
+   * Initialize merge tool sidebar
+   */
+  function initializeMergeTool() {
+    console.log('[Merge Tool] Setting up event listeners...');
+    setupFileUpload();
+    setupConfigControls();
+    loadMergeConfiguration();
+  }
+
+  // ========================================================================
+  // FILE UPLOAD HANDLING
+  // ========================================================================
+
+  /**
+   * Setup file upload drag-and-drop and input handlers
+   */
+  function setupFileUpload() {
+    const uploadArea = document.getElementById('upload-area');
+    const fileInput = document.getElementById('file-input');
+
+    // Click to browse
+    uploadArea.addEventListener('click', function() {
+      fileInput.click();
+    });
+
+    // File input change
+    fileInput.addEventListener('change', function(e) {
+      if (e.target.files.length > 0) {
+        handleFileUpload(e.target.files[0]);
+      }
+    });
+
+    // Drag and drop
+    uploadArea.addEventListener('dragover', function(e) {
+      e.preventDefault();
+      uploadArea.classList.add('drag-over');
+    });
+
+    uploadArea.addEventListener('dragleave', function(e) {
+      e.preventDefault();
+      uploadArea.classList.remove('drag-over');
+    });
+
+    uploadArea.addEventListener('drop', function(e) {
+      e.preventDefault();
+      uploadArea.classList.remove('drag-over');
+      
+      if (e.dataTransfer.files.length > 0) {
+        handleFileUpload(e.dataTransfer.files[0]);
+      }
+    });
+  }
+
+  /**
+   * Handle file upload and validation
+   * @param {File} file - The selected file
+   */
+  function handleFileUpload(file) {
+    console.log('[Merge Tool] File selected:', file.name);
+
+    // Validate file type
+    const validExtensions = ['.xlsx', '.xls', '.csv'];
+    const fileExtension = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+    
+    if (!validExtensions.includes(fileExtension)) {
+      showToast('Invalid file type. Please select .xlsx, .xls, or .csv file', 'error');
+      return;
+    }
+
+    // Validate file size (50MB max)
+    const maxSize = 50 * 1024 * 1024; // 50MB in bytes
+    if (file.size > maxSize) {
+      showToast('File size exceeds 50MB limit. Please use a smaller file', 'error');
+      return;
+    }
+
+    // Show loading
+    showLoading(true, 'Uploading file...');
+
+    // Read file as base64
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const base64Data = e.target.result.split(',')[1];
+      
+      // Upload to server
+      google.script.run
+        .withSuccessHandler(onFileUploaded)
+        .withFailureHandler(onFileUploadError)
+        .uploadCDKFile(base64Data, file.name, window.SESSION_ID);
+    };
+
+    reader.onerror = function() {
+      showLoading(false);
+      showToast('Error reading file. Please try again', 'error');
+    };
+
+    reader.readAsDataURL(file);
+  }
+
+  /**
+   * Handle successful file upload
+   * @param {Object} result - Upload result from server
+   */
+  function onFileUploaded(result) {
+    console.log('[Merge Tool] File uploaded successfully:', result);
+    showLoading(false);
+
+    if (result.success) {
+      uploadedFileId = result.fileId;
+      uploadedFileName = result.fileName;
+
+      // Update UI
+      document.getElementById('upload-area').classList.add('has-file');
+      
+      const fileInfo = document.getElementById('file-info');
+      fileInfo.querySelector('.file-name').textContent = '✓ ' + result.fileName;
+      fileInfo.querySelector('.file-details').textContent = 
+        `${result.rowCount} records • ${result.columnCount} columns`;
+      fileInfo.classList.remove('hidden');
+
+      // Show preview if available
+      if (result.preview) {
+        displayFilePreview(result.preview);
+      }
+
+      // Enable next button
+      document.getElementById('next-config').disabled = false;
+
+      // Auto-populate column mappings
+      if (result.detectedColumns) {
+        populateColumnMappings(result.detectedColumns);
+      }
+
+      showToast('File uploaded successfully!', 'success');
+    } else {
+      showToast('Upload failed: ' + result.error, 'error');
+    }
+  }
+
+  /**
+   * Handle file upload error
+   * @param {Error} error - Error object
+   */
+  function onFileUploadError(error) {
+    console.error('[Merge Tool] Upload error:', error);
+    showLoading(false);
+    showToast('Upload failed: ' + error.message, 'error');
+  }
+
+  /**
+   * Display file preview
+   * @param {Array} previewData - Preview rows
+   */
+  function displayFilePreview(previewData) {
+    const preview = document.getElementById('file-preview');
+    const content = preview.querySelector('.preview-content');
+    
+    let previewText = '';
+    previewData.forEach((row, index) => {
+      previewText += row.join(' | ') + '\n';
+    });
+    
+    content.textContent = previewText;
+    preview.classList.remove('hidden');
+  }
+
+  /**
+   * Remove uploaded file
+   */
+  window.removeFile = function() {
+    uploadedFileId = null;
+    uploadedFileName = null;
+    
+    document.getElementById('upload-area').classList.remove('has-file');
+    document.getElementById('file-info').classList.add('hidden');
+    document.getElementById('file-preview').classList.add('hidden');
+    document.getElementById('next-config').disabled = true;
+    document.getElementById('file-input').value = '';
+  };
+
+  // ========================================================================
+  // CONFIGURATION
+  // ========================================================================
+
+  /**
+   * Setup configuration controls
+   */
+  function setupConfigControls() {
+    // Confidence threshold slider
+    const slider = document.getElementById('confidence-threshold');
+    const valueDisplay = document.getElementById('threshold-value');
+    
+    slider.addEventListener('input', function(e) {
+      valueDisplay.textContent = e.target.value + '%';
+    });
+
+    // Enable/disable partial match options
+    const enablePartial = document.getElementById('enable-partial');
+    enablePartial.addEventListener('change', function(e) {
+      // Could enable/disable related options here
+    });
+  }
+
+  /**
+   * Load merge configuration from server
+   */
+  function loadMergeConfiguration() {
+    google.script.run
+      .withSuccessHandler(function(config) {
+        console.log('[Merge Tool] Configuration loaded:', config);
+        window.MERGE_CONFIG = config;
+      })
+      .withFailureHandler(function(error) {
+        console.error('[Merge Tool] Config load error:', error);
+      })
+      .getMergeConfiguration();
+  }
+
+  /**
+   * Populate column mapping dropdowns
+   * @param {Object} detectedColumns - Detected column mappings
+   */
+  function populateColumnMappings(detectedColumns) {
+    console.log('[Merge Tool] Populating column mappings:', detectedColumns);
+    
+    // Populate dropdowns with column options
+    const columnSelects = [
+      'stock-column',
+      'type-column',
+      'front-gp-column',
+      'back-gp-column',
+      'total-gp-column'
+    ];
+
+    columnSelects.forEach(selectId => {
+      const select = document.getElementById(selectId);
+      select.innerHTML = '';
+      
+      detectedColumns.headers.forEach((header, index) => {
+        const option = document.createElement('option');
+        option.value = index;
+        option.textContent = `Column ${String.fromCharCode(65 + index)} - ${header}`;
+        select.appendChild(option);
+      });
+    });
+
+    // Set detected values
+    if (detectedColumns.stockColumn !== undefined) {
+      document.getElementById('stock-column').value = detectedColumns.stockColumn;
+    }
+    if (detectedColumns.typeColumn !== undefined) {
+      document.getElementById('type-column').value = detectedColumns.typeColumn;
+    }
+    if (detectedColumns.frontGPColumn !== undefined) {
+      document.getElementById('front-gp-column').value = detectedColumns.frontGPColumn;
+    }
+    if (detectedColumns.backGPColumn !== undefined) {
+      document.getElementById('back-gp-column').value = detectedColumns.backGPColumn;
+    }
+    if (detectedColumns.totalGPColumn !== undefined) {
+      document.getElementById('total-gp-column').value = detectedColumns.totalGPColumn;
+    }
+  }
+
+  /**
+   * Get current configuration from UI
+   * @returns {Object} Configuration object
+   */
+  function getConfiguration() {
+    return {
+      fileId: uploadedFileId,
+      columnMapping: {
+        stockColumn: parseInt(document.getElementById('stock-column').value),
+        typeColumn: parseInt(document.getElementById('type-column').value),
+        frontGPColumn: parseInt(document.getElementById('front-gp-column').value),
+        backGPColumn: parseInt(document.getElementById('back-gp-column').value),
+        totalGPColumn: parseInt(document.getElementById('total-gp-column').value)
+      },
+      matchingOptions: {
+        ignoreLeadingZeros: document.getElementById('ignore-leading-zeros').checked,
+        caseInsensitive: document.getElementById('case-insensitive').checked,
+        enablePartialMatch: document.getElementById('enable-partial').checked,
+        confidenceThreshold: parseInt(document.getElementById('confidence-threshold').value) / 100,
+        reviewSettings: document.getElementById('review-settings').checked
+      },
+      sessionId: window.SESSION_ID
+    };
+  }
+
+  /**
+   * Validate configuration before starting merge
+   * @returns {boolean} True if valid
+   */
+  function validateConfiguration() {
+    const config = getConfiguration();
+
+    if (!config.fileId) {
+      showToast('No file uploaded', 'error');
+      return false;
+    }
+
+    // Check for duplicate column selections
+    const columns = Object.values(config.columnMapping);
+    const uniqueColumns = new Set(columns);
+    if (columns.length !== uniqueColumns.size) {
+      showToast('Cannot use the same column for multiple fields', 'error');
+      return false;
+    }
+
+    return true;
+  }
+
+  // ========================================================================
+  // MERGE PROCESS
+  // ========================================================================
+
+  /**
+   * Start the merge process
+   */
+  window.startMerge = function() {
+    console.log('[Merge Tool] Starting merge process...');
+
+    if (!validateConfiguration()) {
+      return;
+    }
+
+    const config = getConfiguration();
+    startTime = Date.now();
+
+    // Move to matching step
+    showStep(3);
+
+    // Reset progress
+    updateProgress(0, 'Initializing merge...');
+    resetMatchStats();
+
+    // Start merge on server
+    google.script.run
+      .withSuccessHandler(onMergeStarted)
+      .withFailureHandler(onMergeError)
+      .startMergeProcess(config);
+  };
+
+  /**
+   * Handle merge start confirmation
+   * @param {Object} result - Start result
+   */
+  function onMergeStarted(result) {
+    console.log('[Merge Tool] Merge started:', result);
+
+    if (result.success) {
+      // Start polling for progress
+      progressInterval = setInterval(checkProgress, 2000);
+    } else {
+      showToast('Failed to start merge: ' + result.error, 'error');
+      showStep(2);
+    }
+  }
+
+  /**
+   * Check merge progress
+   */
+  function checkProgress() {
+    google.script.run
+      .withSuccessHandler(onProgressUpdate)
+      .withFailureHandler(function(error) {
+        console.error('[Merge Tool] Progress check error:', error);
+      })
+      .getMergeStatus(window.SESSION_ID);
+  }
+
+  /**
+   * Handle progress update
+   * @param {Object} progress - Progress data
+   */
+  function onProgressUpdate(progress) {
+    console.log('[Merge Tool] Progress update:', progress);
+
+    if (progress.status === 'processing') {
+      updateProgress(progress.percentage, progress.message);
+      updateMatchStats(progress.stats);
+    } else if (progress.status === 'complete') {
+      clearInterval(progressInterval);
+      updateProgress(100, 'Matching complete!');
+      updateMatchStats(progress.stats);
+      
+      // Wait a moment then show results
+      setTimeout(function() {
+        displayResults(progress.results);
+      }, 500);
+    } else if (progress.status === 'error') {
+      clearInterval(progressInterval);
+      onMergeError(progress.error);
+    }
+  }
+
+  /**
+   * Update progress bar
+   * @param {number} percent - Percentage complete (0-100)
+   * @param {string} message - Status message
+   */
+  function updateProgress(percent, message) {
+    document.getElementById('progress-fill').style.width = percent + '%';
+    document.getElementById('progress-text').textContent = Math.round(percent) + '%';
+    document.getElementById('status-message').textContent = message;
+
+    // Update time estimate
+    if (percent > 0 && startTime) {
+      const elapsed = (Date.now() - startTime) / 1000;
+      const estimated = (elapsed / percent) * (100 - percent);
+      
+      if (estimated > 60) {
+        document.getElementById('time-estimate').textContent = 
+          `Estimated time remaining: ${Math.ceil(estimated / 60)} minute(s)`;
+      } else {
+        document.getElementById('time-estimate').textContent = 
+          `Estimated time remaining: ${Math.ceil(estimated)} second(s)`;
+      }
+    }
+  }
+
+  /**
+   * Reset match statistics
+   */
+  function resetMatchStats() {
+    document.getElementById('exact-count').textContent = '0';
+    document.getElementById('numeric-count').textContent = '0';
+    document.getElementById('partial-count').textContent = '0';
+    document.getElementById('unmatched-count').textContent = '0';
+  }
+
+  /**
+   * Update match statistics
+   * @param {Object} stats - Match statistics
+   */
+  function updateMatchStats(stats) {
+    if (stats) {
+      document.getElementById('exact-count').textContent = stats.exact || 0;
+      document.getElementById('numeric-count').textContent = stats.numeric || 0;
+      document.getElementById('partial-count').textContent = stats.partial || 0;
+      document.getElementById('unmatched-count').textContent = stats.unmatched || 0;
+    }
+  }
+
+  /**
+   * Cancel merge operation
+   */
+  window.cancelMerge = function() {
+    if (confirm('Cancel the merge operation?\n\nThis will discard the current progress.')) {
+      clearInterval(progressInterval);
+      
+      google.script.run
+        .withSuccessHandler(function() {
+          showToast('Merge cancelled', 'success');
+          showStep(2);
+        })
+        .withFailureHandler(function(error) {
+          console.error('[Merge Tool] Cancel error:', error);
+          showStep(2);
+        })
+        .cancelMerge(window.SESSION_ID);
+    }
+  };
+
+  /**
+   * Handle merge error
+   * @param {Error|string} error - Error object or message
+   */
+  function onMergeError(error) {
+    console.error('[Merge Tool] Merge error:', error);
+    clearInterval(progressInterval);
+    
+    const message = error.message || error.toString();
+    showToast('Merge failed: ' + message, 'error');
+    showStep(2);
+  }
+
+  // ========================================================================
+  // RESULTS DISPLAY
+  // ========================================================================
+
+  /**
+   * Display merge results
+   * @param {Object} results - Merge results
+   */
+  function displayResults(results) {
+    console.log('[Merge Tool] Displaying results:', results);
+    mergeResults = results;
+
+    // Update summary statistics
+    document.getElementById('total-records').textContent = results.totalRecords || 0;
+    document.getElementById('matched-records').textContent = results.matchedRecords || 0;
+    
+    const matchRate = results.totalRecords > 0 
+      ? ((results.matchedRecords / results.totalRecords) * 100).toFixed(1)
+      : 0;
+    document.getElementById('match-rate').textContent = matchRate + '%';
+    
+    document.getElementById('total-gp').textContent = 
+      '$' + (results.totalGP || 0).toLocaleString();
+
+    // Display records needing review
+    if (results.reviewRecords && results.reviewRecords.length > 0) {
+      displayReviewRecords(results.reviewRecords);
+      document.getElementById('review-count').textContent = results.reviewRecords.length;
+    } else {
+      document.getElementById('review-section').style.display = 'none';
+    }
+
+    // Update unmatched count
+    document.getElementById('unmatched-summary').textContent = 
+      results.unmatchedCount || 0;
+
+    // Show step 4
+    showStep(4);
+
+    // Check if match rate is low
+    if (matchRate < 70) {
+      showToast('Low match rate detected. Consider adjusting settings.', 'error');
+    }
+  }
+
+  /**
+   * Display records needing review
+   * @param {Array} records - Records to review
+   */
+  function displayReviewRecords(records) {
+    const reviewList = document.getElementById('review-list');
+    reviewList.innerHTML = '';
+
+    records.forEach((record, index) => {
+      const card = document.createElement('div');
+      card.className = 'review-card';
+      card.innerHTML = `
+        <div class="review-card-header">
+          Stock: ${escapeHtml(record.stockNumber)} 
+          <span style="color: var(--warning-yellow);">[${record.confidence}% match]</span>
+        </div>
+        <div class="review-card-details">
+          Sales Log: ${escapeHtml(record.salesLogCustomer)} - ${escapeHtml(record.salesLogModel)}
+        </div>
+        <div class="review-card-details">
+          CDK Match: ${escapeHtml(record.cdkCustomer)} - ${escapeHtml(record.cdkModel)}
+        </div>
+        ${record.warnings ? `<div class="review-card-details" style="color: var(--warning-yellow);">⚠️ ${escapeHtml(record.warnings)}</div>` : ''}
+        <div class="review-card-actions">
+          <button type="button" class="btn-primary btn-small" onclick="approveMatch(${index})">✓ Approve</button>
+          <button type="button" class="btn-secondary btn-small" onclick="rejectMatch(${index})">✗ Reject</button>
+        </div>
+      `;
+      reviewList.appendChild(card);
+    });
+  }
+
+  /**
+   * Approve a match
+   * @param {number} index - Record index
+   */
+  window.approveMatch = function(index) {
+    console.log('[Merge Tool] Approving match:', index);
+    
+    if (mergeResults && mergeResults.reviewRecords) {
+      mergeResults.reviewRecords[index].approved = true;
+      
+      // Remove from UI
+      const reviewList = document.getElementById('review-list');
+      reviewList.children[index].style.opacity = '0.5';
+      reviewList.children[index].style.pointerEvents = 'none';
+      
+      showToast('Match approved', 'success');
+    }
+  };
+
+  /**
+   * Reject a match
+   * @param {number} index - Record index
+   */
+  window.rejectMatch = function(index) {
+    console.log('[Merge Tool] Rejecting match:', index);
+    
+    if (mergeResults && mergeResults.reviewRecords) {
+      mergeResults.reviewRecords[index].approved = false;
+      
+      // Remove from UI
+      const reviewList = document.getElementById('review-list');
+      reviewList.children[index].remove();
+      
+      // Update count
+      const remaining = reviewList.children.length;
+      document.getElementById('review-count').textContent = remaining;
+      
+      showToast('Match rejected', 'success');
+    }
+  };
+
+  // ========================================================================
+  // MERGE COMPLETION
+  // ========================================================================
+
+  /**
+   * Complete the merge and write to sheet
+   */
+  window.completeMerge = function() {
+    console.log('[Merge Tool] Completing merge...');
+
+    showLoading(true, 'Writing merged data...');
+
+    google.script.run
+      .withSuccessHandler(onMergeComplete)
+      .withFailureHandler(onMergeError)
+      .confirmMerge(window.SESSION_ID, mergeResults);
+  };
+
+  /**
+   * Handle merge completion
+   * @param {Object} result - Completion result
+   */
+  function onMergeComplete(result) {
+    console.log('[Merge Tool] Merge complete:', result);
+    showLoading(false);
+
+    if (result.success) {
+      // Update final statistics
+      document.getElementById('final-processed').textContent = result.processed || 0;
+      document.getElementById('final-matched').textContent = result.matched || 0;
+      document.getElementById('final-merged').textContent = result.merged || 0;
+      document.getElementById('final-unmatched').textContent = result.unmatched || 0;
+      
+      const processingTime = Math.round((Date.now() - startTime) / 1000);
+      document.getElementById('processing-time').textContent = processingTime + 's';
+      
+      const now = new Date();
+      document.getElementById('completion-time').textContent = 
+        `Completed at ${now.toLocaleTimeString()} on ${now.toLocaleDateString()}`;
+
+      // Show/hide unmatched section
+      if (result.unmatched > 0) {
+        document.getElementById('unmatched-section').style.display = 'block';
+      } else {
+        document.getElementById('unmatched-section').style.display = 'none';
+      }
+
+      // Show completion step
+      showStep(5);
+      showToast('Merge completed successfully!', 'success');
+    } else {
+      showToast('Merge failed: ' + result.error, 'error');
+    }
+  }
+
+  /**
+   * View merged data sheet
+   */
+  window.viewMergedData = function() {
+    google.script.run
+      .withSuccessHandler(function() {
+        showToast('Navigating to MERGED_DATA sheet...', 'success');
+        google.script.host.close();
+      })
+      .withFailureHandler(function(error) {
+        showToast('Error: ' + error.message, 'error');
+      })
+      .viewMergedDataSheet();
+  };
+
+  /**
+   * View unmatched data
+   */
+  window.viewUnmatchedData = function() {
+    google.script.run
+      .withSuccessHandler(function() {
+        showToast('Navigating to UNMATCHED sheet...', 'success');
+        google.script.host.close();
+      })
+      .withFailureHandler(function(error) {
+        showToast('Error: ' + error.message, 'error');
+      })
+      .viewUnmatchedSheet();
+  };
+
+  /**
+   * Start a new merge
+   */
+  window.startNewMerge = function() {
+    if (confirm('Start a new merge?\n\nThis will reset the current session.')) {
+      // Reset all state
+      currentStep = 1;
+      uploadedFileId = null;
+      uploadedFileName = null;
+      mergeResults = null;
+      clearInterval(progressInterval);
+      
+      // Reset UI
+      removeFile();
+      showStep(1);
+      
+      showToast('Ready for new merge', 'success');
+    }
+  };
+
+  // ========================================================================
+  // STEP NAVIGATION
+  // ========================================================================
+
+  /**
+   * Show specific step
+   * @param {number} stepNumber - Step number (1-5)
+   */
+  window.showStep = function(stepNumber) {
+    console.log('[Merge Tool] Showing step:', stepNumber);
+    
+    // Hide all steps
+    document.querySelectorAll('.step-container').forEach(step => {
+      step.classList.remove('active');
+    });
+
+    // Show requested step
+    document.getElementById('step-' + stepNumber).classList.add('active');
+
+    // Update progress indicator
+    document.querySelectorAll('.progress-step').forEach(step => {
+      const stepNum = parseInt(step.dataset.step);
+      step.classList.remove('active', 'completed');
+      
+      if (stepNum === stepNumber) {
+        step.classList.add('active');
+      } else if (stepNum < stepNumber) {
+        step.classList.add('completed');
+      }
+    });
+
+    currentStep = stepNumber;
+  };
+
+  // ========================================================================
+  // UTILITY FUNCTIONS
+  // ========================================================================
+
+  /**
+   * Show loading overlay
+   * @param {boolean} show - Show or hide
+   * @param {string} message - Loading message
+   */
+  function showLoading(show, message) {
+    const overlay = document.getElementById('loading-overlay');
+    const messageEl = document.getElementById('loading-message');
+    
+    if (show) {
+      messageEl.textContent = message || 'Processing...';
+      overlay.classList.remove('hidden');
+    } else {
+      overlay.classList.add('hidden');
+    }
+  }
+
+  /**
+   * Show toast notification
+   * @param {string} message - Message to display
+   * @param {string} type - Type: 'success', 'error', or default
+   */
+  function showToast(message, type) {
+    const toast = document.getElementById('toast');
+    toast.textContent = message;
+    toast.className = 'toast active';
+    
+    if (type) {
+      toast.classList.add(type);
+    }
+
+    setTimeout(function() {
+      toast.classList.remove('active');
+    }, 3000);
+  }
+
+  /**
+   * Escape HTML to prevent XSS
+   * @param {string} text - Text to escape
+   * @returns {string} Escaped text
+   */
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  console.log('[Merge Tool] Initialization complete');
+</script>
