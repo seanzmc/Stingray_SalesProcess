@@ -163,12 +163,25 @@
 
   /**
    * Handle file upload error
-   * @param {Error} error - Error object
+   * @param {Error|string|Object} error - Error object, string, or object
    */
   function onFileUploadError(error) {
     console.error('[Merge Tool] Upload error:', error);
     showLoading(false);
-    showToast('Upload failed: ' + error.message, 'error');
+    
+    // Handle different error formats
+    let errorMessage = 'Unknown error occurred';
+    if (typeof error === 'string') {
+      errorMessage = error;
+    } else if (error && error.message) {
+      errorMessage = error.message;
+    } else if (error && error.error) {
+      errorMessage = error.error;
+    } else if (error && typeof error === 'object') {
+      errorMessage = JSON.stringify(error);
+    }
+    
+    showToast('Upload failed: ' + errorMessage, 'error');
   }
 
   /**
@@ -488,14 +501,25 @@
 
   /**
    * Handle merge error
-   * @param {Error|string} error - Error object or message
+   * @param {Error|string|Object} error - Error object, string, or object
    */
   function onMergeError(error) {
     console.error('[Merge Tool] Merge error:', error);
     clearInterval(progressInterval);
     
-    const message = error.message || error.toString();
-    showToast('Merge failed: ' + message, 'error');
+    // Handle different error formats
+    let errorMessage = 'Unknown error occurred';
+    if (typeof error === 'string') {
+      errorMessage = error;
+    } else if (error && error.message) {
+      errorMessage = error.message;
+    } else if (error && error.error) {
+      errorMessage = error.error;
+    } else if (error && typeof error === 'object') {
+      errorMessage = JSON.stringify(error);
+    }
+    
+    showToast('Merge failed: ' + errorMessage, 'error');
     showStep(2);
   }
 

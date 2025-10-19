@@ -22,7 +22,8 @@
  */
 function showMergeSidebar() {
   try {
-    const html = HtmlService.createHtmlOutputFromFile('merge_sidebar')
+    const html = HtmlService.createTemplateFromFile('merge_sidebar')
+      .evaluate()
       .setTitle('CDK Data Merge Tool')
       .setWidth(400);
     
@@ -48,16 +49,42 @@ function uploadCDKFile(fileData, fileName, sessionId) {
   try {
     logInfo('uploadCDKFile', 'Starting CDK file upload', { fileName, sessionId });
     
-    // Validate inputs
-    if (!fileData || !fileName || !sessionId) {
-      throw new Error('Missing required parameters: fileData, fileName, or sessionId');
+    // Validate inputs with safe checks
+    if (!fileData || typeof fileData !== 'string') {
+      return {
+        success: false,
+        error: 'Invalid file data provided'
+      };
+    }
+    
+    if (!fileName || typeof fileName !== 'string') {
+      return {
+        success: false,
+        error: 'Invalid file name provided'
+      };
+    }
+    
+    if (!sessionId || typeof sessionId !== 'string') {
+      return {
+        success: false,
+        error: 'Invalid session ID provided'
+      };
     }
     
     // Update progress
     updateProgress(sessionId, 5, 'Uploading CDK file...', {});
     
     // Create temporary file in Drive
-    const fileId = createTempDriveFile(fileData, fileName, sessionId);
+    let fileId;
+    try {
+      fileId = createTempDriveFile(fileData, fileName, sessionId);
+    } catch (driveError) {
+      logError('uploadCDKFile', driveError, { step: 'createTempDriveFile' });
+      return {
+        success: false,
+        error: 'Failed to create temporary file: ' + (driveError.message || driveError)
+      };
+    }
     
     updateProgress(sessionId, 15, 'Validating file format...', {});
     
@@ -65,23 +92,64 @@ function uploadCDKFile(fileData, fileName, sessionId) {
     const validation = validateFileFormat(fileId, fileName);
     if (!validation.valid) {
       cleanupTempFile(fileId);
-      throw new Error('Invalid file format: ' + validation.error);
+      return {
+        success: false,
+        error: validation.error || 'Invalid file format'
+      };
     }
     
     updateProgress(sessionId, 25, 'Reading file data...', {});
     
-    // Read file data
-    const fileContents = readFileContents(fileId, fileName);
+    // Read file data with error handling
+    let fileContents;
+    try {
+      fileContents = readFileContents(fileId, fileName);
+      
+      if (!fileContents || !fileContents.data || !Array.isArray(fileContents.data)) {
+        throw new Error('File contents could not be read or are invalid');
+      }
+      
+      if (fileContents.data.length === 0) {
+        throw new Error('File appears to be empty');
+      }
+      
+    } catch (readError) {
+      logError('uploadCDKFile', readError, { step: 'readFileContents' });
+      cleanupTempFile(fileId);
+      return {
+        success: false,
+        error: 'Failed to read file contents: ' + (readError.message || readError)
+      };
+    }
     
     updateProgress(sessionId, 40, 'Processing CDK data...', {});
     
     // Store in cache for later use
-    storeCachedData(sessionId, 'cdkFileId', fileId);
-    storeCachedData(sessionId, 'cdkFileName', fileName);
-    storeCachedData(sessionId, 'cdkData', fileContents.data);
+    try {
+      storeCachedData(sessionId, 'cdkFileId', fileId);
+      storeCachedData(sessionId, 'cdkFileName', fileName);
+      storeCachedData(sessionId, 'cdkData', fileContents.data);
+    } catch (cacheError) {
+      logError('uploadCDKFile', cacheError, { step: 'storeCachedData' });
+      cleanupTempFile(fileId);
+      return {
+        success: false,
+        error: 'Failed to cache file data: ' + (cacheError.message || cacheError)
+      };
+    }
     
     // Generate preview (first 10 rows)
     const preview = fileContents.data.slice(0, Math.min(10, fileContents.data.length));
+    
+    // Detect columns for mapping
+    const detectedColumns = {
+      headers: fileContents.data[0] || [],
+      stockColumn: undefined,
+      typeColumn: undefined,
+      frontGPColumn: undefined,
+      backGPColumn: undefined,
+      totalGPColumn: undefined
+    };
     
     updateProgress(sessionId, 50, 'CDK file uploaded successfully', {
       rowCount: fileContents.data.length
@@ -89,25 +157,34 @@ function uploadCDKFile(fileData, fileName, sessionId) {
     
     logInfo('uploadCDKFile', 'CDK file processed successfully', {
       fileName,
-      rowCount: fileContents.data.length
+      rowCount: fileContents.data.length,
+      columnCount: detectedColumns.headers.length
     });
     
     return {
       success: true,
       fileId: fileId,
+      fileName: fileName,
       preview: preview,
       rowCount: fileContents.data.length,
-      headers: fileContents.data[0] || []
+      columnCount: detectedColumns.headers.length,
+      detectedColumns: detectedColumns
     };
     
   } catch (error) {
+    // Catch-all for any unexpected errors
     const errorLog = logError('uploadCDKFile', error, { fileName, sessionId });
-    updateProgress(sessionId, 0, 'Upload failed: ' + errorLog.message, {});
     
+    try {
+      updateProgress(sessionId, 0, 'Upload failed', {});
+    } catch (e) {
+      // Ignore progress update errors
+    }
+    
+    // Return a safe error response
     return {
       success: false,
-      error: errorLog.message,
-      technicalDetails: errorLog.fullLog
+      error: errorLog && errorLog.message ? errorLog.message : 'An unexpected error occurred during file upload'
     };
   }
 }
@@ -127,11 +204,21 @@ function startMergeProcess(config) {
   const startTime = Date.now();
   
   try {
-    logInfo('startMergeProcess', 'Starting merge process', { sessionId: config.sessionId });
+    logInfo('startMergeProcess', 'Starting merge process', { config });
     
-    // Validate configuration
-    if (!config || !config.sessionId) {
-      throw new Error('Invalid configuration: sessionId is required');
+    // Validate configuration with safe checks
+    if (!config || typeof config !== 'object') {
+      return {
+        success: false,
+        error: 'Invalid configuration provided'
+      };
+    }
+    
+    if (!config.sessionId || typeof config.sessionId !== 'string') {
+      return {
+        success: false,
+        error: 'Session ID is required'
+      };
     }
     
     const sessionId = config.sessionId;
@@ -141,25 +228,54 @@ function startMergeProcess(config) {
     
     // Step 1: Read Sales Log data
     updateProgress(sessionId, 10, 'Reading Sales Log data...', {});
-    const salesLogRecords = processSalesLogSheet(config.salesLog);
     
-    logInfo('startMergeProcess', 'Sales Log data processed', {
-      recordCount: salesLogRecords.length
-    });
+    // Build sales log configuration
+    const salesLogConfig = {
+      sheet: SpreadsheetApp.getActiveSpreadsheet().getActiveSheet(),
+      newStockColumn: 5,
+      usedStockColumn: 12,
+      headerRow: 1,
+      dataStartRow: 2
+    };
+    
+    let salesLogRecords;
+    try {
+      salesLogRecords = processSalesLogSheet(salesLogConfig);
+      logInfo('startMergeProcess', 'Sales Log data processed', {
+        recordCount: salesLogRecords.length
+      });
+    } catch (salesLogError) {
+      logError('startMergeProcess', salesLogError, { step: 'processSalesLogSheet' });
+      return {
+        success: false,
+        error: 'Failed to read Sales Log data: ' + (salesLogError.message || salesLogError)
+      };
+    }
     
     // Step 2: Read CDK data
     updateProgress(sessionId, 25, 'Reading CDK export data...', {});
     const cdkData = getCachedData(sessionId, 'cdkData');
     
     if (!cdkData || !Array.isArray(cdkData)) {
-      throw new Error('CDK data not found in cache. Please upload CDK file again.');
+      return {
+        success: false,
+        error: 'CDK data not found in cache. Please upload CDK file again.'
+      };
     }
     
-    const cdkRecords = processCDKData(cdkData);
-    
-    logInfo('startMergeProcess', 'CDK data processed', {
-      recordCount: cdkRecords.length
-    });
+    let cdkRecords;
+    try {
+      cdkRecords = processCDKData(cdkData, config.columnMapping);
+      logInfo('startMergeProcess', 'CDK data processed', {
+        recordCount: cdkRecords.length
+      });
+    } catch (cdkError) {
+      logError('startMergeProcess', cdkError, { step: 'processCDKData' });
+      return {
+        success: false,
+        error: 'Failed to process CDK data: ' + (cdkError.message || cdkError)
+      };
+    }
     
     // Step 3: Match stock numbers
     updateProgress(sessionId, 40, 'Matching stock numbers...', {
@@ -167,11 +283,32 @@ function startMergeProcess(config) {
       cdkCount: cdkRecords.length
     });
     
-    const matchResults = matchStockNumbers(
-      salesLogRecords,
-      cdkRecords,
-      config.matching || {}
-    );
+    // Build matching options from config
+    const matchingOptions = {
+      requireExactMatch: false,
+      minConfidence: (config.matchingOptions && config.matchingOptions.confidenceThreshold)
+        ? config.matchingOptions.confidenceThreshold * 100
+        : 70,
+      caseSensitive: config.matchingOptions && config.matchingOptions.caseInsensitive ? false : true,
+      allowPartialMatches: config.matchingOptions && config.matchingOptions.enablePartialMatch ? true : false,
+      validateStockType: true,
+      ignoreLeadingZeros: config.matchingOptions && config.matchingOptions.ignoreLeadingZeros ? true : false
+    };
+    
+    let matchResults;
+    try {
+      matchResults = matchStockNumbers(
+        salesLogRecords,
+        cdkRecords,
+        matchingOptions
+      );
+    } catch (matchError) {
+      logError('startMergeProcess', matchError, { step: 'matchStockNumbers' });
+      return {
+        success: false,
+        error: 'Failed to match stock numbers: ' + (matchError.message || matchError)
+      };
+    }
     
     logInfo('startMergeProcess', 'Stock matching complete', {
       matched: matchResults.stats.matched,
@@ -422,8 +559,57 @@ function cancelMerge(sessionId) {
 }
 
 /**
+ * Gets the current merge configuration
+ * Returns default configuration for the merge tool
+ *
+ * @returns {Object} Configuration object
+ */
+function getMergeConfiguration() {
+  try {
+    logInfo('getMergeConfiguration', 'Retrieving merge configuration');
+    
+    // Return default configuration
+    const config = {
+      salesLog: {
+        newStockColumn: 5,    // Column E
+        usedStockColumn: 12,  // Column L
+        headerRow: 1,
+        dataStartRow: 2
+      },
+      cdk: {
+        headerRow: 1,
+        dataStartRow: 2,
+        stockColumn: 3,       // Column D (default)
+        typeColumn: 9,        // Column J (default)
+        frontGPColumn: 10,    // Column K (default)
+        backGPColumn: 11,     // Column L (default)
+        totalGPColumn: 12     // Column M (default)
+      },
+      matching: {
+        requireExactMatch: false,
+        minConfidence: 70,
+        caseSensitive: false,
+        allowPartialMatches: true,
+        validateStockType: true,
+        ignoreLeadingZeros: true
+      }
+    };
+    
+    logInfo('getMergeConfiguration', 'Configuration retrieved successfully');
+    return config;
+    
+  } catch (error) {
+    const errorLog = logError('getMergeConfiguration', error);
+    return {
+      success: false,
+      error: errorLog.message
+    };
+  }
+}
+
+/**
  * Activates the MERGED_DATA sheet and scrolls to top
- * 
+ *
  * @returns {Object} {success, message, error}
  */
 function viewMergedDataSheet() {
@@ -746,9 +932,46 @@ function readFileContents(fileId, fileName) {
     const extension = fileName.toLowerCase().split('.').pop();
     
     if (extension === 'csv') {
-      // Read CSV file
-      const csvContent = file.getBlob().getDataAsString();
-      const data = Utilities.parseCsv(csvContent);
+      // Read CSV file with encoding handling
+      let csvContent;
+      try {
+        csvContent = file.getBlob().getDataAsString('UTF-8');
+      } catch (encodingError) {
+        // Try without encoding specification
+        csvContent = file.getBlob().getDataAsString();
+      }
+      
+      if (!csvContent || csvContent.trim().length === 0) {
+        throw new Error('CSV file appears to be empty');
+      }
+      
+      // Parse CSV with error handling
+      let data;
+      try {
+        data = Utilities.parseCsv(csvContent);
+      } catch (parseError) {
+        logError('readFileContents', parseError, { step: 'parseCsv', contentLength: csvContent.length });
+        throw new Error('Failed to parse CSV file. The file may be corrupted or have invalid formatting.');
+      }
+      
+      // Validate parsed data
+      if (!data || !Array.isArray(data) || data.length === 0) {
+        throw new Error('CSV file contains no data');
+      }
+      
+      // Clean up data - remove completely empty rows at the end
+      while (data.length > 0 && data[data.length - 1].every(cell => !cell || cell === '')) {
+        data.pop();
+      }
+      
+      if (data.length === 0) {
+        throw new Error('CSV file contains only empty rows');
+      }
+      
+      logInfo('readFileContents', 'CSV file parsed successfully', {
+        rows: data.length,
+        columns: data[0] ? data[0].length : 0
+      });
       
       return {
         data: data,
@@ -761,12 +984,40 @@ function readFileContents(fileId, fileName) {
         mimeType: MimeType.GOOGLE_SHEETS
       };
       
-      const convertedFile = Drive.Files.copy(resource, fileId);
-      const sheet = SpreadsheetApp.openById(convertedFile.id).getSheets()[0];
-      const data = sheet.getDataRange().getValues();
+      let convertedFile;
+      try {
+        convertedFile = Drive.Files.copy(resource, fileId);
+      } catch (convertError) {
+        logError('readFileContents', convertError, { step: 'Drive.Files.copy' });
+        throw new Error('Failed to convert Excel file. The file may be password-protected or corrupted.');
+      }
       
-      // Delete the converted file
-      DriveApp.getFileById(convertedFile.id).setTrashed(true);
+      let data;
+      try {
+        const sheet = SpreadsheetApp.openById(convertedFile.id).getSheets()[0];
+        data = sheet.getDataRange().getValues();
+      } catch (sheetError) {
+        logError('readFileContents', sheetError, { step: 'getDataRange' });
+        throw new Error('Failed to read data from converted spreadsheet');
+      } finally {
+        // Always try to delete the converted file
+        try {
+          if (convertedFile && convertedFile.id) {
+            DriveApp.getFileById(convertedFile.id).setTrashed(true);
+          }
+        } catch (cleanupError) {
+          logWarning('readFileContents', 'Could not cleanup converted file', { fileId: convertedFile ? convertedFile.id : 'unknown' });
+        }
+      }
+      
+      if (!data || data.length === 0) {
+        throw new Error('Excel file contains no data');
+      }
+      
+      logInfo('readFileContents', 'Excel file converted and parsed successfully', {
+        rows: data.length,
+        columns: data[0] ? data[0].length : 0
+      });
       
       return {
         data: data,
@@ -775,8 +1026,8 @@ function readFileContents(fileId, fileName) {
     }
     
   } catch (error) {
-    logError('readFileContents', error, { fileId, fileName });
-    throw new Error('Failed to read file contents: ' + error.message);
+    const errorLog = logError('readFileContents', error, { fileId, fileName });
+    throw new Error('Failed to read file contents: ' + errorLog.message);
   }
 }
 
