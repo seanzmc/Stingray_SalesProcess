@@ -13,6 +13,12 @@
     window.MERGE_CONFIG = null; // Will be loaded via API
   </script>
 
+  <style>
+    :root {
+      <?!= generateCssVariables(getConfiguration().visual) ?>
+    }
+  </style>
+
   <?!= include('merge_sidebar.css') ?>
 </head>
 
