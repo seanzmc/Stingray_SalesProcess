@@ -1,0 +1,13 @@
+architecture/*
+programideas/*
+.gitignore
+.github/*
+README.md
+*.md
+LICENSE
+CHANGELOG.md
+package.json
+.prettierrc
+.markdownlint.json
+*.csv
+*.xlsx

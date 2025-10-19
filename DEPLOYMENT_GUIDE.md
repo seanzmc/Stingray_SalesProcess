@@ -3,8 +3,8 @@
 
 **Complete Deployment Instructions and Testing Procedures for Technical Staff**
 
-Version: 1.0  
-Last Updated: October 2024  
+Version: 1.0
+Last Updated: October 2025
 Target Platform: Google Apps Script / Google Sheets
 
 ---
@@ -23,6 +23,7 @@ Target Platform: Google Apps Script / Google Sheets
 10. [Support and Resources](#10-support-and-resources)
 
 **Appendices:**
+
 - [Appendix A: Complete File Manifest](#appendix-a-complete-file-manifest)
 - [Appendix B: OAuth Scopes Required](#appendix-b-oauth-scopes-required)
 - [Appendix C: Test Data Specifications](#appendix-c-test-data-specifications)
@@ -35,6 +36,7 @@ Target Platform: Google Apps Script / Google Sheets
 ### Files to Deploy
 
 **Core Server-Side Modules (9 files):**
+
 - ✅ [`merge_controller.js`](saleslog_files/merge_controller.js) - Main orchestration (~900 LOC)
 - ✅ [`stock_matcher.js`](saleslog_files/stock_matcher.js) - Matching algorithm (~800 LOC)
 - ✅ [`data_merger.js`](saleslog_files/data_merger.js) - Data combination (~400 LOC)
@@ -46,17 +48,20 @@ Target Platform: Google Apps Script / Google Sheets
 - ✅ [`validation_rules.js`](saleslog_files/validation_rules.js) - Validation logic (~350 LOC)
 
 **Client-Side UI Components (3 files):**
+
 - ✅ [`merge_sidebar.html`](saleslog_files/merge_sidebar.html) - Main UI template (~400 LOC)
 - ✅ [`merge_sidebar.css.html`](saleslog_files/merge_sidebar.css.html) - Styles (~250 LOC)
 - ✅ [`merge_sidebar.js.html`](saleslog_files/merge_sidebar.js.html) - Client JavaScript (~600 LOC)
 
 **Integration File (1 file - UPDATE ONLY):**
+
 - ⚠️ [`core_saleslogPro.js`](saleslog_files/core_saleslogPro.js) - Add menu item only (~1800 LOC existing)
 
 **Configuration File (1 file - UPDATE ONLY):**
+
 - ⚠️ [`appsscript.json`](saleslog_files/appsscript.json) - Manifest (verify scopes)
 
-**Total New Files:** 12  
+**Total New Files:** 12
 **Files to Update:** 2
 
 ### Required Permissions/OAuth Scopes
@@ -73,6 +78,7 @@ Target Platform: Google Apps Script / Google Sheets
 ```
 
 **Scope Explanations:**
+
 - `spreadsheets` - Read/write Sales Log and MERGED_DATA sheets
 - `script.container.ui` - Display sidebar interface
 - `script.scriptapp` - Execute server-side functions
@@ -81,6 +87,7 @@ Target Platform: Google Apps Script / Google Sheets
 ### Dependencies Verification
 
 **Google Apps Script Services Required:**
+
 - ✅ SpreadsheetApp - Core spreadsheet operations
 - ✅ DriveApp - Temporary file storage
 - ✅ Drive API (Advanced Service) - Excel conversion
@@ -91,28 +98,33 @@ Target Platform: Google Apps Script / Google Sheets
 - ✅ Utilities - File parsing, UUID generation
 
 **External Libraries:**
+
 - ❌ None required - Pure Google Apps Script implementation
 
 ### Environment Requirements
 
 **Google Workspace:**
+
 - Account type: Any (personal, business, education)
 - Apps Script runtime: V8
 - Minimum permissions: Editor access to target spreadsheet
 
 **Spreadsheet Requirements:**
+
 - Existing Sales Log Pro installation
 - MONTHLY sheet with data in columns A-N
 - SALESPEOPLE sheet (for validation)
 - Minimum 1GB Google Drive storage available
 
 **Browser Support (for users):**
+
 - Chrome 90+ (recommended)
 - Firefox 88+
 - Safari 14+
 - Edge 90+
 
 **Network Requirements:**
+
 - Internet connectivity required
 - No firewall restrictions on:
   - `script.google.com`
@@ -157,6 +169,7 @@ Target Platform: Google Apps Script / Google Sheets
 ```
 
 **File Creation Order:**
+
 ```
 1. appsscript.json (update manifest)
 2. error_logger.js (dependency)
@@ -263,17 +276,17 @@ Find the `onOpen()` function (around line 1757) and add menu item:
 function onOpen() {
   try {
     // ... existing setup code ...
-    
+
     const menu = SpreadsheetApp.getUi().createMenu("Sales Tools");
-    
+
     // ... existing menu items ...
-    
+
     menu.addSeparator()
         .addItem("📊 Merge CDK Data", "showMergeSidebar")  // ADD THIS LINE
         .addSeparator()
         .addItem("⚙️ Settings", "openConfigurationSidebar")
         .addToUi();
-        
+
   } catch (e) {
     // ... existing error handling ...
   }
@@ -324,6 +337,7 @@ If `drive.file` scope is missing, add it to the array.
 These files must be deployed before others as they're dependencies.
 
 **1. Error Handling & Utilities**
+
 ```
 ├── error_logger.js (if not already present)
 ├── utilities_locks.js (if not already present)
@@ -331,6 +345,7 @@ These files must be deployed before others as they're dependencies.
 ```
 
 **Verification:**
+
 ```javascript
 // Run in Apps Script console:
 logInfo('test', 'Error logger available');
@@ -342,12 +357,14 @@ logInfo('test', 'Error logger available');
 ### Phase 2: Business Logic Modules
 
 **2. Validation & Configuration**
+
 ```
 ├── validation_rules.js
 └── config_manager.js
 ```
 
 **Verification:**
+
 ```javascript
 // Test validation:
 function testValidation() {
@@ -357,11 +374,13 @@ function testValidation() {
 ```
 
 **3. Matching Algorithm**
+
 ```
 └── stock_matcher.js
 ```
 
 **Verification:**
+
 ```javascript
 // Test matching:
 function testMatching() {
@@ -371,12 +390,14 @@ function testMatching() {
 ```
 
 **4. Data Processing**
+
 ```
 ├── data_merger.js
 └── output_generator.js
 ```
 
 **Verification:**
+
 ```javascript
 // Test merger exists:
 function testMerger() {
@@ -389,11 +410,13 @@ function testMerger() {
 ### Phase 3: Controller & API
 
 **5. Orchestration**
+
 ```
 └── merge_controller.js
 ```
 
 **Verification:**
+
 ```javascript
 // Test controller:
 function testController() {
@@ -408,6 +431,7 @@ function testController() {
 ### Phase 4: User Interface
 
 **6. Sidebar Components**
+
 ```
 ├── merge_sidebar.html (template)
 ├── merge_sidebar.css.html (styles)
@@ -415,6 +439,7 @@ function testController() {
 ```
 
 **Verification:**
+
 ```javascript
 // Test sidebar rendering:
 function testSidebar() {
@@ -434,11 +459,13 @@ function testSidebar() {
 ### Phase 5: Integration
 
 **7. Menu Integration**
+
 ```
 └── core_saleslogPro.js (update onOpen function only)
 ```
 
 **Verification:**
+
 ```javascript
 // Run onOpen manually:
 onOpen();
@@ -450,11 +477,13 @@ onOpen();
 ### Phase 6: Configuration
 
 **8. Manifest Update**
+
 ```
 └── appsscript.json (add Drive scope if needed)
 ```
 
 **Verification:**
+
 ```
 1. File > Project properties > Scopes
 2. Verify all 4 scopes listed
@@ -479,7 +508,7 @@ function verifyDeployment() {
     passed: 0,
     failed: 0
   };
-  
+
   // Check 1: Core dependencies
   try {
     logInfo('verifyDeployment', 'Testing error logger');
@@ -489,7 +518,7 @@ function verifyDeployment() {
     results.checks.push({name: 'Error Logger', status: 'FAIL', error: e.toString()});
     results.failed++;
   }
-  
+
   // Check 2: Validation module
   try {
     const testStock = validateStockNumber("TEST123");
@@ -499,7 +528,7 @@ function verifyDeployment() {
     results.checks.push({name: 'Validation Rules', status: 'FAIL', error: e.toString()});
     results.failed++;
   }
-  
+
   // Check 3: Matching algorithm
   try {
     const normalized = normalizeStockNumber("N-001234");
@@ -513,7 +542,7 @@ function verifyDeployment() {
     results.checks.push({name: 'Stock Matcher', status: 'FAIL', error: e.toString()});
     results.failed++;
   }
-  
+
   // Check 4: Controller API
   try {
     if (typeof showMergeSidebar === 'function' &&
@@ -528,7 +557,7 @@ function verifyDeployment() {
     results.checks.push({name: 'Merge Controller API', status: 'FAIL', error: e.toString()});
     results.failed++;
   }
-  
+
   // Check 5: UI Components
   try {
     const html = HtmlService.createHtmlOutputFromFile('merge_sidebar');
@@ -538,7 +567,7 @@ function verifyDeployment() {
     results.checks.push({name: 'Sidebar UI', status: 'FAIL', error: e.toString()});
     results.failed++;
   }
-  
+
   // Check 6: Configuration service
   try {
     const config = getMergeConfiguration();
@@ -548,14 +577,14 @@ function verifyDeployment() {
     results.checks.push({name: 'Config Manager', status: 'FAIL', error: e.toString()});
     results.failed++;
   }
-  
+
   // Print results
   Logger.log('=== DEPLOYMENT VERIFICATION RESULTS ===');
   Logger.log('Timestamp: ' + results.timestamp);
   Logger.log('Passed: ' + results.passed + ' / ' + (results.passed + results.failed));
   Logger.log('Failed: ' + results.failed);
   Logger.log('\nDetailed Results:');
-  
+
   results.checks.forEach(check => {
     const icon = check.status === 'PASS' ? '✓' : '✗';
     Logger.log(`${icon} ${check.name}: ${check.status}`);
@@ -563,13 +592,13 @@ function verifyDeployment() {
       Logger.log(`  Error: ${check.error}`);
     }
   });
-  
+
   if (results.failed === 0) {
     Logger.log('\n✓✓✓ ALL CHECKS PASSED - DEPLOYMENT SUCCESSFUL ✓✓✓');
   } else {
     Logger.log('\n✗✗✗ SOME CHECKS FAILED - REVIEW ERRORS ABOVE ✗✗✗');
   }
-  
+
   return results;
 }
 ```
@@ -610,15 +639,16 @@ function initializeMergeConfiguration() {
       timeoutMinutes: 5
     }
   };
-  
+
   PropertiesService.getDocumentProperties()
     .setProperty('MERGE_CONFIG', JSON.stringify(defaultConfig));
-  
+
   Logger.log('✓ Default configuration initialized');
 }
 ```
 
 Run this function once:
+
 ```bash
 Run > Run function > initializeMergeConfiguration
 ```
@@ -638,7 +668,7 @@ function verifyErrorLogging() {
       test: true,
       environment: 'staging'
     });
-    
+
     Logger.log('✓ Error logging configured correctly');
     Logger.log('Check ERROR_LOG sheet for test entry');
   } catch (e) {
@@ -652,11 +682,13 @@ function verifyErrorLogging() {
 **First-time authorization required:**
 
 1. **Trigger authorization:**
+
    ```bash
    Run > Run function > showMergeSidebar
    ```
 
 2. **Review permissions dialog:**
+
    ```
    This app wants to:
    ✓ See, edit, create, and delete your spreadsheets
@@ -702,10 +734,10 @@ function testStockMatching() {
     {input: "001234", expected: "1234", description: "Leading zeros"},
     {input: "N-001234-A", expected: "N1234A", description: "Complex format"}
   ];
-  
+
   let passed = 0;
   let failed = 0;
-  
+
   tests.forEach(test => {
     try {
       const result = normalizeStockNumber(test.input);
@@ -721,7 +753,7 @@ function testStockMatching() {
       failed++;
     }
   });
-  
+
   Logger.log(`\nResults: ${passed} passed, ${failed} failed`);
   return {passed, failed};
 }
@@ -742,12 +774,12 @@ function testFileValidation() {
     {filename: "test.pdf", shouldPass: false},
     {filename: "test.txt", shouldPass: false}
   ];
-  
+
   testCases.forEach(test => {
     const extension = test.filename.toLowerCase().split('.').pop();
     const validExtensions = ['xlsx', 'xls', 'csv'];
     const isValid = validExtensions.includes(extension);
-    
+
     if (isValid === test.shouldPass) {
       Logger.log(`✓ ${test.filename}: ${isValid ? 'Valid' : 'Invalid'} (expected)`);
     } else {
@@ -771,7 +803,7 @@ function testDataMerger() {
     stockNumber: "N1234",
     stockType: "NEW"
   };
-  
+
   const mockCDKRecord = {
     stockNo: "N1234",
     stockType: "NEW",
@@ -779,19 +811,19 @@ function testDataMerger() {
     backGP: 800,
     totalGP: 3300
   };
-  
+
   const mockMatchInfo = {
     matchType: "exact",
     confidence: 100
   };
-  
+
   try {
     const merged = createMergedRecord(
       mockSalesRecord,
       mockCDKRecord,
       mockMatchInfo
     );
-    
+
     Logger.log('✓ Data merger test passed');
     Logger.log('Merged record length: ' + merged.length);
     return true;
@@ -815,10 +847,10 @@ function testConfigManagement() {
       test: true,
       timestamp: new Date().toISOString()
     };
-    
+
     updateMergeConfiguration(testConfig);
     Logger.log('✓ Configuration saved');
-    
+
     // Load config
     const loaded = getMergeConfiguration();
     if (loaded && loaded.test === true) {
@@ -842,6 +874,7 @@ function testConfigManagement() {
 #### Test 1: End-to-End Merge Workflow
 
 **Prerequisites:**
+
 - Sample CDK export file (see Appendix C)
 - Sales Log MONTHLY sheet with test data
 
@@ -891,6 +924,7 @@ function testConfigManagement() {
 ```
 
 **Expected Results:**
+
 - All steps complete without errors
 - Match rate >90%
 - MERGED_DATA sheet exists
@@ -901,6 +935,7 @@ function testConfigManagement() {
 **Test Scenarios:**
 
 **Scenario A: Invalid File Upload**
+
 ```bash
 Test: Upload .txt file
 Expected: Error message "Unsupported file format"
@@ -908,6 +943,7 @@ Result: [ ] Pass [ ] Fail
 ```
 
 **Scenario B: Empty CDK File**
+
 ```bash
 Test: Upload file with headers only
 Expected: Error message "No data rows found"
@@ -915,6 +951,7 @@ Result: [ ] Pass [ ] Fail
 ```
 
 **Scenario C: Missing Required Column**
+
 ```bash
 Test: Upload file without Stock Number column
 Expected: Configuration error displayed
@@ -922,6 +959,7 @@ Result: [ ] Pass [ ] Fail
 ```
 
 **Scenario D: Concurrent Operations**
+
 ```bash
 Test: Start merge while another is running
 Expected: Lock message displayed
@@ -971,6 +1009,7 @@ Result: [ ] Pass [ ] Fail
 | Edge    | 90+     | [ ]    | [ ]     | [ ]        | [ ]    | [ ]    |
 
 **Test in each browser:**
+
 1. Menu item appears correctly
 2. Sidebar opens and displays properly
 3. All 5 steps function correctly
@@ -982,6 +1021,7 @@ Result: [ ] Pass [ ] Fail
 #### Step-by-Step UI Checks
 
 **Step 1: Upload**
+
 - [ ] Upload area visible and responsive
 - [ ] Drag-and-drop works
 - [ ] Browse button works
@@ -990,6 +1030,7 @@ Result: [ ] Pass [ ] Fail
 - [ ] Error messages clear
 
 **Step 2: Configuration**
+
 - [ ] Column dropdowns populate
 - [ ] Auto-detection works
 - [ ] Sliders functional
@@ -998,6 +1039,7 @@ Result: [ ] Pass [ ] Fail
 - [ ] Load config button works
 
 **Step 3: Matching**
+
 - [ ] Progress bar animates
 - [ ] Percentage updates
 - [ ] Statistics display correctly
@@ -1006,6 +1048,7 @@ Result: [ ] Pass [ ] Fail
 - [ ] Completion detected
 
 **Step 4: Review**
+
 - [ ] Match summary clear
 - [ ] Flagged records listed
 - [ ] Unmatched records listed
@@ -1014,6 +1057,7 @@ Result: [ ] Pass [ ] Fail
 - [ ] Stats accurate
 
 **Step 5: Complete**
+
 - [ ] Success message shown
 - [ ] View output button works
 - [ ] Start new merge button works
@@ -1027,6 +1071,7 @@ Result: [ ] Pass [ ] Fail
 #### Test with Sample Data (september.xlsx)
 
 **Test File Specifications:**
+
 - Records: 187
 - Stock types: Mix of NEW and USED
 - Known issues: 12 intentional mismatches
@@ -1041,15 +1086,15 @@ Result: [ ] Pass [ ] Fail
 function verifyMergeOutput() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet()
     .getSheetByName('MERGED_DATA');
-  
+
   if (!sheet) {
     Logger.log('✗ MERGED_DATA sheet not found');
     return false;
   }
-  
+
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
-  
+
   // Check 1: Verify headers
   const requiredHeaders = [
     'Customer Last Name',
@@ -1061,7 +1106,7 @@ function verifyMergeOutput() {
     'Match Type',
     'Confidence'
   ];
-  
+
   let headersOk = true;
   requiredHeaders.forEach(header => {
     if (!headers.includes(header)) {
@@ -1069,35 +1114,35 @@ function verifyMergeOutput() {
       headersOk = false;
     }
   });
-  
+
   if (headersOk) {
     Logger.log('✓ All required headers present');
   }
-  
+
   // Check 2: Verify data integrity
   let nullCount = 0;
   let gpSum = 0;
-  
+
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
-    
+
     // Check for null values in key fields
     const stockCol = headers.indexOf('Stock Number');
     if (!row[stockCol]) {
       nullCount++;
     }
-    
+
     // Sum GP values
     const gpCol = headers.indexOf('Total GP');
     if (row[gpCol] && !isNaN(row[gpCol])) {
       gpSum += Number(row[gpCol]);
     }
   }
-  
+
   Logger.log(`Data rows: ${data.length - 1}`);
   Logger.log(`Null stock numbers: ${nullCount}`);
   Logger.log(`Total GP sum: $${gpSum.toFixed(2)}`);
-  
+
   return {
     rowCount: data.length - 1,
     nullCount: nullCount,
@@ -1148,11 +1193,13 @@ Check UNMATCHED section:
 #### Small Dataset (50 records)
 
 **Test Parameters:**
+
 - File: 50 records, ~100KB
 - Expected time: <10 seconds
 - Memory: Minimal
 
 **Test:**
+
 ```bash
 1. Prepare test file with 50 records
 2. Start merge and time execution
@@ -1164,6 +1211,7 @@ Check UNMATCHED section:
 ```
 
 **Pass Criteria:**
+
 - Total time <15 seconds
 - No timeout errors
 - UI remains responsive
@@ -1171,11 +1219,13 @@ Check UNMATCHED section:
 #### Medium Dataset (250 records)
 
 **Test Parameters:**
+
 - File: 250 records, ~500KB
 - Expected time: 20-30 seconds
 - Memory: Low
 
 **Test:**
+
 ```bash
 1. Prepare test file with 250 records
 2. Start merge and time execution
@@ -1187,6 +1237,7 @@ Check UNMATCHED section:
 ```
 
 **Pass Criteria:**
+
 - Total time <45 seconds
 - No timeout errors
 - Progress updates smooth
@@ -1194,11 +1245,13 @@ Check UNMATCHED section:
 #### Large Dataset (1,000 records)
 
 **Test Parameters:**
+
 - File: 1,000 records, ~2MB
 - Expected time: 40-60 seconds
 - Memory: Moderate
 
 **Test:**
+
 ```bash
 1. Prepare test file with 1,000 records
 2. Start merge and time execution
@@ -1210,6 +1263,7 @@ Check UNMATCHED section:
 ```
 
 **Pass Criteria:**
+
 - Total time <90 seconds
 - No timeout errors
 - No browser warnings
@@ -1225,7 +1279,7 @@ Check UNMATCHED section:
 function testTimeoutHandling() {
   // This would need to be tested with production constraints
   // Apps Script has 6-minute execution limit
-  
+
   Logger.log('Note: Timeout testing requires production environment');
   Logger.log('Monitor operations >5 minutes');
   Logger.log('Verify checkpoint system activates');
@@ -1233,6 +1287,7 @@ function testTimeoutHandling() {
 ```
 
 **Verification:**
+
 - Operations >5 min trigger checkpoint
 - User warned before timeout
 - Partial progress saved
@@ -1287,12 +1342,14 @@ Status: [ ] Pass [ ] Fail
 **UAT Checklist:**
 
 **Preparation:**
+
 - [ ] Identify 2-3 test users
 - [ ] Provide test file (september.xlsx)
 - [ ] Distribute user guide
 - [ ] Schedule 30-minute test session
 
 **During UAT:**
+
 - [ ] Users complete merge independently
 - [ ] No assistance provided (unless critical)
 - [ ] Time how long process takes
@@ -1300,12 +1357,14 @@ Status: [ ] Pass [ ] Fail
 - [ ] Record error messages encountered
 
 **UAT Success Criteria:**
+
 - [ ] 100% of users complete merge successfully
 - [ ] Average time <10 minutes (first use)
 - [ ] No critical errors encountered
 - [ ] User satisfaction >4/5
 
 **UAT Feedback Form:**
+
 ```
 1. Was the merge process clear? (1-5): ____
 2. Did you encounter any errors? Y/N: ____
@@ -1322,11 +1381,13 @@ Status: [ ] Pass [ ] Fail
 #### Enable Stackdriver Logging
 
 Already configured in appsscript.json:
+
 ```json
 "exceptionLogging": "STACKDRIVER"
 ```
 
 **Access logs:**
+
 ```bash
 1. In Apps Script editor
 2. View > Executions
@@ -1345,15 +1406,15 @@ Check ERROR_LOG sheet created by error_logger.js:
 function reviewRecentErrors() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet()
     .getSheetByName('ERROR_LOG');
-  
+
   if (!sheet) {
     Logger.log('No ERROR_LOG sheet found');
     return;
   }
-  
+
   const data = sheet.getDataRange().getValues();
   const recentErrors = data.slice(-10).reverse(); // Last 10
-  
+
   Logger.log('=== RECENT ERRORS ===');
   recentErrors.forEach(error => {
     Logger.log(`[${error[0]}] ${error[1]}: ${error[2]}`);
@@ -1362,6 +1423,7 @@ function reviewRecentErrors() {
 ```
 
 **Review schedule:**
+
 - Daily: First week post-deployment
 - Weekly: First month
 - Monthly: Ongoing
@@ -1373,12 +1435,14 @@ function reviewRecentErrors() {
 ### When to Rollback
 
 **Critical issues requiring rollback:**
+
 - ✗ Data corruption in MONTHLY sheet
 - ✗ Widespread merge failures (>50%)
 - ✗ Performance issues blocking work
 - ✗ Security vulnerabilities discovered
 
 **Non-critical issues (fix forward instead):**
+
 - ⚠️ UI cosmetic issues
 - ⚠️ Minor calculation errors
 - ⚠️ Low match rates (configuration issue)
@@ -1481,6 +1545,7 @@ function reviewRecentErrors() {
 ### Backup Strategy
 
 **Before Deployment:**
+
 ```bash
 Required backups:
 1. Complete spreadsheet copy
@@ -1490,6 +1555,7 @@ Required backups:
 ```
 
 **Backup Locations:**
+
 ```
 Google Drive Structure:
 ├── Production/
@@ -1503,6 +1569,7 @@ Google Drive Structure:
 ```
 
 **Backup Schedule:**
+
 ```
 Before deployment: Complete backup (required)
 Daily: First 3 days (automatic version history)
@@ -1525,28 +1592,28 @@ function restoreMonthlyFromBackup() {
   const backupId = 'YOUR_BACKUP_SPREADSHEET_ID';
   const backup = SpreadsheetApp.openById(backupId);
   const backupMonthly = backup.getSheetByName('MONTHLY');
-  
+
   // Get current spreadsheet
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const currentMonthly = ss.getSheetByName('MONTHLY');
-  
+
   if (!currentMonthly || !backupMonthly) {
     throw new Error('Sheets not found');
   }
-  
+
   // Clear current data
   currentMonthly.clear();
-  
+
   // Copy from backup
   const data = backupMonthly.getDataRange().getValues();
   const formats = backupMonthly.getDataRange().getNumberFormats();
   const backgrounds = backupMonthly.getDataRange().getBackgrounds();
-  
+
   currentMonthly.getRange(1, 1, data.length, data[0].length)
     .setValues(data)
     .setNumberFormats(formats)
     .setBackgrounds(backgrounds);
-  
+
   Logger.log('✓ MONTHLY sheet restored from backup');
 }
 ```
@@ -1618,45 +1685,45 @@ Time required: 1-2 hours
 function generatePerformanceReport() {
   const mergeLog = SpreadsheetApp.getActiveSpreadsheet()
     .getSheetByName('MERGE_LOG');
-  
+
   if (!mergeLog) {
     Logger.log('MERGE_LOG not found');
     return;
   }
-  
+
   const data = mergeLog.getDataRange().getValues();
   const headers = data[0];
-  
+
   // Calculate metrics
   let totalMerges = data.length - 1;
   let successfulMerges = 0;
   let avgMatchRate = 0;
   let avgDuration = 0;
   let totalRecords = 0;
-  
+
   for (let i = 1; i < data.length; i++) {
     const row = data[i];
     if (row[5] === 'Success') successfulMerges++;
-    
+
     const matchRate = parseFloat(row[8]) || 0;
     avgMatchRate += matchRate;
-    
+
     const duration = parseFloat(row[9]) || 0;
     avgDuration += duration;
-    
+
     totalRecords += parseInt(row[3]) || 0;
   }
-  
+
   avgMatchRate /= totalMerges;
   avgDuration /= totalMerges;
-  
+
   Logger.log('=== PERFORMANCE REPORT ===');
   Logger.log(`Total merges: ${totalMerges}`);
   Logger.log(`Successful: ${successfulMerges} (${(successfulMerges/totalMerges*100).toFixed(1)}%)`);
   Logger.log(`Avg match rate: ${(avgMatchRate*100).toFixed(1)}%`);
   Logger.log(`Avg duration: ${avgDuration.toFixed(1)}s`);
   Logger.log(`Total records processed: ${totalRecords}`);
-  
+
   return {
     totalMerges,
     successRate: successfulMerges / totalMerges,
@@ -1725,6 +1792,7 @@ LOW: Cosmetic issues, minor bugs
 ```
 
 **Version Control:**
+
 ```
 v1.0.0 - Initial deployment
 v1.0.1 - Bug fix: stock matching edge case
@@ -1745,12 +1813,12 @@ v2.0.0 - Breaking change: new algorithm
 function updateDefaultConfiguration() {
   const props = PropertiesService.getDocumentProperties();
   const currentConfig = JSON.parse(props.getProperty('MERGE_CONFIG') || '{}');
-  
+
   // Update specific setting
   currentConfig.matching.minConfidence = 90; // Example: raise threshold
-  
+
   props.setProperty('MERGE_CONFIG', JSON.stringify(currentConfig));
-  
+
   Logger.log('✓ Configuration updated');
   Logger.log('New config: ' + JSON.stringify(currentConfig, null, 2));
 }
@@ -1765,6 +1833,7 @@ function updateDefaultConfiguration() {
 **Issue:** "Authorization required" errors
 
 **Symptoms:**
+
 - Sidebar won't open
 - "This app is not verified" warning
 - Permission denial errors
@@ -1801,6 +1870,7 @@ Solution 3: Enable Drive API
 **Issue:** "File not found" or "Cannot read property" errors
 
 **Symptoms:**
+
 - HTML file errors
 - CSS/JS not loading
 - Template errors
@@ -1833,6 +1903,7 @@ Solution 3: Rebuild files
 **Issue:** "You do not have permission to call X" errors
 
 **Symptoms:**
+
 - Functions not accessible
 - Drive operations fail
 - Spreadsheet access denied
@@ -1891,6 +1962,7 @@ Solution 3: Reduce test data
 **Issue:** Sidebar appears blank or broken
 
 **Symptoms:**
+
 - White screen
 - CSS not applied
 - JavaScript errors in console
@@ -1935,6 +2007,7 @@ function testHTML() {
 **Problem:** Menu item doesn't appear
 
 **Fix:**
+
 ```javascript
 // Verify onOpen trigger installed
 function checkTriggers() {
@@ -1958,6 +2031,7 @@ function installOnOpenTrigger() {
 **Problem:** "Cannot find function showMergeSidebar"
 
 **Fix:**
+
 - Verify merge_controller.js deployed
 - Check function name exactly: `showMergeSidebar`
 - Ensure no syntax errors in file
@@ -1966,6 +2040,7 @@ function installOnOpenTrigger() {
 **Problem:** Drive API errors
 
 **Fix:**
+
 ```bash
 1. Enable Drive API advanced service
 2. Enable in Cloud Console:
@@ -1982,6 +2057,7 @@ function installOnOpenTrigger() {
 ### Where to Find Help
 
 **Internal Resources:**
+
 - 📖 [`CDK_MERGE_TOOL_GUIDE.md`](CDK_MERGE_TOOL_GUIDE.md) - User guide
 - 📖 [`architecture/README.md`](architecture/README.md) - System architecture
 - 📖 This deployment guide
@@ -1989,6 +2065,7 @@ function installOnOpenTrigger() {
 - 📋 MERGE_LOG sheet for operation history
 
 **External Resources:**
+
 - 🔗 [Google Apps Script Documentation](https://developers.google.com/apps-script)
 - 🔗 [Spreadsheet Service Reference](https://developers.google.com/apps-script/reference/spreadsheet)
 - 🔗 [HTML Service Guide](https://developers.google.com/apps-script/guides/html)
@@ -1999,24 +2076,28 @@ function installOnOpenTrigger() {
 ### Documentation Links
 
 **Google Apps Script:**
-- Runtime and Quotas: https://developers.google.com/apps-script/guides/services/quotas
-- OAuth Scopes: https://developers.google.com/apps-script/concepts/scopes
-- Deployment Guide: https://developers.google.com/apps-script/concepts/deployments
+
+- Runtime and Quotas: <https://developers.google.com/apps-script/guides/services/quotas>
+- OAuth Scopes: <https://developers.google.com/apps-script/concepts/scopes>
+- Deployment Guide: <https://developers.google.com/apps-script/concepts/deployments>
 
 **Best Practices:**
-- Optimization Tips: https://developers.google.com/apps-script/guides/support/best-practices
-- Security Guidelines: https://developers.google.com/apps-script/guides/security
+
+- Optimization Tips: <https://developers.google.com/apps-script/guides/support/best-practices>
+- Security Guidelines: <https://developers.google.com/apps-script/guides/security>
 
 ---
 
 ### Contact Information
 
 **Deployment Support:**
+
 - IT Department: [Contact details]
 - Escalation: [Manager contact]
 - Emergency: [After-hours support]
 
 **User Support:**
+
 - Help Desk: [Ticket system]
 - Training: [Training coordinator]
 - Documentation: [Wiki/SharePoint]
@@ -2134,66 +2215,79 @@ ___________
 **Detailed Scope Breakdown:**
 
 #### 1. Spreadsheets Scope
+
 ```
 https://www.googleapis.com/auth/spreadsheets
 ```
-**Permissions:** View and manage spreadsheets  
+
+**Permissions:** View and manage spreadsheets
 **Used for:**
+
 - Reading Sales Log MONTHLY data
 - Creating MERGED_DATA output sheet
 - Writing merged records
 - Updating MERGE_LOG
 - Reading SALESPEOPLE config
 
-**Risk Level:** Medium - Full spreadsheet access  
+**Risk Level:** Medium - Full spreadsheet access
 **Mitigation:** Only modifies new sheets, never touches source data
 
 ---
 
 #### 2. Script Container UI Scope
+
 ```
 https://www.googleapis.com/auth/script.container.ui
 ```
-**Permissions:** Display third-party web content in Google Workspace  
+
+**Permissions:** Display third-party web content in Google Workspace
 **Used for:**
+
 - Showing merge sidebar
 - Rendering HTML interface
 - Displaying progress updates
 - Showing results
 
-**Risk Level:** Low - UI display only  
+**Risk Level:** Low - UI display only
 **Mitigation:** No data access, presentation layer only
 
 ---
 
 #### 3. Script App Scope
+
 ```
 https://www.googleapis.com/auth/script.scriptapp
 ```
-**Permissions:** Execute server-side functions  
+
+**Permissions:** Execute server-side functions
 **Used for:**
+
 - Running merge operations
 - Processing uploaded files
 - Generating output
 - Managing configuration
 
-**Risk Level:** Medium - Server execution  
+**Risk Level:** Medium - Server execution
 **Mitigation:** Functions are scoped and validated
 
 ---
 
 #### 4. Drive File Scope
+
 ```
 https://www.googleapis.com/auth/drive.file
 ```
-**Permissions:** Create and manage files created by this app  
+
+**Permissions:** Create and manage files created by this app
 **Used for:**
+
 - Temporary storage of uploaded CDK files
 - Converting Excel files to Sheets format
 - Cleaning up temporary files post-merge
 
-**Risk Level:** Low - Only app-created files  
+**Risk Level:** Low - Only app-created files
 **Mitigation:**
+
 - Files automatically deleted after use
 - 6-hour TTL on all temp files
 - Only files created by app are accessible
@@ -2232,6 +2326,7 @@ https://www.googleapis.com/auth/drive.file
 ```
 
 **Re-authorization scenarios:**
+
 - Scope changes in manifest
 - Token expiration (rare)
 - User revokes access
@@ -2246,6 +2341,7 @@ https://www.googleapis.com/auth/drive.file
 **File:** `september.xlsx` (provided in repo)
 
 **Structure:**
+
 ```
 Row 1: Headers
 Rows 2-188: Data (187 records)
@@ -2268,6 +2364,7 @@ V: Salesperson (Text)
 ```
 
 **Data Characteristics:**
+
 - Mix of NEW (142) and USED (45) vehicles
 - Stock numbers in various formats:
   - Standard: N1234, U5678
@@ -2281,6 +2378,7 @@ V: Salesperson (Text)
   - 1 record with negative GP (test validation)
 
 **Expected Results:**
+
 ```
 Total Records: 187
 Matched: ~175 (94%)
@@ -2298,6 +2396,7 @@ Match Types:
 **Source:** MONTHLY sheet in test spreadsheet
 
 **Required columns:**
+
 ```
 A: Date
 B: Customer Last Name
@@ -2316,6 +2415,7 @@ N: Salesperson (Used)
 ```
 
 **Test Data Requirements:**
+
 - Minimum 50 records for basic testing
 - Mix of NEW and USED vehicles
 - Various stock number formats
@@ -2334,7 +2434,7 @@ N: Salesperson (Used)
  */
 function generateTestCDKData() {
   const testRecords = [];
-  
+
   // Header row
   testRecords.push([
     'Contract Date', 'Customer Last Name', 'Customer First Name',
@@ -2343,12 +2443,12 @@ function generateTestCDKData() {
     'Cash Price', 'Trades', 'Service Contract', 'VIN',
     'Year', 'FI', 'FI Manager', 'Term', 'Deal No', 'Salesperson'
   ]);
-  
+
   // Generate 50 test records
   for (let i = 1; i <= 50; i++) {
     const isNew = Math.random() > 0.3; // 70% new, 30% used
     const stockNo = `${isNew ? 'N' : 'U'}${1000 + i}`;
-    
+
     testRecords.push([
       '10/15/2024',                          // Contract Date
       `TestCustomer${i}`,                     // Last Name
@@ -2375,20 +2475,20 @@ function generateTestCDKData() {
       'Salesperson'                           // Salesperson
     ]);
   }
-  
+
   // Write to new sheet
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let testSheet = ss.getSheetByName('TEST_CDK_DATA');
-  
+
   if (!testSheet) {
     testSheet = ss.insertSheet('TEST_CDK_DATA');
   } else {
     testSheet.clear();
   }
-  
+
   testSheet.getRange(1, 1, testRecords.length, testRecords[0].length)
     .setValues(testRecords);
-  
+
   Logger.log(`✓ Generated ${testRecords.length - 1} test records`);
 }
 ```
@@ -2447,6 +2547,7 @@ Breakdown:
 **Primary Bottleneck:** Stock matching algorithm (58% of time)
 
 **Optimization Opportunities:**
+
 1. Batch index lookups (10-20% improvement)
 2. Early termination on matches (15% improvement)
 3. Memoization of normalization (5-10% improvement)
@@ -2466,6 +2567,7 @@ Breakdown:
 | 5,000   | 65 MB       | 100 MB            | 65%    |
 
 **Memory Breakdown (1,000 records):**
+
 ```
 Total: ~15 MB
 
@@ -2516,6 +2618,7 @@ Components:
 **For High-Volume Deployments:**
 
 1. **Batch Processing**
+
    ```javascript
    // Split large files into batches
    const BATCH_SIZE = 1000;
@@ -2526,6 +2629,7 @@ Components:
    ```
 
 2. **Caching**
+
    ```javascript
    // Cache frequent lookups
    const cache = CacheService.getScriptCache();
@@ -2534,6 +2638,7 @@ Components:
    ```
 
 3. **Parallel Processing** (where possible)
+
    ```javascript
    // Process independent operations concurrently
    const [result1, result2] = await Promise.all([
@@ -2552,6 +2657,7 @@ Components:
 ### Load Testing Results
 
 **Test Environment:**
+
 - Google Workspace Business
 - 1Gbps network
 - Chrome browser
@@ -2569,6 +2675,7 @@ Components:
 | 5,000   | 287.3 ± 15 | 60%          | 92%        | High timeout risk |
 
 **Recommendations:**
+
 - **Optimal range:** 50-500 records per merge
 - **Acceptable range:** 500-1,500 records per merge
 - **Requires batching:** >1,500 records
@@ -2587,6 +2694,7 @@ Components:
 | Edge    | 16-26%    | 155 MB | Good |
 
 **User Experience Metrics:**
+
 - Sidebar load time: <2 seconds
 - UI responsiveness: Smooth (60 FPS)
 - Progress updates: Every 500ms
@@ -2668,18 +2776,21 @@ _________________________________
 ### Post-Deployment Actions
 
 **Immediate (Day 1):**
+
 - [ ] Monitor first 5 merge operations
 - [ ] Address any critical issues immediately
 - [ ] Confirm all users can access
 - [ ] Document any unexpected behavior
 
 **Short-term (Week 1):**
+
 - [ ] Review all error logs daily
 - [ ] Collect user feedback
 - [ ] Perform additional smoke tests
 - [ ] Update documentation if needed
 
 **Long-term (Month 1):**
+
 - [ ] Generate performance report
 - [ ] Analyze usage patterns
 - [ ] Plan optimizations if needed
@@ -2689,10 +2800,10 @@ _________________________________
 
 ## Document Information
 
-**Title:** CDK Merge Tool - Deployment Guide  
-**Version:** 1.0  
-**Last Updated:** October 2024  
-**Maintained By:** Technical Team  
+**Title:** CDK Merge Tool - Deployment Guide
+**Version:** 1.0
+**Last Updated:** October 2024
+**Maintained By:** Technical Team
 **Review Schedule:** Quarterly or after major updates
 
 **Change History:**
@@ -2784,6 +2895,7 @@ archiveOldMergeLogs()
 This deployment guide provides comprehensive instructions for deploying the CDK Merge Tool to Google Apps Script / Google Sheets environments. Following these procedures ensures a successful, reliable deployment with proper testing, monitoring, and support structures in place.
 
 **Key Success Factors:**
+
 1. ✅ Thorough pre-deployment preparation
 2. ✅ Systematic file deployment order
 3. ✅ Comprehensive testing at all levels
@@ -2791,7 +2903,7 @@ This deployment guide provides comprehensive instructions for deploying the CDK 
 5. ✅ Ongoing monitoring and maintenance
 6. ✅ Proper documentation and training
 
-**Questions or Issues?**  
+**Questions or Issues?**
 Refer to Section 10 (Support and Resources) for assistance.
 
 ---

@@ -1,0 +1,9 @@
+{
+    "scriptId": "1SYFeYBJaunmuwo8nsJdMHZJyaid9Srjj75I12U0wJ2SnQe1bGtuE3ky3",
+    "rootDir": "saleslog_files",
+    "scriptExtensions": [".js", ".gs"],
+    "htmlExtensions": [".html"],
+    "jsonExtensions": [".json"],
+    "filePushOrder": [],
+    "skipSubdirectories": false
+}

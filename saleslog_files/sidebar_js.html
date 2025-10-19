@@ -16,7 +16,7 @@
         skipSundays: true,
         mondayLogsSaturday: true
       };
-      
+
       console.log('[DEBUG] Using injected config. INITIAL_CONFIG length:', INITIAL_CONFIG.length);
       console.log('[DEBUG] FEATURE_FLAGS:', FEATURE_FLAGS);
 
@@ -40,11 +40,11 @@
        */
       window.switchTab = function(tabName) {
         console.log('[DEBUG] switchTab called with:', tabName);
-        
+
         // Update tab buttons
         const tabs = document.querySelectorAll('.tab');
         tabs.forEach(tab => tab.classList.remove('active'));
-        
+
         // Find the clicked tab by matching the onclick attribute
         tabs.forEach(tab => {
           if (tab.getAttribute('onclick') && tab.getAttribute('onclick').includes("'" + tabName + "'")) {
@@ -56,10 +56,10 @@
         const contents = document.querySelectorAll('.tab-content');
         contents.forEach(content => content.classList.remove('active'));
         document.getElementById('tab-' + tabName).classList.add('active');
-        
+
         console.log('[DEBUG] switchTab completed for:', tabName);
       };
-      
+
       console.log('[DEBUG] switchTab function defined on window:', typeof window.switchTab);
 
       // ========================================================================
@@ -72,14 +72,14 @@
           const config = JSON.parse(INITIAL_CONFIG);
           configCache = config;
           populateUI(config);
-          
+
           // Log successful load from injected data
           console.log('Configuration loaded from server injection (no API call)');
         } catch (e) {
           // Fallback to API call if injection fails
           console.warn('Failed to parse injected config, falling back to API call:', e);
           showLoading(true);
-          
+
           google.script.run
             .withSuccessHandler(function (config) {
               configCache = config;
@@ -144,11 +144,11 @@ function setupEventListeners() {
           const fullName = e.target.value.trim();
           if (fullName) {
             const parts = fullName.split(' ');
-            
+
             // Auto-generate display code (initials)
             const code = parts.map(p => p.charAt(0).toUpperCase()).join('').substring(0, 4);
             document.getElementById('new-displaycode').value = code;
-            
+
             // Auto-generate aliases: "FirstName, FirstName LastInitial"
             if (parts.length >= 2) {
               const firstName = parts[0];
