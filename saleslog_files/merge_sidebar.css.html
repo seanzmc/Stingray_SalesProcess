@@ -4,7 +4,10 @@
    Material Design styling matching Sales Log Pro aesthetic
    ======================================================================== */
 
+  /* CSS Variables from Server Configuration */
   :root {
+    <?!= generateCssVariables(getConfiguration().visual) ?>
+    
     /* Primary colors */
     --primary-blue: #4285f4;
     --primary-dark: #1a73e8;
