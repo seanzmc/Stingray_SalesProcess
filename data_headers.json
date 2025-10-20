@@ -1,0 +1,46 @@
+{
+  "CDK_DATA": {
+    "HEADERS": [
+      "Deal No.",
+      "Customer",
+      "VIN",
+      "Stock No.",
+      "Status",
+      "PLC",
+      "Contract Date",
+      "Sale Type",
+      "Year",
+      "Model",
+      "StockType",
+      "Front GP$",
+      "Back GP$",
+      "GP$",
+      "Cash Price",
+      "Trades",
+      "Service Contract",
+      "Finance Institution",
+      "Salesperson",
+      "FI Manager",
+      "Term"
+    ]
+  },
+
+  "MONTHLY": {
+    "HEADERS": [
+      "#",
+      "CUSTOMER",
+      "FI",
+      "NEW MODEL",
+      "STOCK #",
+      "TRADE",
+      "SALESPERSON",
+      "",
+      "CUSTOMER",
+      "FI",
+      "USED MODEL",
+      "STOCK #",
+      "TRADE",
+      "SALESPERSON"
+    ]
+  }
+}
