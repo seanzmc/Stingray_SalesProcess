@@ -15,6 +15,8 @@
   let mergeResults = null;
   let progressInterval = null;
   let startTime = null;
+  let resultsRetryCount = 0;
+  const MAX_RESULTS_RETRIES = 5; // Allow up to 5 retries (10 seconds) for results
 
   // Initialize on load
   window.addEventListener('DOMContentLoaded', function() {
@@ -363,6 +365,7 @@
 
     const config = getConfiguration();
     startTime = Date.now();
+    resultsRetryCount = 0; // Reset retry counter for new merge
 
     // Move to matching step
     showStep(3);
@@ -417,16 +420,37 @@
       updateProgress(progress.percentage, progress.message);
       updateMatchStats(progress.stats);
     } else if (progress.status === 'complete') {
-      clearInterval(progressInterval);
       updateProgress(100, 'Matching complete!');
       updateMatchStats(progress.stats);
       
-      // Validate that results exist before displaying
+      // CRITICAL FIX: Validate that results exist before displaying
       if (!progress.results) {
-        console.error('[Merge Tool] Results object is undefined');
+        console.warn('[Merge Tool] Results object is undefined (attempt ' + (resultsRetryCount + 1) + ')');
+        
+        // Check if this is a known cache propagation issue
+        if (progress.stats && progress.stats.cacheError) {
+          console.log('[Merge Tool] Cache error detected - will retry...');
+        }
+        
+        // Retry a few times to handle cache propagation delays
+        if (resultsRetryCount < MAX_RESULTS_RETRIES) {
+          resultsRetryCount++;
+          updateProgress(100, 'Retrieving results... (attempt ' + resultsRetryCount + ')');
+          // Keep polling - don't clear interval yet
+          return;
+        }
+        
+        // After max retries, show error
+        console.error('[Merge Tool] Results still undefined after ' + resultsRetryCount + ' retries');
+        clearInterval(progressInterval);
+        resultsRetryCount = 0; // Reset for next merge
         handleMissingResults();
         return;
       }
+      
+      // Success! Clear interval and reset retry count
+      clearInterval(progressInterval);
+      resultsRetryCount = 0;
       
       // Wait a moment then show results
       setTimeout(function() {
@@ -434,6 +458,7 @@
       }, 500);
     } else if (progress.status === 'error') {
       clearInterval(progressInterval);
+      resultsRetryCount = 0; // Reset on error
       onMergeError(progress.error);
     }
   }
@@ -607,20 +632,28 @@
   function onMergeError(error) {
     console.error('[Merge Tool] Merge error:', error);
     clearInterval(progressInterval);
+    resultsRetryCount = 0; // Reset retry counter
     
     // Ensure we're not stuck in loading state
     showLoading(false);
     
-    // Handle different error formats
+    // Handle different error formats with better null safety
     let errorMessage = 'Unknown error occurred';
     if (typeof error === 'string') {
       errorMessage = error;
-    } else if (error && error.message) {
-      errorMessage = error.message;
-    } else if (error && error.error) {
-      errorMessage = error.error;
     } else if (error && typeof error === 'object') {
-      errorMessage = JSON.stringify(error);
+      // CRITICAL FIX: Better handling of undefined/null errors
+      if (error.message) {
+        errorMessage = error.message;
+      } else if (error.error) {
+        errorMessage = error.error;
+      } else {
+        try {
+          errorMessage = JSON.stringify(error);
+        } catch (e) {
+          errorMessage = 'Error object could not be serialized';
+        }
+      }
     }
     
     showToast('Merge failed: ' + errorMessage, 'error');

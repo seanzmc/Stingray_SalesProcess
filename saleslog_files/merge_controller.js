@@ -349,11 +349,22 @@ function startMergeProcess(config) {
     
     const duration = (Date.now() - startTime) / 1000;
     
+    // CRITICAL FIX: Store results in progress object to avoid race condition
+    // When frontend polls getMergeStatus, results will be immediately available
     updateProgress(sessionId, 100, 'Merge process complete - ready for review', {
       duration: duration.toFixed(2),
       matchRate: stats.matchRate,
       totalRecords: stats.totalRecords,
-      matched: stats.mergedRecords
+      matched: stats.mergedRecords,
+      // Include formatted results for immediate frontend access
+      results: {
+        totalRecords: stats.totalRecords || 0,
+        matchedRecords: stats.mergedRecords || 0,
+        totalGP: stats.financialSummary ? stats.financialSummary.totalGP : 0,
+        unmatchedCount: stats.unmatchedSalesLog || 0,
+        reviewRecords: [],
+        matchRate: stats.matchRate || 0
+      }
     });
     
     logInfo('startMergeProcess', 'Merge process completed successfully', {
@@ -417,18 +428,56 @@ function getMergeStatus(sessionId) {
     
     // If merge is complete, retrieve and format results for frontend
     if (progress.status === 'complete') {
-      const cachedResults = getCachedData(sessionId, 'mergeResults');
-      
-      if (cachedResults && cachedResults.stats) {
-        // Transform the cached results structure to match what the frontend expects
-        response.results = {
-          totalRecords: cachedResults.stats.totalRecords || 0,
-          matchedRecords: cachedResults.stats.mergedRecords || 0,
-          totalGP: cachedResults.stats.financialSummary ? cachedResults.stats.financialSummary.totalGP : 0,
-          unmatchedCount: cachedResults.stats.unmatchedSalesLog || 0,
-          reviewRecords: [],  // Placeholder - could be populated from validation if needed
-          matchRate: cachedResults.stats.matchRate || 0
-        };
+      // CRITICAL FIX: First try to get results from progress.stats (no race condition)
+      // This was stored along with the progress update, so it's immediately available
+      if (progress.stats && progress.stats.results) {
+        response.results = progress.stats.results;
+        
+        logInfo('getMergeStatus', 'Results retrieved from progress object', {
+          totalRecords: response.results.totalRecords,
+          matchedRecords: response.results.matchedRecords
+        });
+      } else {
+        // FALLBACK: Try to retrieve from separate cache (legacy support)
+        const cachedResults = getCachedData(sessionId, 'mergeResults');
+        
+        // Diagnostic logging to identify cache retrieval issues
+        logInfo('getMergeStatus', 'Falling back to cached results retrieval', {
+          sessionId: sessionId,
+          cachedResultsExists: !!cachedResults,
+          hasStats: cachedResults ? !!cachedResults.stats : false
+        });
+        
+        if (cachedResults && cachedResults.stats) {
+          // Transform the cached results structure to match what the frontend expects
+          response.results = {
+            totalRecords: cachedResults.stats.totalRecords || 0,
+            matchedRecords: cachedResults.stats.mergedRecords || 0,
+            totalGP: cachedResults.stats.financialSummary ? cachedResults.stats.financialSummary.totalGP : 0,
+            unmatchedCount: cachedResults.stats.unmatchedSalesLog || 0,
+            reviewRecords: [],  // Placeholder - could be populated from validation if needed
+            matchRate: cachedResults.stats.matchRate || 0
+          };
+          
+          logInfo('getMergeStatus', 'Results successfully retrieved from fallback cache', {
+            totalRecords: response.results.totalRecords,
+            matchedRecords: response.results.matchedRecords
+          });
+        } else {
+          // CRITICAL: Both retrieval methods failed - log for diagnosis
+          logError('getMergeStatus', new Error('Failed to retrieve results from both sources'), {
+            sessionId: sessionId,
+            progressStatsResults: !!(progress.stats && progress.stats.results),
+            cachedResultsNull: !cachedResults,
+            statsUndefined: cachedResults ? !cachedResults.stats : 'N/A',
+            progressPercent: progress.percent,
+            progressStatus: progress.status
+          });
+          
+          // Set error flag and informative message
+          response.stats.cacheError = true;
+          response.message = 'Results not yet available - please wait and the page will auto-update';
+        }
       }
     }
     
