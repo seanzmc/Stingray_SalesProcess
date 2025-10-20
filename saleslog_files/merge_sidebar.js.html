@@ -31,6 +31,54 @@
     setupFileUpload();
     setupConfigControls();
     loadMergeConfiguration();
+    checkForCDKDataSheet();
+  }
+
+  /**
+   * Check if CDK_DATA sheet exists
+   */
+  function checkForCDKDataSheet() {
+    google.script.run
+      .withSuccessHandler(function(sheetExists) {
+        if (sheetExists) {
+          showCDKSheetDetected();
+        } else {
+          showCDKSheetInstructions();
+        }
+      })
+      .withFailureHandler(function(error) {
+        console.log('[Merge Tool] Could not check for CDK_DATA sheet:', error);
+        showCDKSheetInstructions();
+      })
+      .checkForCDKDataSheet();
+  }
+
+  /**
+   * Show CDK sheet detected status
+   */
+  function showCDKSheetDetected() {
+    const statusElement = document.getElementById('cdk-sheet-status');
+    if (statusElement) {
+      statusElement.innerHTML = '<div class="success-box">✅ CDK_DATA sheet found! Ready to merge.</div>';
+      statusElement.className = 'status-ready';
+      
+      // Enable next button since we have CDK data
+      const nextButton = document.getElementById('next-config');
+      if (nextButton) {
+        nextButton.disabled = false;
+      }
+    }
+  }
+
+  /**
+   * Show CDK sheet instructions
+   */
+  function showCDKSheetInstructions() {
+    const statusElement = document.getElementById('cdk-sheet-status');
+    if (statusElement) {
+      statusElement.innerHTML = '<div class="info-box">ℹ️ No CDK_DATA sheet found. Please import your CDK data as described above, or upload a file below.</div>';
+      statusElement.className = 'status-waiting';
+    }
   }
 
   // ========================================================================

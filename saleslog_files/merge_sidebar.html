@@ -48,7 +48,34 @@
 
   <!-- Step 1: Upload CDK File -->
   <div id="step-1" class="step-container active">
-    <div class="section-header">Step 1: Upload CDK File</div>
+    <div class="section-header">Step 1: Prepare CDK Data</div>
+
+    <!-- New Workflow Section -->
+    <div class="workflow-section">
+      <h3>📥 Import CDK Data (Recommended)</h3>
+      <div class="info-box">
+        <p><strong>New Workflow:</strong></p>
+        <ol>
+          <li>Export your CDK data as CSV/Excel</li>
+          <li>In Google Sheets: <strong>File > Import > Upload</strong></li>
+          <li>Choose "<strong>Insert new sheet(s)</strong>"</li>
+          <li>Rename the imported sheet to "<strong>CDK_DATA</strong>"</li>
+          <li>Click "Next: Configure Settings" below</li>
+        </ol>
+        <p class="note">💡 The system will automatically detect your column headers!</p>
+      </div>
+    </div>
+
+    <!-- CDK Sheet Status Indicator -->
+    <div id="cdk-sheet-status" class="status-waiting">
+      <!-- Status will be dynamically updated by JavaScript -->
+    </div>
+
+    <!-- Legacy File Upload Section -->
+    <div class="workflow-section legacy">
+      <h3>📎 Upload CDK File (Alternative Method)</h3>
+      <p class="info-text">If you prefer, you can still upload a CDK file directly:</p>
+    </div>
 
     <div class="upload-area" id="upload-area">
       <div class="upload-icon">📁</div>

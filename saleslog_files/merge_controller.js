@@ -255,27 +255,82 @@ function startMergeProcess(config) {
     
     // Step 2: Read CDK data
     updateProgress(sessionId, 25, 'Reading CDK export data...', {});
-    const cdkData = getCachedData(sessionId, 'cdkData');
     
-    if (!cdkData || !Array.isArray(cdkData)) {
-      return {
-        success: false,
-        error: 'CDK data not found in cache. Please upload CDK file again.'
-      };
-    }
+    // Check for CDK_DATA sheet first (new workflow)
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const cdkSheet = ss.getSheetByName('CDK_DATA');
     
     let cdkRecords;
-    try {
-      cdkRecords = processCDKData(cdkData, config.columnMapping);
-      logInfo('startMergeProcess', 'CDK data processed', {
-        recordCount: cdkRecords.length
-      });
-    } catch (cdkError) {
-      logError('startMergeProcess', cdkError, { step: 'processCDKData' });
-      return {
-        success: false,
-        error: 'Failed to process CDK data: ' + (cdkError.message || cdkError)
-      };
+    let columnMap = null;
+    
+    if (cdkSheet) {
+      // NEW WORKFLOW: Read from CDK_DATA sheet
+      logInfo('startMergeProcess', 'Reading CDK data from CDK_DATA sheet...');
+      
+      try {
+        const cdkSheetData = readCDKDataSheet();
+        
+        // Store column map for processCDKData
+        columnMap = cdkSheetData.columnMap;
+        
+        // Log detection report
+        logInfo('startMergeProcess', 'Column detection complete', {
+          coverage: cdkSheetData.detectionReport.coverage + '%',
+          mappedFields: Object.keys(columnMap).length
+        });
+        
+        if (cdkSheetData.detectionReport.lowConfidenceMatches.length > 0) {
+          logWarning('startMergeProcess', 'Low confidence matches found', {
+            matches: cdkSheetData.detectionReport.lowConfidenceMatches
+          });
+        }
+        
+        // Process CDK data with column map
+        cdkRecords = processCDKData(cdkSheetData.data, columnMap);
+        
+        logInfo('startMergeProcess', 'CDK data processed from sheet', {
+          recordCount: cdkRecords.length
+        });
+        
+      } catch (sheetError) {
+        logError('startMergeProcess', sheetError, { step: 'readCDKDataSheet' });
+        return {
+          success: false,
+          error: 'Failed to read CDK_DATA sheet: ' + (sheetError.message || sheetError)
+        };
+      }
+      
+    } else {
+      // LEGACY WORKFLOW: Read from cached file
+      logWarning('startMergeProcess', 'CDK_DATA sheet not found, falling back to cached file upload');
+      
+      const cdkData = getCachedData(sessionId, 'cdkData');
+      
+      if (!cdkData || !Array.isArray(cdkData)) {
+        return {
+          success: false,
+          error: 'No CDK data found. Please follow these steps:\n\n' +
+            '1. Export your CDK data as CSV or Excel\n' +
+            '2. In Google Sheets: File > Import > Upload\n' +
+            '3. Choose "Insert new sheet(s)"\n' +
+            '4. Rename the sheet to "CDK_DATA"\n' +
+            '5. Try the merge again\n\n' +
+            'Alternatively, you can upload a CDK file directly using the file upload option.'
+        };
+      }
+      
+      try {
+        cdkRecords = processCDKData(cdkData, null); // null columnMap = use hardcoded indices
+        logInfo('startMergeProcess', 'CDK data processed from cache', {
+          recordCount: cdkRecords.length
+        });
+      } catch (cdkError) {
+        logError('startMergeProcess', cdkError, { step: 'processCDKData' });
+        return {
+          success: false,
+          error: 'Failed to process CDK data: ' + (cdkError.message || cdkError)
+        };
+      }
     }
     
     // Step 3: Match stock numbers
@@ -782,6 +837,21 @@ function cancelMerge(sessionId) {
 }
 
 /**
+ * Check if CDK_DATA sheet exists in the active spreadsheet
+ * @returns {boolean} True if CDK_DATA sheet exists
+ */
+function checkForCDKDataSheet() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName('CDK_DATA');
+    return sheet !== null;
+  } catch (error) {
+    logError('checkForCDKDataSheet', error);
+    return false;
+  }
+}
+
+/**
  * Gets the current merge configuration
  * Returns default configuration for the merge tool
  *
@@ -1010,57 +1080,630 @@ function processSalesLogSheet(salesLogConfig) {
     throw error;
   }
 }
+// ==================== HEADER DETECTION AND MAPPING FUNCTIONS ====================
+// Phase 1: Core header detection and mapping functions for dynamic CDK data processing
 
 /**
- * Processes CDK data array and extracts records
+ * Calculates Levenshtein distance between two strings
+ * Used for fuzzy matching of header names
  * 
  * @private
+ * @param {string} str1 - First string
+ * @param {string} str2 - Second string
+ * @returns {number} Edit distance between strings
+ */
+function levenshteinDistance(str1, str2) {
+  const len1 = str1.length;
+  const len2 = str2.length;
+  const matrix = [];
+  
+  // Initialize matrix
+  for (let i = 0; i <= len1; i++) {
+    matrix[i] = [i];
+  }
+  for (let j = 0; j <= len2; j++) {
+    matrix[0][j] = j;
+  }
+  
+  // Calculate distances
+  for (let i = 1; i <= len1; i++) {
+    for (let j = 1; j <= len2; j++) {
+      if (str1.charAt(i - 1) === str2.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substitution
+          matrix[i][j - 1] + 1,     // insertion
+          matrix[i - 1][j] + 1      // deletion
+        );
+      }
+    }
+  }
+  
+  return matrix[len1][len2];
+}
+
+/**
+ * Matches a normalized header to expected field names using priority-based matching
+ * 
+ * Priority levels:
+ * 1. Exact match (case-insensitive)
+ * 2. Synonym match using predefined synonyms
+ * 3. Partial match (contains keyword)
+ * 4. Fuzzy match using Levenshtein distance
+ * 
+ * @private
+ * @param {string} normalizedHeader - Normalized header string (lowercase, no special chars)
+ * @param {Object} expectedFields - Map of expected field names
+ * @returns {Object|null} {field: string, confidence: number} or null if no match
+ */
+function matchHeaderName(normalizedHeader, expectedFields) {
+  if (!normalizedHeader) return null;
+  
+  // Define synonym map for common header variations
+  const HEADER_SYNONYMS = {
+    'stockno': ['stock no', 'stock number', 'stock #', 'stock', 'stk no', 'stk #', 'stocknum'],
+    'stocktype': ['stock type', 'type', 'new/used', 'condition', 'newused', 'vehicletype'],
+    'frontgp': ['front gp', 'front gross', 'front profit', 'front gp$', 'front', 'frontgross', 'frontprofit'],
+    'backgp': ['back gp', 'back gross', 'back profit', 'back gp$', 'back', 'backgross', 'backprofit', 'fni'],
+    'totalgp': ['total gp', 'gp$', 'gp', 'total gross', 'total profit', 'gross profit', 'totalgross', 'totalprofit', 'gptotal'],
+    'contractdate': ['contract date', 'date', 'sale date', 'sold date', 'saledate', 'solddate'],
+    'customer': ['customer', 'customer name', 'buyer', 'purchaser', 'customername', 'customerlastname'],
+    'model': ['model', 'vehicle model', 'car model', 'vehiclemodel'],
+    'salesperson': ['salesperson', 'sales person', 'salesman', 'saleswoman', 'seller', 'salesrep', 'rep'],
+    'dealno': ['deal no', 'deal number', 'deal num', 'deal', 'dealnumber', 'dealnum'],
+    'vin': ['vin', 'vehicle vin', 'vin number', 'vehiclevin', 'vinnumber'],
+    'financeins': ['finance ins', 'finance institution', 'lender', 'bank', 'fi', 'financeinstitution'],
+    'fimanager': ['fi manager', 'f&i manager', 'finance manager', 'fimanager', 'financemanager'],
+    'year': ['year', 'model year', 'yr', 'modelyear'],
+    'cashprice': ['cash price', 'price', 'sale price', 'saleprice', 'cashprice'],
+    'trades': ['trades', 'trade', 'trade-in', 'tradein'],
+    'servicecontract': ['service contract', 'warranty', 'service', 'servicecontract'],
+    'term': ['term', 'loan term', 'months', 'loanterm']
+  };
+  
+  // Priority 1: Exact match (case-insensitive)
+  const normalizedExpectedFields = {};
+  for (const field in expectedFields) {
+    normalizedExpectedFields[field.toLowerCase().replace(/[^a-z0-9]/g, '')] = field;
+  }
+  
+  if (normalizedExpectedFields[normalizedHeader]) {
+    return {
+      field: normalizedExpectedFields[normalizedHeader],
+      confidence: 100
+    };
+  }
+  
+  // Priority 2: Synonym matching
+  for (const [field, synonyms] of Object.entries(HEADER_SYNONYMS)) {
+    const normalizedSynonyms = synonyms.map(s => s.toLowerCase().replace(/[^a-z0-9]/g, ''));
+    if (normalizedSynonyms.includes(normalizedHeader)) {
+      return {
+        field: field,
+        confidence: 90
+      };
+    }
+  }
+  
+  // Priority 3: Partial match (contains)
+  for (const field of Object.keys(expectedFields)) {
+    const normalizedField = field.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (normalizedHeader.includes(normalizedField) || normalizedField.includes(normalizedHeader)) {
+      return {
+        field: field,
+        confidence: 75
+      };
+    }
+  }
+  
+  // Priority 4: Fuzzy match using Levenshtein distance
+  let bestMatch = null;
+  let bestDistance = Infinity;
+  
+  for (const field of Object.keys(expectedFields)) {
+    const normalizedField = field.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const distance = levenshteinDistance(normalizedHeader, normalizedField);
+    if (distance < bestDistance && distance <= 3) { // Max 3 character difference
+      bestDistance = distance;
+      bestMatch = field;
+    }
+  }
+  
+  if (bestMatch) {
+    const confidence = Math.max(50, 100 - (bestDistance * 15));
+    return {
+      field: bestMatch,
+      confidence: confidence
+    };
+  }
+  
+  return null; // No match found
+}
+
+/**
+ * Load fallback header definitions from data_headers.json
+ * @returns {Object} Fallback headers configuration
+ */
+function loadFallbackHeaders() {
+  try {
+    // In Apps Script, we'll need to store this in script properties or hardcode
+    // For now, hardcode the expected headers from data_headers.json
+    return {
+      CDK_DATA: {
+        HEADERS: [
+          "Deal No.", "Customer", "VIN", "Stock No.", "Status", "PLC",
+          "Contract Date", "Sale Type", "Year", "Model", "StockType",
+          "Front GP$", "Back GP$", "GP$", "Cash Price", "Trades",
+          "Service Contract", "Finance Institution", "Salesperson",
+          "FI Manager", "Term"
+        ]
+      }
+    };
+  } catch (error) {
+    logError('loadFallbackHeaders', error);
+    return { CDK_DATA: { HEADERS: [] } };
+  }
+}
+
+/**
+ * Detects column mapping from header row
+ * Maps CDK headers to expected field names using intelligent matching
+ *
+ * @private
+ * @param {Array<string>} headers - Column headers from CDK data
+ * @param {Object} fallbackHeaders - Reference headers from data_headers.json (optional)
+ * @returns {Object} {columnMap, unmatchedHeaders, lowConfidenceMatches, coverage}
+ */
+function detectColumnMapping(headers, fallbackHeaders) {
+  try {
+    logInfo('detectColumnMapping', 'Starting header detection', {
+      headerCount: headers ? headers.length : 0
+    });
+    
+    // Define expected fields with their requirements
+    const expectedFields = {
+      'dealno': { required: false, type: 'string' },
+      'customer': { required: true, type: 'string' },
+      'vin': { required: false, type: 'string' },
+      'stockno': { required: true, type: 'string' },
+      'status': { required: false, type: 'string' },
+      'contractdate': { required: true, type: 'date' },
+      'year': { required: false, type: 'number' },
+      'model': { required: true, type: 'string' },
+      'stocktype': { required: true, type: 'string' },
+      'frontgp': { required: true, type: 'number' },
+      'backgp': { required: true, type: 'number' },
+      'totalgp': { required: true, type: 'number' },
+      'cashprice': { required: false, type: 'number' },
+      'trades': { required: false, type: 'number' },
+      'servicecontract': { required: false, type: 'number' },
+      'financeins': { required: false, type: 'string' },
+      'salesperson': { required: false, type: 'string' },
+      'fimanager': { required: false, type: 'string' },
+      'term': { required: false, type: 'number' }
+    };
+    
+    const columnMap = {};
+    const unmatchedHeaders = [];
+    const lowConfidenceMatches = [];
+    
+    // Normalize and match each header
+    headers.forEach(function(header, index) {
+      if (!header) return;
+      
+      // Normalize header: lowercase, remove special chars and spaces
+      const normalized = String(header)
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '');
+      
+      const match = matchHeaderName(normalized, expectedFields);
+      
+      if (match) {
+        if (match.confidence >= 80) {
+          // High confidence match - use it
+          columnMap[match.field] = index;
+          logInfo('detectColumnMapping', 'Matched header', {
+            header: header,
+            field: match.field,
+            index: index,
+            confidence: match.confidence
+          });
+        } else if (match.confidence >= 60) {
+          // Medium confidence - flag for review
+          lowConfidenceMatches.push({
+            header: header,
+            field: match.field,
+            index: index,
+            confidence: match.confidence
+          });
+          logWarning('detectColumnMapping', 'Low confidence match', {
+            header: header,
+            field: match.field,
+            confidence: match.confidence
+          });
+        }
+      } else {
+        unmatchedHeaders.push({ header: header, index: index });
+      }
+    });
+    
+    // Use fallback headers from data_headers.json for missing required fields
+    if (fallbackHeaders && fallbackHeaders.CDK_DATA) {
+      const fallback = fallbackHeaders.CDK_DATA.HEADERS;
+      
+      for (const field in expectedFields) {
+        if (!columnMap[field] && expectedFields[field].required) {
+          // Try to find by position in fallback
+          const fallbackIndex = fallback.findIndex(function(h) {
+            const normalized = String(h).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+            return normalized === field;
+          });
+          
+          if (fallbackIndex !== -1 && fallbackIndex < headers.length) {
+            columnMap[field] = fallbackIndex;
+            logInfo('detectColumnMapping', 'Used fallback mapping', {
+              field: field,
+              index: fallbackIndex
+            });
+          }
+        }
+      }
+    }
+    
+    const coverage = Object.keys(columnMap).length / Object.keys(expectedFields).length;
+    
+    logInfo('detectColumnMapping', 'Header detection complete', {
+      mappedFields: Object.keys(columnMap).length,
+      totalFields: Object.keys(expectedFields).length,
+      coverage: (coverage * 100).toFixed(1) + '%',
+      unmatchedCount: unmatchedHeaders.length
+    });
+    
+    return {
+      columnMap: columnMap,
+      unmatchedHeaders: unmatchedHeaders,
+      lowConfidenceMatches: lowConfidenceMatches,
+      coverage: coverage
+    };
+    
+  } catch (error) {
+    logError('detectColumnMapping', error);
+    throw error;
+  }
+}
+
+/**
+ * Validates that all required CDK headers are present in the column map
+ * 
+ * @private
+ * @param {Object} columnMap - Mapping of field names to column indices
+ * @returns {Object} {valid: boolean, missing: Array, warnings: Array}
+ */
+function validateCDKHeaders(columnMap) {
+  try {
+    logInfo('validateCDKHeaders', 'Starting header validation');
+    
+    // Define required fields
+    const requiredFields = [
+      'stockno',
+      'stocktype',
+      'frontgp',
+      'backgp',
+      'totalgp',
+      'contractdate',
+      'customer'
+    ];
+    
+    // Define recommended fields
+    const recommendedFields = [
+      'model',
+      'vin',
+      'year',
+      'dealno',
+      'salesperson'
+    ];
+    
+    const missing = [];
+    const warnings = [];
+    
+    // Check required fields
+    for (let i = 0; i < requiredFields.length; i++) {
+      const field = requiredFields[i];
+      if (columnMap[field] === undefined) {
+        missing.push(field);
+      }
+    }
+    
+    // Check recommended fields
+    for (let i = 0; i < recommendedFields.length; i++) {
+      const field = recommendedFields[i];
+      if (columnMap[field] === undefined) {
+        warnings.push('Recommended field "' + field + '" not found');
+      }
+    }
+    
+    const result = {
+      valid: missing.length === 0,
+      missing: missing,
+      warnings: warnings,
+      foundCount: Object.keys(columnMap).length,
+      requiredCount: requiredFields.length
+    };
+    
+    if (!result.valid) {
+      logError('validateCDKHeaders', 'Missing required fields', {
+        missing: missing
+      });
+    } else if (warnings.length > 0) {
+      logWarning('validateCDKHeaders', 'Missing recommended fields', {
+        warnings: warnings
+      });
+    } else {
+      logInfo('validateCDKHeaders', 'All headers validated successfully');
+    }
+    
+    return result;
+    
+  } catch (error) {
+    logError('validateCDKHeaders', error);
+    return {
+      valid: false,
+      missing: [],
+      warnings: [],
+      error: error.message
+    };
+  }
+}
+
+/**
+ * Reads CDK data from the CDK_DATA sheet
+ * Detects column mapping and validates headers
+ *
+ * @returns {Object} {data, headers, columnMap, validation, detectionReport}
+ * @throws {Error} If CDK_DATA sheet not found or validation fails
+ */
+function readCDKDataSheet() {
+  try {
+    logInfo('readCDKDataSheet', 'Reading CDK_DATA sheet');
+    
+    const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = spreadsheet.getSheetByName('CDK_DATA');
+    
+    // Validate sheet exists
+    if (!sheet) {
+      throw new Error(
+        'CDK_DATA sheet not found. Please import your CDK export file:\n' +
+        '1. Go to File > Import\n' +
+        '2. Upload your CDK export file\n' +
+        '3. Choose "Insert new sheet(s)"\n' +
+        '4. Rename the new sheet to "CDK_DATA"'
+      );
+    }
+    
+    // Get sheet dimensions
+    const lastRow = sheet.getLastRow();
+    const lastCol = sheet.getLastColumn();
+    
+    if (lastRow < 2) {
+      throw new Error(
+        'CDK_DATA sheet appears to be empty or has no data rows.\n' +
+        'Please ensure the sheet contains header row and at least one data row.'
+      );
+    }
+    
+    if (lastCol < 10) {
+      throw new Error(
+        'CDK_DATA sheet has too few columns (found ' + lastCol + ').\n' +
+        'Expected at least 10 columns for CDK data.'
+      );
+    }
+    
+    // Read all data including headers
+    const allData = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+    
+    // Extract headers (first row)
+    const headers = allData[0];
+    
+    // Validate headers are not empty
+    const nonEmptyHeaders = headers.filter(function(h) { return h && String(h).trim(); });
+    if (nonEmptyHeaders.length < 5) {
+      throw new Error(
+        'CDK_DATA sheet has insufficient column headers.\n' +
+        'Found only ' + nonEmptyHeaders.length + ' non-empty headers, expected at least 5.'
+      );
+    }
+    
+    // Load fallback headers
+    const fallbackHeaders = loadFallbackHeaders();
+    
+    // Detect column mapping
+    const mappingResult = detectColumnMapping(headers, fallbackHeaders);
+    
+    // Validate headers
+    const validation = validateCDKHeaders(mappingResult.columnMap);
+    
+    if (!validation.valid) {
+      throw new Error(
+        'CDK data has missing required columns: ' + validation.missing.join(', ') + '\n\n' +
+        'Please ensure your CDK export includes these fields.'
+      );
+    }
+    
+    // Log warnings
+    if (validation.warnings.length > 0) {
+      logWarning('readCDKDataSheet', 'Header validation warnings', {
+        warnings: validation.warnings
+      });
+    }
+    
+    logInfo('readCDKDataSheet', 'Successfully read CDK_DATA sheet', {
+      totalRows: lastRow,
+      dataRows: lastRow - 1,
+      columns: lastCol,
+      nonEmptyHeaders: nonEmptyHeaders.length,
+      mappedFields: Object.keys(mappingResult.columnMap).length,
+      coverage: (mappingResult.coverage * 100).toFixed(1) + '%'
+    });
+    
+    return {
+      data: allData,
+      headers: headers,
+      columnMap: mappingResult.columnMap,
+      validation: validation,
+      detectionReport: {
+        coverage: (mappingResult.coverage * 100).toFixed(1),
+        unmatchedHeaders: mappingResult.unmatchedHeaders,
+        lowConfidenceMatches: mappingResult.lowConfidenceMatches
+      }
+    };
+    
+  } catch (error) {
+    logError('readCDKDataSheet', error);
+    throw error;
+  }
+}
+
+/**
+ * Safely extracts a value from a row using column index
+ * Returns default value if column index is undefined or value is empty
+ *
+ * @private
+ * @param {Array} row - Data row array
+ * @param {number} columnIndex - Column index to extract from
+ * @param {*} defaultValue - Default value if extraction fails
+ * @returns {*} Extracted value or default value
+ */
+function extractValue(row, columnIndex, defaultValue) {
+  if (columnIndex === undefined || columnIndex === null) {
+    return defaultValue;
+  }
+  const value = row[columnIndex];
+  return (value !== null && value !== undefined && value !== '') ? value : defaultValue;
+}
+
+/**
+ * Extracts and parses a numeric value from a row
+ * Returns default value if parsing fails or value is not numeric
+ * 
+ * @private
+ * @param {Array} row - Data row array
+ * @param {number} columnIndex - Column index to extract from
+ * @param {number} defaultValue - Default value if extraction/parsing fails
+ * @returns {number} Parsed numeric value or default value
+ */
+function extractNumericValue(row, columnIndex, defaultValue) {
+  const value = extractValue(row, columnIndex, null);
+  if (value === null) return defaultValue;
+  const parsed = parseFloat(value);
+  return isNaN(parsed) ? defaultValue : parsed;
+}
+
+/**
+ * Extracts and parses an integer value from a row
+ * Returns default value if parsing fails or value is not an integer
+ * 
+ * @private
+ * @param {Array} row - Data row array
+ * @param {number} columnIndex - Column index to extract from
+ * @param {number} defaultValue - Default value if extraction/parsing fails
+ * @returns {number} Parsed integer value or default value
+ */
+function extractIntValue(row, columnIndex, defaultValue) {
+  const value = extractValue(row, columnIndex, null);
+  if (value === null) return defaultValue;
+  const parsed = parseInt(value);
+  return isNaN(parsed) ? defaultValue : parsed;
+}
+
+
+/**
+ * Processes CDK data array and extracts records using dynamic column mapping
+ *
+ * @private
  * @param {Array} cdkData - 2D array of CDK data
+ * @param {Object} columnMap - Mapping of field names to column indices (optional for backward compatibility)
  * @returns {Array} Array of CDK record objects
  */
-function processCDKData(cdkData) {
+function processCDKData(cdkData, columnMap) {
   try {
     if (!Array.isArray(cdkData) || cdkData.length < 2) {
       throw new Error('Invalid CDK data format');
     }
     
-    // Assume first row is headers
-    const headers = cdkData[0];
     const records = [];
     
-    // Process data rows
-    for (let i = 1; i < cdkData.length; i++) {
-      const row = cdkData[i];
+    // If columnMap not provided, use hardcoded indices for backward compatibility
+    if (!columnMap) {
+      logWarning('processCDKData', 'Using legacy hardcoded column indices');
       
-      const record = {
-        rowNumber: i,
-        contractDate: row[0] || null,
-        customerLastName: row[1] || '',
-        stockNo: row[3] || '',
-        model: row[8] || '',
-        stockType: row[9] || '',
-        frontGP: parseFloat(row[10]) || 0,
-        backGP: parseFloat(row[11]) || 0,
-        totalGP: parseFloat(row[12]) || 0,
-        cashPrice: parseFloat(row[13]) || 0,
-        trades: parseFloat(row[14]) || 0,
-        serviceContract: parseFloat(row[15]) || 0,
-        vin: row[16] || '',
-        year: parseInt(row[17]) || null,
-        financeInstitution: row[18] || '',
-        fiManager: row[19] || '',
-        term: parseInt(row[20]) || null,
-        dealNo: row[21] || '',
-        salesperson: row[22] || ''
-      };
-      
-      if (record.stockNo) {
-        records.push(record);
+      // Process data rows with hardcoded indices
+      for (let i = 1; i < cdkData.length; i++) {
+        const row = cdkData[i];
+        
+        const record = {
+          rowNumber: i,
+          contractDate: row[0] || null,
+          customerLastName: row[1] || '',
+          stockNo: row[3] || '',
+          model: row[8] || '',
+          stockType: row[9] || '',
+          frontGP: parseFloat(row[10]) || 0,
+          backGP: parseFloat(row[11]) || 0,
+          totalGP: parseFloat(row[12]) || 0,
+          cashPrice: parseFloat(row[13]) || 0,
+          trades: parseFloat(row[14]) || 0,
+          serviceContract: parseFloat(row[15]) || 0,
+          vin: row[16] || '',
+          year: parseInt(row[17]) || null,
+          financeInstitution: row[18] || '',
+          fiManager: row[19] || '',
+          term: parseInt(row[20]) || null,
+          dealNo: row[21] || '',
+          salesperson: row[22] || ''
+        };
+        
+        if (record.stockNo) {
+          records.push(record);
+        }
+      }
+    } else {
+      // Use dynamic column mapping
+      for (let i = 1; i < cdkData.length; i++) {
+        const row = cdkData[i];
+        
+        const record = {
+          rowNumber: i,
+          contractDate: extractValue(row, columnMap.contractdate, null),
+          customerLastName: extractValue(row, columnMap.customer, ''),
+          stockNo: extractValue(row, columnMap.stockno, ''),
+          model: extractValue(row, columnMap.model, ''),
+          stockType: extractValue(row, columnMap.stocktype, ''),
+          frontGP: extractNumericValue(row, columnMap.frontgp, 0),
+          backGP: extractNumericValue(row, columnMap.backgp, 0),
+          totalGP: extractNumericValue(row, columnMap.totalgp, 0),
+          cashPrice: extractNumericValue(row, columnMap.cashprice, 0),
+          trades: extractNumericValue(row, columnMap.trades, 0),
+          serviceContract: extractNumericValue(row, columnMap.servicecontract, 0),
+          vin: extractValue(row, columnMap.vin, ''),
+          year: extractIntValue(row, columnMap.year, null),
+          financeInstitution: extractValue(row, columnMap.financeins, ''),
+          fiManager: extractValue(row, columnMap.fimanager, ''),
+          term: extractIntValue(row, columnMap.term, null),
+          dealNo: extractValue(row, columnMap.dealno, ''),
+          salesperson: extractValue(row, columnMap.salesperson, '')
+        };
+        
+        if (record.stockNo) {
+          records.push(record);
+        }
       }
     }
     
     logInfo('processCDKData', 'Extracted CDK records', {
-      recordCount: records.length
+      recordCount: records.length,
+      usedDynamicMapping: !!columnMap
     });
     
     return records;
