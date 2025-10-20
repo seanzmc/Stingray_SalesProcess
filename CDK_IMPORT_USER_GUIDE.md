@@ -152,7 +152,7 @@ Before exporting from CDK, ensure you have:
    ```
    Report Type: Deal Summary or Sales Detail Report
    Date Range: Select your period (e.g., Current Month)
-   
+
    Required Fields (ensure these are included):
    ✓ Stock Number
    ✓ Customer Name
@@ -162,7 +162,7 @@ Before exporting from CDK, ensure you have:
    ✓ Front GP (Gross Profit)
    ✓ Back GP (F&I Gross)
    ✓ Total GP
-   
+
    Recommended Fields:
    ✓ VIN
    ✓ Year
@@ -181,7 +181,7 @@ Before exporting from CDK, ensure you have:
    ```
    Good naming: CDK_Export_October_2024.csv
    Bad naming: export.csv
-   
+
    Save location: Desktop or Documents folder
    ```
 
@@ -236,13 +236,13 @@ Import location:
   ○ Insert new sheet(s)  ← SELECT THIS
   ○ Replace current sheet
   ○ Append rows to current sheet
-  
+
 Separator type:
   [Auto-detect ▼]         ← Usually correct
-  
+
 Convert text to numbers, dates, and formulas:
   ☑ Yes                   ← Keep checked
-  
+
 [Cancel]  [Import data]
 ```
 
@@ -1063,12 +1063,12 @@ The automatic column detection couldn't find one or more required fields in your
 2. Look at row 1 (headers)
 3. Do you see columns for GP (Gross Profit)?
 4. If yes but named differently, you have options:
-   
+
    Option A: Rename the headers directly
    - Click the cell with the header
    - Change to recognized name (e.g., "Front GP" or "Front GP$")
    - Save and retry merge
-   
+
    Option B: Add the field to synonyms (contact IT)
    - If your CDK uses unique naming
    - IT can add custom synonyms
@@ -1446,53 +1446,53 @@ The complete synonym map used for matching (from [`merge_controller.js:1144-1163
 ```javascript
 const HEADER_SYNONYMS = {
   'stockno': [
-    'stock no', 'stock number', 'stock #', 'stock', 
+    'stock no', 'stock number', 'stock #', 'stock',
     'stk no', 'stk #', 'stocknum'
   ],
   'stocktype': [
-    'stock type', 'type', 'new/used', 'condition', 
+    'stock type', 'type', 'new/used', 'condition',
     'newused', 'vehicletype'
   ],
   'frontgp': [
-    'front gp', 'front gross', 'front profit', 'front gp$', 
+    'front gp', 'front gross', 'front profit', 'front gp$',
     'front', 'frontgross', 'frontprofit'
   ],
   'backgp': [
-    'back gp', 'back gross', 'back profit', 'back gp$', 
+    'back gp', 'back gross', 'back profit', 'back gp$',
     'back', 'backgross', 'backprofit', 'fni'
   ],
   'totalgp': [
-    'total gp', 'gp$', 'gp', 'total gross', 'total profit', 
+    'total gp', 'gp$', 'gp', 'total gross', 'total profit',
     'gross profit', 'totalgross', 'totalprofit', 'gptotal'
   ],
   'contractdate': [
-    'contract date', 'date', 'sale date', 'sold date', 
+    'contract date', 'date', 'sale date', 'sold date',
     'saledate', 'solddate'
   ],
   'customer': [
-    'customer', 'customer name', 'buyer', 'purchaser', 
+    'customer', 'customer name', 'buyer', 'purchaser',
     'customername', 'customerlastname'
   ],
   'model': [
     'model', 'vehicle model', 'car model', 'vehiclemodel'
   ],
   'salesperson': [
-    'salesperson', 'sales person', 'salesman', 'saleswoman', 
+    'salesperson', 'sales person', 'salesman', 'saleswoman',
     'seller', 'salesrep', 'rep'
   ],
   'dealno': [
-    'deal no', 'deal number', 'deal num', 'deal', 
+    'deal no', 'deal number', 'deal num', 'deal',
     'dealnumber', 'dealnum'
   ],
   'vin': [
     'vin', 'vehicle vin', 'vin number', 'vehiclevin', 'vinnumber'
   ],
   'financeins': [
-    'finance ins', 'finance institution', 'lender', 'bank', 
+    'finance ins', 'finance institution', 'lender', 'bank',
     'fi', 'financeinstitution'
   ],
   'fimanager': [
-    'fi manager', 'f&i manager', 'finance manager', 
+    'fi manager', 'f&i manager', 'finance manager',
     'fimanager', 'financemanager'
   ],
   'year': [
@@ -2314,7 +2314,7 @@ Fix: Click "Cancel Operation" → Adjust settings → Retry
 **After Merge:**
 ```
 Mistake: Results are wrong
-Fix: 
+Fix:
   Option 1: Delete MERGED_DATA sheet, run again
   Option 2: File > Version history → Restore previous
   Option 3: Use backup copy you made before merge
@@ -2822,7 +2822,7 @@ If your organization uses unique column names, IT can add them to the synonym ma
 ```javascript
 const HEADER_SYNONYMS = {
   'stockno': [
-    'stock no', 'stock number', 'stock #', 'stock', 
+    'stock no', 'stock number', 'stock #', 'stock',
     'stk no', 'stk #', 'stocknum',
     // ADD YOUR CUSTOM SYNONYMS HERE:
     'vehicle number', 'veh #', 'unit number'  // ← NEW
