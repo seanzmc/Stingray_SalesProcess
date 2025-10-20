@@ -32,7 +32,8 @@ function showMergeSidebar() {
     logInfo('showMergeSidebar', 'Merge sidebar opened successfully');
   } catch (error) {
     const errorLog = logError('showMergeSidebar', error);
-    SpreadsheetApp.getUi().alert('Error opening merge sidebar: ' + errorLog.message);
+    const errorMessage = errorLog?.message || 'Unknown error occurred';
+    SpreadsheetApp.getUi().alert('Error opening merge sidebar: ' + errorMessage);
   }
 }
 
@@ -184,7 +185,7 @@ function uploadCDKFile(fileData, fileName, sessionId) {
     // Return a safe error response
     return {
       success: false,
-      error: errorLog && errorLog.message ? errorLog.message : 'An unexpected error occurred during file upload'
+      error: errorLog?.message || 'An unexpected error occurred during file upload'
     };
   }
 }
@@ -384,12 +385,15 @@ function startMergeProcess(config) {
     
   } catch (error) {
     const errorLog = logError('startMergeProcess', error, { sessionId: config.sessionId });
-    updateProgress(config.sessionId, 0, 'Error: ' + errorLog.message, {});
+    const errorMessage = errorLog?.message || 'Unknown error occurred';
+    const technicalDetails = errorLog?.fullLog || 'No technical details available';
+    
+    updateProgress(config.sessionId, 0, 'Error: ' + errorMessage, {});
     
     return {
       success: false,
-      error: errorLog.message,
-      technicalDetails: errorLog.fullLog
+      error: errorMessage,
+      technicalDetails: technicalDetails
     };
   }
 }
@@ -507,64 +511,185 @@ function confirmMerge(sessionId) {
   try {
     logInfo('confirmMerge', 'Starting merge confirmation', { sessionId });
     
-    // Retrieve results from cache
-    const results = getCachedData(sessionId, 'mergeResults');
+    // STEP 1: Retrieve results using dual-path strategy
+    logInfo('confirmMerge', 'STEP 1: Retrieving merge results', { sessionId });
+    let results = null;
     
+    // PRIMARY: Try to get results from progress object first (follows getMergeStatus pattern)
+    try {
+      const cache = CacheService.getScriptCache();
+      const progressKey = `merge_progress_${sessionId}`;
+      const progressJson = cache.get(progressKey);
+      
+      if (progressJson) {
+        const progress = JSON.parse(progressJson);
+        
+        // Check if progress indicates completion and results are available
+        if (progress.status === 'complete' && progress.stats && progress.stats.results) {
+          // Progress exists and shows completion - retrieve full results from cache
+          results = getCachedData(sessionId, 'mergeResults');
+          
+          if (results) {
+            logInfo('confirmMerge', 'Retrieved results from progress-indicated cache', {
+              hasMergedRecords: !!results.mergedRecords,
+              hasStats: !!results.stats,
+              mergedRecordsLength: results.mergedRecords ? results.mergedRecords.length : 0
+            });
+          }
+        }
+      }
+    } catch (progressError) {
+      logWarning('confirmMerge', 'Could not check progress object, trying fallback', {
+        error: progressError.message
+      });
+    }
+    
+    // FALLBACK: Try cache directly if progress path didn't work
     if (!results) {
-      throw new Error('Merge results not found. Please run the merge process again.');
+      results = getCachedData(sessionId, 'mergeResults');
+      
+      if (results) {
+        logInfo('confirmMerge', 'Retrieved results from cache fallback', {
+          hasMergedRecords: !!results.mergedRecords,
+          hasStats: !!results.stats,
+          hasUnmatchedReports: !!results.unmatchedReports,
+          mergedRecordsLength: results.mergedRecords ? results.mergedRecords.length : 0
+        });
+      }
+    }
+    
+    // Only throw error if BOTH paths failed
+    if (!results) {
+      logError('confirmMerge', new Error('Results not found in either location'), {
+        sessionId: sessionId,
+        checkedProgressPath: true,
+        checkedCacheFallback: true
+      });
+      throw new Error('Merge results not found in cache. Please run the merge process again.');
+    }
+    
+    logInfo('confirmMerge', 'Results successfully retrieved via dual-path strategy', {
+      hasMergedRecords: !!results.mergedRecords,
+      hasStats: !!results.stats,
+      hasUnmatchedReports: !!results.unmatchedReports,
+      mergedRecordsLength: results.mergedRecords ? results.mergedRecords.length : 0
+    });
+    
+    if (!results.mergedRecords || !Array.isArray(results.mergedRecords)) {
+      throw new Error('Invalid merge results: mergedRecords is missing or not an array');
+    }
+    
+    if (!results.stats) {
+      throw new Error('Invalid merge results: stats object is missing');
     }
     
     updateProgress(sessionId, 10, 'Writing merged data to sheet...', {});
     
-    // Generate output sheet
-    const outputResult = generateMergedOutput(
-      results.mergedRecords,
-      results.stats,
-      results.unmatchedReports
-    );
+    // STEP 2: Generate output sheet
+    logInfo('confirmMerge', 'STEP 2: Generating merged output', {
+      recordCount: results.mergedRecords.length,
+      hasStats: !!results.stats,
+      hasUnmatchedReports: !!results.unmatchedReports
+    });
+    
+    let outputResult;
+    try {
+      outputResult = generateMergedOutput(
+        results.mergedRecords,
+        results.stats,
+        results.unmatchedReports
+      );
+      
+      logInfo('confirmMerge', 'generateMergedOutput returned', {
+        success: outputResult ? outputResult.success : false,
+        hasSheetName: outputResult ? !!outputResult.sheetName : false,
+        hasSheetUrl: outputResult ? !!outputResult.sheetUrl : false,
+        error: outputResult && !outputResult.success ? outputResult.error : null
+      });
+    } catch (outputError) {
+      const outputErrorLog = logError('confirmMerge', outputError, {
+        step: 'generateMergedOutput',
+        recordCount: results.mergedRecords.length
+      });
+      throw new Error('Output generation failed: ' + outputErrorLog.message);
+    }
+    
+    if (!outputResult) {
+      throw new Error('generateMergedOutput returned null or undefined');
+    }
     
     if (!outputResult.success) {
-      throw new Error('Failed to generate output: ' + outputResult.error);
+      throw new Error('Failed to generate output: ' + (outputResult.error || 'Unknown reason'));
     }
     
     updateProgress(sessionId, 75, 'Creating merge log entry...', {});
     
-    // Create merge log entry
-    const cdkFileName = getCachedData(sessionId, 'cdkFileName') || 'Unknown';
+    // STEP 3: Create merge log entry
+    logInfo('confirmMerge', 'STEP 3: Creating merge log entry');
+    
+    let cdkFileName;
+    try {
+      cdkFileName = getCachedData(sessionId, 'cdkFileName') || 'Unknown';
+    } catch (fileNameError) {
+      logWarning('confirmMerge', 'Could not retrieve CDK filename', { error: fileNameError.message });
+      cdkFileName = 'Unknown';
+    }
+    
     const duration = (Date.now() - startTime) / 1000;
     
-    createMergeLogEntry({
-      timestamp: new Date().toISOString(),
-      user: Session.getActiveUser().getEmail(),
-      salesLogFile: 'Current Sheet',
-      cdkFile: cdkFileName,
-      totalRecords: results.stats.totalRecords,
-      matched: results.stats.mergedRecords,
-      unmatchedSL: results.stats.unmatchedSalesLog,
-      unmatchedCDK: results.stats.unmatchedCDK,
-      matchRate: results.stats.matchRate,
-      duration: duration,
-      status: 'Success'
-    });
+    try {
+      createMergeLogEntry({
+        timestamp: new Date().toISOString(),
+        user: Session.getActiveUser().getEmail(),
+        salesLogFile: 'Current Sheet',
+        cdkFile: cdkFileName,
+        totalRecords: results.stats.totalRecords,
+        matched: results.stats.mergedRecords,
+        unmatchedSL: results.stats.unmatchedSalesLog,
+        unmatchedCDK: results.stats.unmatchedCDK,
+        matchRate: results.stats.matchRate,
+        duration: duration,
+        status: 'Success'
+      });
+      
+      logInfo('confirmMerge', 'Merge log entry created successfully');
+    } catch (logEntryError) {
+      // Log entry failure shouldn't stop the merge completion
+      const logEntryErrorLog = logError('confirmMerge', logEntryError, { step: 'createMergeLogEntry' });
+      logWarning('confirmMerge', 'Merge log entry creation failed but continuing: ' + logEntryErrorLog.message);
+    }
     
     updateProgress(sessionId, 90, 'Cleaning up temporary files...', {});
     
-    // Cleanup temporary files
-    const cdkFileId = getCachedData(sessionId, 'cdkFileId');
-    if (cdkFileId) {
-      cleanupTempFile(cdkFileId);
+    // STEP 4: Cleanup temporary files
+    logInfo('confirmMerge', 'STEP 4: Cleaning up temporary files');
+    try {
+      const cdkFileId = getCachedData(sessionId, 'cdkFileId');
+      if (cdkFileId) {
+        cleanupTempFile(cdkFileId);
+        logInfo('confirmMerge', 'Temporary file cleaned up', { fileId: cdkFileId });
+      }
+    } catch (cleanupError) {
+      logWarning('confirmMerge', 'Temp file cleanup failed but continuing: ' + cleanupError.message);
     }
     
-    // Clear session cache
-    cleanupSession(sessionId);
+    // STEP 5: Clear session cache
+    logInfo('confirmMerge', 'STEP 5: Clearing session cache');
+    try {
+      cleanupSession(sessionId);
+      logInfo('confirmMerge', 'Session cache cleared successfully');
+    } catch (sessionError) {
+      logWarning('confirmMerge', 'Session cleanup failed but continuing: ' + sessionError.message);
+    }
     
     updateProgress(sessionId, 100, 'Merge completed successfully!', {
       sheetName: outputResult.sheetName
     });
     
-    logInfo('confirmMerge', 'Merge confirmed and finalized', {
+    logInfo('confirmMerge', 'Merge confirmed and finalized successfully', {
       duration: duration,
-      sheetName: outputResult.sheetName
+      sheetName: outputResult.sheetName,
+      sheetUrl: outputResult.sheetUrl
     });
     
     return {
@@ -575,13 +700,34 @@ function confirmMerge(sessionId) {
     };
     
   } catch (error) {
-    const errorLog = logError('confirmMerge', error, { sessionId });
-    updateProgress(sessionId, 0, 'Confirmation failed: ' + errorLog.message, {});
+    // CRITICAL: Comprehensive error logging
+    logError('confirmMerge', error, {
+      sessionId,
+      errorType: error.constructor ? error.constructor.name : typeof error,
+      errorMessage: error.message || String(error),
+      errorStack: error.stack || 'No stack trace available'
+    });
+    
+    const errorMessage = error.message || String(error) || 'Unknown error occurred';
+    const technicalDetails = error.stack || error.toString() || 'No technical details available';
+    
+    // Log the exact error details that will be returned
+    logInfo('confirmMerge', 'Returning error response', {
+      errorMessage: errorMessage,
+      technicalDetails: technicalDetails,
+      hasStack: !!error.stack
+    });
+    
+    try {
+      updateProgress(sessionId, 0, 'Confirmation failed: ' + errorMessage, {});
+    } catch (progressError) {
+      logWarning('confirmMerge', 'Could not update progress for error state: ' + progressError.message);
+    }
     
     return {
       success: false,
-      error: errorLog.message,
-      technicalDetails: errorLog.fullLog
+      error: errorMessage,
+      technicalDetails: technicalDetails
     };
   }
 }
@@ -621,7 +767,7 @@ function cancelMerge(sessionId) {
     
     return {
       success: false,
-      error: errorLog.message
+      error: errorLog?.message || 'Unknown error occurred'
     };
   }
 }
@@ -670,7 +816,7 @@ function getMergeConfiguration() {
     const errorLog = logError('getMergeConfiguration', error);
     return {
       success: false,
-      error: errorLog.message
+      error: errorLog?.message || 'Unknown error occurred'
     };
   }
 }
@@ -702,7 +848,7 @@ function viewMergedDataSheet() {
     
     return {
       success: false,
-      error: errorLog.message
+      error: errorLog?.message || 'Unknown error occurred'
     };
   }
 }
@@ -753,7 +899,7 @@ function viewUnmatchedSheet() {
     
     return {
       success: false,
-      error: errorLog.message
+      error: errorLog?.message || 'Unknown error occurred'
     };
   }
 }
@@ -1095,7 +1241,8 @@ function readFileContents(fileId, fileName) {
     
   } catch (error) {
     const errorLog = logError('readFileContents', error, { fileId, fileName });
-    throw new Error('Failed to read file contents: ' + errorLog.message);
+    const errorMessage = errorLog?.message || 'Unknown error occurred';
+    throw new Error('Failed to read file contents: ' + errorMessage);
   }
 }
 
