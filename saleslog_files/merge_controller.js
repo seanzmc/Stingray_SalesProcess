@@ -407,18 +407,37 @@ function getMergeStatus(sessionId) {
     
     const progress = JSON.parse(progressJson);
     
-    return {
-      percent: progress.percent || 0,
+    const response = {
+      percentage: progress.percent || 0,
       message: progress.message || '',
       stats: progress.stats || {},
       status: progress.status || 'processing',
       lastUpdate: progress.lastUpdate
     };
     
+    // If merge is complete, retrieve and format results for frontend
+    if (progress.status === 'complete') {
+      const cachedResults = getCachedData(sessionId, 'mergeResults');
+      
+      if (cachedResults && cachedResults.stats) {
+        // Transform the cached results structure to match what the frontend expects
+        response.results = {
+          totalRecords: cachedResults.stats.totalRecords || 0,
+          matchedRecords: cachedResults.stats.mergedRecords || 0,
+          totalGP: cachedResults.stats.financialSummary ? cachedResults.stats.financialSummary.totalGP : 0,
+          unmatchedCount: cachedResults.stats.unmatchedSalesLog || 0,
+          reviewRecords: [],  // Placeholder - could be populated from validation if needed
+          matchRate: cachedResults.stats.matchRate || 0
+        };
+      }
+    }
+    
+    return response;
+    
   } catch (error) {
     logError('getMergeStatus', error, { sessionId });
     return {
-      percent: 0,
+      percentage: 0,
       message: 'Error retrieving status',
       stats: {},
       status: 'error'
