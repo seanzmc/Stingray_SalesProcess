@@ -563,9 +563,18 @@ function confirmMerge(sessionId) {
       logError('confirmMerge', new Error('Results not found in either location'), {
         sessionId: sessionId,
         checkedProgressPath: true,
-        checkedCacheFallback: true
+        checkedCacheFallback: true,
+        possibleCause: 'Cache size limit exceeded or data expired'
       });
-      throw new Error('Merge results not found in cache. Please run the merge process again.');
+      
+      // Enhanced error message with diagnostic information
+      throw new Error(
+        'Merge results not found in cache. This may occur if:\n' +
+        '1. The merge results exceeded the cache size limit (100KB)\n' +
+        '2. The cache data has expired (6 hour TTL)\n' +
+        '3. The merge process did not complete successfully\n\n' +
+        'Please run the merge process again. The system now uses chunking to handle large datasets.'
+      );
     }
     
     logInfo('confirmMerge', 'Results successfully retrieved via dual-path strategy', {
@@ -1280,7 +1289,8 @@ function updateProgress(sessionId, percent, message, stats = {}) {
 
 /**
  * Stores data in cache for a session
- * 
+ * Implements chunking strategy for data exceeding 90KB to avoid CacheService 100KB limit
+ *
  * @private
  * @param {string} sessionId - Session identifier
  * @param {string} key - Data key
@@ -1290,17 +1300,114 @@ function storeCachedData(sessionId, key, data) {
   try {
     const cache = CacheService.getScriptCache();
     const cacheKey = `merge_data_${sessionId}_${key}`;
+    const jsonData = JSON.stringify(data);
+    const dataSize = jsonData.length;
     
-    cache.put(cacheKey, JSON.stringify(data), 21600); // 6 hours
+    // Log data size for diagnostics
+    logInfo('storeCachedData', 'Caching data', {
+      sessionId: sessionId,
+      key: key,
+      sizeBytes: dataSize,
+      sizeKB: (dataSize / 1024).toFixed(2)
+    });
+    
+    // CacheService has 100KB limit per entry - use 90KB threshold for safety
+    const MAX_CACHE_SIZE = 90 * 1024; // 90KB - leave 10KB buffer
+    const CHUNK_SIZE = 80 * 1024; // 80KB per chunk - safe size with buffer
+    
+    if (dataSize <= MAX_CACHE_SIZE) {
+      // Data is small enough, store in single entry
+      cache.put(cacheKey, jsonData, 21600); // 6 hours
+      
+      logInfo('storeCachedData', 'Data stored in single cache entry', {
+        key: key,
+        sizeKB: (dataSize / 1024).toFixed(2)
+      });
+    } else {
+      // Data exceeds safe limit, implement chunking strategy
+      logInfo('storeCachedData', 'Data exceeds cache limit, implementing chunking', {
+        key: key,
+        sizeKB: (dataSize / 1024).toFixed(2),
+        thresholdKB: (MAX_CACHE_SIZE / 1024).toFixed(2)
+      });
+      
+      // Calculate number of chunks needed
+      const numChunks = Math.ceil(dataSize / CHUNK_SIZE);
+      
+      // Store metadata about the chunks
+      const metadata = {
+        totalSize: dataSize,
+        numChunks: numChunks,
+        chunkSize: CHUNK_SIZE,
+        timestamp: new Date().getTime()
+      };
+      
+      const metaKey = `${cacheKey}_meta`;
+      cache.put(metaKey, JSON.stringify(metadata), 21600);
+      
+      // Split data into chunks and store each atomically
+      const storedChunks = [];
+      try {
+        for (let i = 0; i < numChunks; i++) {
+          const start = i * CHUNK_SIZE;
+          const end = Math.min(start + CHUNK_SIZE, dataSize);
+          const chunk = jsonData.substring(start, end);
+          const chunkKey = `${cacheKey}_chunk_${i}`;
+          
+          cache.put(chunkKey, chunk, 21600);
+          storedChunks.push(chunkKey);
+          
+          logInfo('storeCachedData', `Stored chunk ${i + 1}/${numChunks}`, {
+            chunkIndex: i,
+            chunkSizeKB: (chunk.length / 1024).toFixed(2)
+          });
+        }
+        
+        logInfo('storeCachedData', 'All chunks stored successfully', {
+          key: key,
+          numChunks: numChunks,
+          totalSizeKB: (dataSize / 1024).toFixed(2)
+        });
+        
+      } catch (chunkError) {
+        // Cleanup partial chunks on failure to maintain atomicity
+        logError('storeCachedData', chunkError, {
+          key: key,
+          failedAtChunk: storedChunks.length,
+          totalChunks: numChunks
+        });
+        
+        // Remove metadata
+        cache.remove(metaKey);
+        
+        // Remove all stored chunks
+        storedChunks.forEach(chunkKey => {
+          try {
+            cache.remove(chunkKey);
+          } catch (cleanupError) {
+            // Log but don't throw - best effort cleanup
+            logWarning('storeCachedData', 'Failed to cleanup chunk: ' + chunkKey);
+          }
+        });
+        
+        throw new Error(`Failed to store chunk ${storedChunks.length} of ${numChunks}. Cache operation aborted.`);
+      }
+    }
     
   } catch (error) {
-    logError('storeCachedData', error, { sessionId, key });
+    logError('storeCachedData', error, {
+      sessionId,
+      key,
+      errorMessage: error.message || 'Unknown error'
+    });
+    throw error;
   }
 }
 
 /**
  * Retrieves data from cache for a session
- * 
+ * Handles both chunked (large) and single-entry (small) data with backward compatibility
+ *
  * @private
  * @param {string} sessionId - Session identifier
  * @param {string} key - Data key
@@ -1310,12 +1417,94 @@ function getCachedData(sessionId, key) {
   try {
     const cache = CacheService.getScriptCache();
     const cacheKey = `merge_data_${sessionId}_${key}`;
-    const data = cache.get(cacheKey);
     
-    return data ? JSON.parse(data) : null;
+    // Check for metadata first (indicates chunked data)
+    const metaKey = `${cacheKey}_meta`;
+    const metadataJson = cache.get(metaKey);
+    
+    if (metadataJson) {
+      // Data was stored in chunks, reassemble it
+      const metadata = JSON.parse(metadataJson);
+      
+      logInfo('getCachedData', 'Retrieving chunked data', {
+        key: key,
+        numChunks: metadata.numChunks,
+        totalSizeKB: (metadata.totalSize / 1024).toFixed(2)
+      });
+      
+      let reconstructedData = '';
+      let missingChunks = [];
+      
+      // Retrieve and concatenate all chunks
+      for (let i = 0; i < metadata.numChunks; i++) {
+        const chunkKey = `${cacheKey}_chunk_${i}`;
+        const chunk = cache.get(chunkKey);
+        
+        if (!chunk) {
+          missingChunks.push(i);
+          logWarning('getCachedData', `Missing chunk ${i}`, {
+            key: key,
+            chunkIndex: i,
+            totalChunks: metadata.numChunks
+          });
+        } else {
+          reconstructedData += chunk;
+        }
+      }
+      
+      // If any chunks are missing, data is incomplete
+      if (missingChunks.length > 0) {
+        logError('getCachedData', new Error('Incomplete chunked data'), {
+          key: key,
+          missingChunks: missingChunks,
+          totalChunks: metadata.numChunks
+        });
+        return null;
+      }
+      
+      // Verify reconstructed size matches metadata
+      if (reconstructedData.length !== metadata.totalSize) {
+        logError('getCachedData', new Error('Size mismatch after reassembly'), {
+          key: key,
+          expectedSize: metadata.totalSize,
+          actualSize: reconstructedData.length
+        });
+        return null;
+      }
+      
+      logInfo('getCachedData', 'Successfully reassembled chunked data', {
+        key: key,
+        numChunks: metadata.numChunks,
+        reconstructedSizeKB: (reconstructedData.length / 1024).toFixed(2)
+      });
+      
+      return JSON.parse(reconstructedData);
+      
+    } else {
+      // No metadata found - try single entry retrieval (backward compatibility)
+      const data = cache.get(cacheKey);
+      
+      if (data) {
+        logInfo('getCachedData', 'Retrieved single cache entry', {
+          key: key,
+          sizeKB: (data.length / 1024).toFixed(2)
+        });
+        return JSON.parse(data);
+      } else {
+        logInfo('getCachedData', 'No data found in cache', {
+          key: key,
+          sessionId: sessionId
+        });
+        return null;
+      }
+    }
     
   } catch (error) {
-    logError('getCachedData', error, { sessionId, key });
+    logError('getCachedData', error, {
+      sessionId,
+      key,
+      errorMessage: error.message || 'Unknown error'
+    });
     return null;
   }
 }
