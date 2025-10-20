@@ -421,6 +421,13 @@
       updateProgress(100, 'Matching complete!');
       updateMatchStats(progress.stats);
       
+      // Validate that results exist before displaying
+      if (!progress.results) {
+        console.error('[Merge Tool] Results object is undefined');
+        handleMissingResults();
+        return;
+      }
+      
       // Wait a moment then show results
       setTimeout(function() {
         displayResults(progress.results);
@@ -500,12 +507,109 @@
   };
 
   /**
+   * Handle missing results object
+   */
+  function handleMissingResults() {
+    console.error('[Merge Tool] Merge completed but results object is missing');
+    clearInterval(progressInterval);
+    
+    // Show error message to user
+    showToast('Merge completed but results could not be retrieved. Please try restarting the merge.', 'error');
+    
+    // Create error display with retry option
+    const errorHtml = `
+      <div style="padding: 20px; text-align: center;">
+        <div style="color: var(--error-red); font-size: 48px; margin-bottom: 20px;">⚠️</div>
+        <h3 style="color: var(--error-red); margin-bottom: 10px;">Results Not Available</h3>
+        <p style="margin-bottom: 20px;">
+          The merge process completed, but the results could not be retrieved.
+          This may be due to a timing issue or temporary error.
+        </p>
+        <button type="button" class="btn-primary" onclick="retryMerge()" style="margin-right: 10px;">
+          🔄 Retry Merge
+        </button>
+        <button type="button" class="btn-secondary" onclick="startNewMerge()">
+          ↺ Start New Merge
+        </button>
+      </div>
+    `;
+    
+    // Display error in the results area
+    const step4 = document.getElementById('step-4');
+    const firstChild = step4.querySelector('.step-content');
+    if (firstChild) {
+      firstChild.innerHTML = errorHtml;
+    }
+    
+    // Show step 4 to display the error
+    showStep(4);
+  }
+  
+  /**
+   * Handle invalid results object (missing required properties)
+   */
+  function handleInvalidResults(results) {
+    console.error('[Merge Tool] Results object is missing required properties');
+    clearInterval(progressInterval);
+    
+    // Log what we received for debugging
+    console.log('[Merge Tool] Received results:', JSON.stringify(results));
+    
+    showToast('Results incomplete. Please check the merge configuration and try again.', 'error');
+    
+    // Create error display with retry option
+    const errorHtml = `
+      <div style="padding: 20px; text-align: center;">
+        <div style="color: var(--error-red); font-size: 48px; margin-bottom: 20px;">⚠️</div>
+        <h3 style="color: var(--error-red); margin-bottom: 10px;">Incomplete Results</h3>
+        <p style="margin-bottom: 20px;">
+          The merge process returned incomplete results. Required data is missing.
+        </p>
+        <button type="button" class="btn-primary" onclick="retryMerge()" style="margin-right: 10px;">
+          🔄 Retry Merge
+        </button>
+        <button type="button" class="btn-secondary" onclick="startNewMerge()">
+          ↺ Start New Merge
+        </button>
+      </div>
+    `;
+    
+    // Display error in the results area
+    const step4 = document.getElementById('step-4');
+    const firstChild = step4.querySelector('.step-content');
+    if (firstChild) {
+      firstChild.innerHTML = errorHtml;
+    }
+    
+    // Show step 4 to display the error
+    showStep(4);
+  }
+  
+  /**
+   * Retry the merge with current configuration
+   */
+  window.retryMerge = function() {
+    console.log('[Merge Tool] Retrying merge...');
+    
+    // Ensure we're not stuck in loading state
+    showLoading(false);
+    
+    // Go back to configuration step
+    showStep(2);
+    
+    showToast('Ready to retry. Review settings and click Start Merge.', 'success');
+  };
+
+  /**
    * Handle merge error
    * @param {Error|string|Object} error - Error object, string, or object
    */
   function onMergeError(error) {
     console.error('[Merge Tool] Merge error:', error);
     clearInterval(progressInterval);
+    
+    // Ensure we're not stuck in loading state
+    showLoading(false);
     
     // Handle different error formats
     let errorMessage = 'Unknown error occurred';
@@ -533,18 +637,34 @@
    */
   function displayResults(results) {
     console.log('[Merge Tool] Displaying results:', results);
+    
+    // Defensive check: Validate results object exists
+    if (!results) {
+      console.error('[Merge Tool] Results object is undefined or null');
+      handleMissingResults();
+      return;
+    }
+    
+    // Defensive check: Validate required properties exist
+    if (typeof results.totalRecords === 'undefined' ||
+        typeof results.matchedRecords === 'undefined') {
+      console.error('[Merge Tool] Results object missing required properties:', results);
+      handleInvalidResults(results);
+      return;
+    }
+    
     mergeResults = results;
 
     // Update summary statistics
     document.getElementById('total-records').textContent = results.totalRecords || 0;
     document.getElementById('matched-records').textContent = results.matchedRecords || 0;
     
-    const matchRate = results.totalRecords > 0 
+    const matchRate = results.totalRecords > 0
       ? ((results.matchedRecords / results.totalRecords) * 100).toFixed(1)
       : 0;
     document.getElementById('match-rate').textContent = matchRate + '%';
     
-    document.getElementById('total-gp').textContent = 
+    document.getElementById('total-gp').textContent =
       '$' + (results.totalGP || 0).toLocaleString();
 
     // Display records needing review
@@ -556,7 +676,7 @@
     }
 
     // Update unmatched count
-    document.getElementById('unmatched-summary').textContent = 
+    document.getElementById('unmatched-summary').textContent =
       results.unmatchedCount || 0;
 
     // Show step 4
