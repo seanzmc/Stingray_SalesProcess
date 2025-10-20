@@ -852,6 +852,72 @@ function checkForCDKDataSheet() {
 }
 
 /**
+ * Get column headers from CDK_DATA sheet for configuration UI
+ * This enables dropdown population when using sheet-based workflow
+ *
+ * @returns {Object} {success, headers, rowCount, error}
+ */
+function getCDKDataHeaders() {
+  try {
+    logInfo('getCDKDataHeaders', 'Retrieving CDK_DATA sheet headers');
+    
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = ss.getSheetByName('CDK_DATA');
+    
+    if (!sheet) {
+      return {
+        success: false,
+        error: 'CDK_DATA sheet not found'
+      };
+    }
+    
+    const lastCol = sheet.getLastColumn();
+    const lastRow = sheet.getLastRow();
+    
+    if (lastCol === 0 || lastRow === 0) {
+      return {
+        success: false,
+        error: 'CDK_DATA sheet is empty'
+      };
+    }
+    
+    // Read header row
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    
+    // Filter out null/empty headers
+    const validHeaders = headers.filter(function(h) {
+      return h !== null && h !== undefined && String(h).trim() !== '';
+    });
+    
+    if (validHeaders.length === 0) {
+      return {
+        success: false,
+        error: 'CDK_DATA sheet has no valid headers'
+      };
+    }
+    
+    logInfo('getCDKDataHeaders', 'Successfully retrieved headers', {
+      headerCount: validHeaders.length,
+      rowCount: lastRow - 1
+    });
+    
+    return {
+      success: true,
+      headers: headers, // Return all headers including empty ones for indexing
+      rowCount: lastRow - 1,
+      columnCount: lastCol
+    };
+    
+  } catch (error) {
+    const errorLog = logError('getCDKDataHeaders', error);
+    return {
+      success: false,
+      error: errorLog?.message || 'Failed to retrieve CDK_DATA headers'
+    };
+  }
+}
+
+/**
  * Gets the current merge configuration
  * Returns default configuration for the merge tool
  *

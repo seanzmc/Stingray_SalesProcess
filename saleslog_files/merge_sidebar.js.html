@@ -42,6 +42,8 @@
       .withSuccessHandler(function(sheetExists) {
         if (sheetExists) {
           showCDKSheetDetected();
+          // CRITICAL FIX: Load headers from sheet to populate dropdowns
+          loadCDKSheetHeaders();
         } else {
           showCDKSheetInstructions();
         }
@@ -51,6 +53,51 @@
         showCDKSheetInstructions();
       })
       .checkForCDKDataSheet();
+  }
+
+  /**
+   * Load column headers from CDK_DATA sheet
+   * Populates configuration dropdowns for sheet-based workflow
+   */
+  function loadCDKSheetHeaders() {
+    console.log('[Merge Tool] Loading CDK_DATA sheet headers...');
+    
+    google.script.run
+      .withSuccessHandler(function(result) {
+        if (result.success && result.headers && result.headers.length > 0) {
+          console.log('[Merge Tool] CDK_DATA headers loaded:', result.headers.length, 'columns');
+          
+          // Format as detectedColumns for populateColumnMappings
+          const detectedColumns = {
+            headers: result.headers,
+            stockColumn: undefined,
+            typeColumn: undefined,
+            frontGPColumn: undefined,
+            backGPColumn: undefined,
+            totalGPColumn: undefined
+          };
+          
+          // Populate the configuration dropdowns
+          populateColumnMappings(detectedColumns);
+          
+          // Update status with row count
+          const statusElement = document.getElementById('cdk-sheet-status');
+          if (statusElement) {
+            statusElement.innerHTML =
+              '<div class="success-box">✅ CDK_DATA sheet found! ' +
+              result.rowCount + ' records, ' + result.columnCount + ' columns detected. Ready to merge.</div>';
+          }
+          
+        } else {
+          console.error('[Merge Tool] Failed to load CDK_DATA headers:', result.error);
+          showToast('Could not load column headers from CDK_DATA sheet: ' + result.error, 'error');
+        }
+      })
+      .withFailureHandler(function(error) {
+        console.error('[Merge Tool] Error loading CDK_DATA headers:', error);
+        showToast('Error loading sheet headers: ' + error.message, 'error');
+      })
+      .getCDKDataHeaders();
   }
 
   /**
@@ -376,16 +423,16 @@
 
   /**
    * Validate configuration before starting merge
+   * CRITICAL FIX: Support both file upload and CDK_DATA sheet workflows
    * @returns {boolean} True if valid
    */
   function validateConfiguration() {
     const config = getConfiguration();
 
-    if (!config.fileId) {
-      showToast('No file uploaded', 'error');
-      return false;
-    }
-
+    // CRITICAL FIX: Don't require fileId if CDK_DATA sheet exists
+    // The validation will be done server-side in startMergeProcess
+    // For now, just check for duplicate columns
+    
     // Check for duplicate column selections
     const columns = Object.values(config.columnMapping);
     const uniqueColumns = new Set(columns);
