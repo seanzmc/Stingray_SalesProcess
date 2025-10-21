@@ -445,8 +445,102 @@ function startMergeProcess(config) {
     updateProgress(sessionId, 85, 'Calculating statistics...', {});
     const stats = calculateSummaryStatistics(mergedRecords, matchResults);
     
-    // Step 7: Prepare results for review
-    updateProgress(sessionId, 95, 'Preparing results...', {});
+    // Step 7: Check if we're using CDK_DATA sheet workflow (bypass cache for large datasets)
+    const usingCDKSheet = cdkSheet !== null;
+    
+    if (usingCDKSheet && mergedRecords.length > 50) {
+      // OPTIMIZATION: For CDK_DATA sheet workflow with large datasets, write directly to output
+      // This bypasses the cache size limit (90 KB) which is hit with ~50+ records
+      logInfo('startMergeProcess', 'Large dataset detected with CDK_DATA sheet - writing directly to output', {
+        recordCount: mergedRecords.length,
+        skipCache: true
+      });
+      
+      updateProgress(sessionId, 95, 'Writing results to sheet...', {});
+      
+      const unmatchedReports = {
+        salesLog: matchResults.unmatchedSalesLog,
+        cdk: matchResults.unmatchedCDK
+      };
+      
+      // Write output directly
+      const outputResult = generateMergedOutput(mergedRecords, stats, unmatchedReports);
+      
+      if (!outputResult.success) {
+        throw new Error('Failed to generate output: ' + (outputResult.error || 'Unknown reason'));
+      }
+      
+      // Create merge log entry
+      try {
+        const cdkFileName = getCachedData(sessionId, 'cdkFileName') || 'CDK_DATA Sheet';
+        const duration = (Date.now() - startTime) / 1000;
+        
+        createMergeLogEntry({
+          timestamp: new Date().toISOString(),
+          user: Session.getActiveUser().getEmail(),
+          salesLogFile: 'Current Sheet',
+          cdkFile: cdkFileName,
+          totalRecords: stats.totalRecords,
+          matched: stats.mergedRecords,
+          unmatchedSL: stats.unmatchedSalesLog,
+          unmatchedCDK: stats.unmatchedCDK,
+          matchRate: stats.matchRate,
+          duration: duration,
+          status: 'Success'
+        });
+      } catch (logError) {
+        logWarning('startMergeProcess', 'Merge log entry creation failed but continuing: ' + logError.message);
+      }
+      
+      // Clean up session
+      try {
+        cleanupSession(sessionId);
+      } catch (cleanupError) {
+        logWarning('startMergeProcess', 'Session cleanup warning: ' + cleanupError.message);
+      }
+      
+      updateProgress(sessionId, 100, 'Merge complete!', {
+        duration: ((Date.now() - startTime) / 1000).toFixed(2),
+        matchRate: stats.matchRate,
+        totalRecords: stats.totalRecords,
+        matched: stats.mergedRecords,
+        results: {
+          totalRecords: stats.totalRecords || 0,
+          matchedRecords: stats.mergedRecords || 0,
+          totalGP: stats.financialSummary ? stats.financialSummary.totalGP : 0,
+          unmatchedCount: stats.unmatchedSalesLog || 0,
+          reviewRecords: [],
+          matchRate: stats.matchRate || 0,
+          sheetUrl: outputResult.sheetUrl,
+          sheetName: outputResult.sheetName,
+          directWrite: true
+        }
+      });
+      
+      const duration = (Date.now() - startTime) / 1000;
+      
+      logInfo('startMergeProcess', 'Merge completed with direct write', {
+        duration: duration,
+        matchRate: stats.matchRate,
+        sheetName: outputResult.sheetName
+      });
+      
+      return {
+        success: true,
+        results: {
+          stats: stats,
+          validation: validation,
+          needsReview: validation.flaggedForReview > 0,
+          duration: duration,
+          sheetUrl: outputResult.sheetUrl,
+          sheetName: outputResult.sheetName,
+          directWrite: true
+        }
+      };
+    }
+    
+    // LEGACY PATH: Small datasets or file upload workflow - use cache + confirmation
+    updateProgress(sessionId, 95, 'Preparing results for review...', {});
     
     const results = {
       mergedRecords: mergedRecords,

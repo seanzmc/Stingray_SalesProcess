@@ -547,10 +547,20 @@
       clearInterval(progressInterval);
       resultsRetryCount = 0;
       
-      // Wait a moment then show results
-      setTimeout(function() {
-        displayResults(progress.results);
-      }, 500);
+      // OPTIMIZATION: Check if direct write was used (large dataset bypass)
+      if (progress.results.directWrite) {
+        console.log('[Merge Tool] Direct write detected - skipping confirmation step');
+        
+        // Wait a moment then show completion
+        setTimeout(function() {
+          onDirectWriteComplete(progress.results);
+        }, 500);
+      } else {
+        // Standard workflow: Wait a moment then show results for confirmation
+        setTimeout(function() {
+          displayResults(progress.results);
+        }, 500);
+      }
     } else if (progress.status === 'error') {
       clearInterval(progressInterval);
       resultsRetryCount = 0; // Reset on error
@@ -758,6 +768,41 @@
   // ========================================================================
   // RESULTS DISPLAY
   // ========================================================================
+
+  /**
+   * Handle direct write completion (bypasses confirmation step)
+   * Used for large datasets with CDK_DATA sheet workflow
+   * @param {Object} results - Merge results with directWrite flag
+   */
+  function onDirectWriteComplete(results) {
+    console.log('[Merge Tool] Direct write completed:', results);
+    
+    showLoading(false);
+    
+    // Update final statistics directly from results
+    document.getElementById('final-processed').textContent = results.totalRecords || 0;
+    document.getElementById('final-matched').textContent = results.matchedRecords || 0;
+    document.getElementById('final-merged').textContent = results.matchedRecords || 0;
+    document.getElementById('final-unmatched').textContent = results.unmatchedCount || 0;
+    
+    const processingTime = Math.round((Date.now() - startTime) / 1000);
+    document.getElementById('processing-time').textContent = processingTime + 's';
+    
+    const now = new Date();
+    document.getElementById('completion-time').textContent =
+      `Completed at ${now.toLocaleTimeString()} on ${now.toLocaleDateString()}`;
+
+    // Show/hide unmatched section
+    if (results.unmatchedCount > 0) {
+      document.getElementById('unmatched-section').style.display = 'block';
+    } else {
+      document.getElementById('unmatched-section').style.display = 'none';
+    }
+
+    // Show completion step (skip confirmation)
+    showStep(5);
+    showToast('Merge completed successfully! ' + results.matchedRecords + ' records merged.', 'success');
+  }
 
   /**
    * Display merge results
