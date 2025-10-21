@@ -580,27 +580,20 @@ function formatPercentage(value) {
 
 /**
  * Formats a date consistently (YYYY-MM-DD HH:MM:SS)
- * 
+ * Assumes standardized date input from CDK_DATA sheet
+ *
  * @param {Date|string} date - Date to format
- * @returns {string} Formatted date string
+ * @returns {string} Formatted date string or empty string if invalid
  */
 function formatDate(date) {
   try {
-    if (!date) {
-      return '';
-    }
+    if (!date) return '';
     
-    let dateObj;
-    if (typeof date === 'string') {
-      dateObj = new Date(date);
-    } else if (date instanceof Date) {
-      dateObj = date;
-    } else {
-      return String(date);
-    }
+    const dateObj = date instanceof Date ? date : new Date(date);
     
+    // Simple validation
     if (isNaN(dateObj.getTime())) {
-      return String(date);
+      return '';
     }
     
     const year = dateObj.getFullYear();
@@ -613,7 +606,7 @@ function formatDate(date) {
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
     
   } catch (error) {
-    logWarning('formatDate', 'Could not format date: ' + error.message, { date: date });
-    return String(date);
+    logWarning('formatDate', 'Date formatting error', { date });
+    return '';
   }
 }

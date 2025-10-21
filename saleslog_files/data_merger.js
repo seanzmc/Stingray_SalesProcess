@@ -7,6 +7,13 @@
  */
 
 /**
+ * String utility functions provided by utilities_string.js:
+ * - normalizeStockNumber() - Stock number normalization
+ * - stringSimilarity() - String similarity with threshold support
+ * - levenshteinDistance() - Edit distance calculation (internal use)
+ */
+
+/**
  * Merges matched records from stock_matcher output
  * Combines sales log and CDK data for each matched pair
  * 
@@ -98,14 +105,14 @@ function enrichSalesLogRecord(salesLogRecord, cdkRecord) {
 
     // Validate salesperson name similarity
     if (salesLogRecord.salesperson && cdkRecord.salesperson) {
-      if (!stringSimilarity(salesLogRecord.salesperson, cdkRecord.salesperson)) {
+      if (!stringSimilarity(salesLogRecord.salesperson, cdkRecord.salesperson, {threshold: 0.7, returnBoolean: true})) {
         validationIssues.push('Salesperson names differ significantly');
       }
     }
 
     // Validate customer name similarity
     if (salesLogRecord.customerLastName && cdkRecord.customerLastName) {
-      if (!stringSimilarity(salesLogRecord.customerLastName, cdkRecord.customerLastName)) {
+      if (!stringSimilarity(salesLogRecord.customerLastName, cdkRecord.customerLastName, {threshold: 0.7, returnBoolean: true})) {
         validationIssues.push('Customer names differ significantly');
       }
     }
@@ -439,81 +446,4 @@ function calculateSummaryStatistics(mergedRecords, matchResults) {
       error: error.message
     };
   }
-}
-
-/**
- * Normalizes stock numbers for comparison
- * Removes leading zeros and converts to uppercase
- * 
- * @param {string} stockNumber - Stock number to normalize
- * @returns {string} Normalized stock number
- * @private
- */
-function normalizeStockNumber(stockNumber) {
-  if (!stockNumber) return '';
-  return String(stockNumber).toUpperCase().replace(/^0+/, '');
-}
-
-/**
- * Checks string similarity between two strings
- * Returns true if strings are similar enough (>70% match)
- * 
- * @param {string} str1 - First string
- * @param {string} str2 - Second string
- * @returns {boolean} True if strings are similar
- * @private
- */
-function stringSimilarity(str1, str2) {
-  if (!str1 || !str2) return true; // Allow null/empty values
-  
-  const s1 = String(str1).toLowerCase().trim();
-  const s2 = String(str2).toLowerCase().trim();
-  
-  if (s1 === s2) return true;
-  
-  // Check if one contains the other
-  if (s1.includes(s2) || s2.includes(s1)) return true;
-  
-  // Calculate Levenshtein distance
-  const distance = levenshteinDistance(s1, s2);
-  const maxLength = Math.max(s1.length, s2.length);
-  const similarity = (maxLength - distance) / maxLength;
-  
-  return similarity >= 0.7; // 70% similarity threshold
-}
-
-/**
- * Calculates Levenshtein distance between two strings
- * 
- * @param {string} str1 - First string
- * @param {string} str2 - Second string
- * @returns {number} Levenshtein distance
- * @private
- */
-function levenshteinDistance(str1, str2) {
-  const matrix = [];
-  
-  for (let i = 0; i <= str2.length; i++) {
-    matrix[i] = [i];
-  }
-  
-  for (let j = 0; j <= str1.length; j++) {
-    matrix[0][j] = j;
-  }
-  
-  for (let i = 1; i <= str2.length; i++) {
-    for (let j = 1; j <= str1.length; j++) {
-      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
-        );
-      }
-    }
-  }
-  
-  return matrix[str2.length][str1.length];
 }

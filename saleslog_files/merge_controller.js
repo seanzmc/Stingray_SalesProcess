@@ -341,12 +341,6 @@ function startMergeProcess(config) {
             coverage: cdkSheetData.detectionReport.coverage + '%',
             mappedFields: Object.keys(columnMap).length
           });
-          
-          if (cdkSheetData.detectionReport.lowConfidenceMatches.length > 0) {
-            logWarning('startMergeProcess', 'Low confidence matches found', {
-              matches: cdkSheetData.detectionReport.lowConfidenceMatches
-            });
-          }
         }
         
         // Process CDK data with column map (either user-provided or auto-detected)
@@ -631,76 +625,23 @@ function confirmMerge(sessionId) {
   try {
     logInfo('confirmMerge', 'Starting merge confirmation', { sessionId });
     
-    // STEP 1: Retrieve results using dual-path strategy
-    logInfo('confirmMerge', 'STEP 1: Retrieving merge results', { sessionId });
-    let results = null;
-    
-    // PRIMARY: Try to get results from progress object first (follows getMergeStatus pattern)
-    try {
-      const cache = CacheService.getScriptCache();
-      const progressKey = `merge_progress_${sessionId}`;
-      const progressJson = cache.get(progressKey);
-      
-      if (progressJson) {
-        const progress = JSON.parse(progressJson);
-        
-        // Check if progress indicates completion and results are available
-        if (progress.status === 'complete' && progress.stats && progress.stats.results) {
-          // Progress exists and shows completion - retrieve full results from cache
-          results = getCachedData(sessionId, 'mergeResults');
-          
-          if (results) {
-            logInfo('confirmMerge', 'Retrieved results from progress-indicated cache', {
-              hasMergedRecords: !!results.mergedRecords,
-              hasStats: !!results.stats,
-              mergedRecordsLength: results.mergedRecords ? results.mergedRecords.length : 0
-            });
-          }
-        }
-      }
-    } catch (progressError) {
-      logWarning('confirmMerge', 'Could not check progress object, trying fallback', {
-        error: progressError.message
-      });
-    }
-    
-    // FALLBACK: Try cache directly if progress path didn't work
+    // STEP 1: Retrieve results from cache
+    logInfo('confirmMerge', 'Retrieving merge results', { sessionId });
+
+    const results = getCachedData(sessionId, 'mergeResults');
+
     if (!results) {
-      results = getCachedData(sessionId, 'mergeResults');
-      
-      if (results) {
-        logInfo('confirmMerge', 'Retrieved results from cache fallback', {
-          hasMergedRecords: !!results.mergedRecords,
-          hasStats: !!results.stats,
-          hasUnmatchedReports: !!results.unmatchedReports,
-          mergedRecordsLength: results.mergedRecords ? results.mergedRecords.length : 0
-        });
-      }
-    }
-    
-    // Only throw error if BOTH paths failed
-    if (!results) {
-      logError('confirmMerge', new Error('Results not found in either location'), {
-        sessionId: sessionId,
-        checkedProgressPath: true,
-        checkedCacheFallback: true,
-        possibleCause: 'Cache size limit exceeded or data expired'
-      });
-      
-      // Enhanced error message with diagnostic information
       throw new Error(
         'Merge results not found in cache. This may occur if:\n' +
-        '1. The merge results exceeded the cache size limit (100KB)\n' +
-        '2. The cache data has expired (6 hour TTL)\n' +
-        '3. The merge process did not complete successfully\n\n' +
-        'Please run the merge process again. The system now uses chunking to handle large datasets.'
+        '1. The cache data has expired (6 hour TTL)\n' +
+        '2. The merge process did not complete successfully\n\n' +
+        'Please run the merge process again.'
       );
     }
-    
-    logInfo('confirmMerge', 'Results successfully retrieved via dual-path strategy', {
+
+    logInfo('confirmMerge', 'Results retrieved successfully', {
       hasMergedRecords: !!results.mergedRecords,
       hasStats: !!results.stats,
-      hasUnmatchedReports: !!results.unmatchedReports,
       mergedRecordsLength: results.mergedRecords ? results.mergedRecords.length : 0
     });
     
@@ -1212,57 +1153,17 @@ function processSalesLogSheet(salesLogConfig) {
   }
 }
 // ==================== HEADER DETECTION AND MAPPING FUNCTIONS ====================
-// Phase 1: Core header detection and mapping functions for dynamic CDK data processing
+// Phase 3: Simplified header detection for standardized CDK exports
+// Note: levenshteinDistance() is available from utilities_string.js if needed
 
 /**
- * Calculates Levenshtein distance between two strings
- * Used for fuzzy matching of header names
- * 
- * @private
- * @param {string} str1 - First string
- * @param {string} str2 - Second string
- * @returns {number} Edit distance between strings
- */
-function levenshteinDistance(str1, str2) {
-  const len1 = str1.length;
-  const len2 = str2.length;
-  const matrix = [];
-  
-  // Initialize matrix
-  for (let i = 0; i <= len1; i++) {
-    matrix[i] = [i];
-  }
-  for (let j = 0; j <= len2; j++) {
-    matrix[0][j] = j;
-  }
-  
-  // Calculate distances
-  for (let i = 1; i <= len1; i++) {
-    for (let j = 1; j <= len2; j++) {
-      if (str1.charAt(i - 1) === str2.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1, // substitution
-          matrix[i][j - 1] + 1,     // insertion
-          matrix[i - 1][j] + 1      // deletion
-        );
-      }
-    }
-  }
-  
-  return matrix[len1][len2];
-}
-
-/**
- * Matches a normalized header to expected field names using priority-based matching
- * 
+ * Matches a normalized header to expected field names
+ * Simplified for standardized CDK exports with exact match + essential synonyms only
+ *
  * Priority levels:
  * 1. Exact match (case-insensitive)
- * 2. Synonym match using predefined synonyms
- * 3. Partial match (contains keyword)
- * 4. Fuzzy match using Levenshtein distance
- * 
+ * 2. Essential synonym match (critical variations only)
+ *
  * @private
  * @param {string} normalizedHeader - Normalized header string (lowercase, no special chars)
  * @param {Object} expectedFields - Map of expected field names
@@ -1270,28 +1171,6 @@ function levenshteinDistance(str1, str2) {
  */
 function matchHeaderName(normalizedHeader, expectedFields) {
   if (!normalizedHeader) return null;
-  
-  // Define synonym map for common header variations
-  const HEADER_SYNONYMS = {
-    'stockno': ['stock no', 'stock number', 'stock #', 'stock', 'stk no', 'stk #', 'stocknum'],
-    'stocktype': ['stock type', 'type', 'new/used', 'condition', 'newused', 'vehicletype'],
-    'frontgp': ['front gp', 'front gross', 'front profit', 'front gp$', 'front', 'frontgross', 'frontprofit'],
-    'backgp': ['back gp', 'back gross', 'back profit', 'back gp$', 'back', 'backgross', 'backprofit', 'fni'],
-    'totalgp': ['total gp', 'gp$', 'gp', 'total gross', 'total profit', 'gross profit', 'totalgross', 'totalprofit', 'gptotal'],
-    'contractdate': ['contract date', 'date', 'sale date', 'sold date', 'saledate', 'solddate'],
-    'customer': ['customer', 'customer name', 'buyer', 'purchaser', 'customername', 'customerlastname'],
-    'model': ['model', 'vehicle model', 'car model', 'vehiclemodel'],
-    'salesperson': ['salesperson', 'sales person', 'salesman', 'saleswoman', 'seller', 'salesrep', 'rep'],
-    'dealno': ['deal no', 'deal number', 'deal num', 'deal', 'dealnumber', 'dealnum'],
-    'vin': ['vin', 'vehicle vin', 'vin number', 'vehiclevin', 'vinnumber'],
-    'financeins': ['finance ins', 'finance institution', 'lender', 'bank', 'fi', 'financeinstitution'],
-    'fimanager': ['fi manager', 'f&i manager', 'finance manager', 'fimanager', 'financemanager'],
-    'year': ['year', 'model year', 'yr', 'modelyear'],
-    'cashprice': ['cash price', 'price', 'sale price', 'saleprice', 'cashprice'],
-    'trades': ['trades', 'trade', 'trade-in', 'tradein'],
-    'servicecontract': ['service contract', 'warranty', 'service', 'servicecontract'],
-    'term': ['term', 'loan term', 'months', 'loanterm']
-  };
   
   // Priority 1: Exact match (case-insensitive)
   const normalizedExpectedFields = {};
@@ -1306,8 +1185,22 @@ function matchHeaderName(normalizedHeader, expectedFields) {
     };
   }
   
-  // Priority 2: Synonym matching
-  for (const [field, synonyms] of Object.entries(HEADER_SYNONYMS)) {
+  // Priority 2: Essential synonyms only (10-15 critical variations)
+  const ESSENTIAL_SYNONYMS = {
+    'stockno': ['stocknumber', 'stock', 'stkno'],
+    'stocktype': ['type', 'newused', 'condition'],
+    'frontgp': ['frontgross', 'frontprofit'],
+    'backgp': ['backgross', 'backprofit', 'fni'],
+    'totalgp': ['gp', 'grossprofit', 'totalprofit'],
+    'contractdate': ['date', 'saledate'],
+    'customer': ['customername'],
+    'salesperson': ['salesrep', 'rep'],
+    'dealno': ['dealnumber', 'dealnum'],
+    'financeins': ['financeinstitution', 'fi'],
+    'fimanager': ['financemanager']
+  };
+  
+  for (const [field, synonyms] of Object.entries(ESSENTIAL_SYNONYMS)) {
     const normalizedSynonyms = synonyms.map(s => s.toLowerCase().replace(/[^a-z0-9]/g, ''));
     if (normalizedSynonyms.includes(normalizedHeader)) {
       return {
@@ -1317,76 +1210,18 @@ function matchHeaderName(normalizedHeader, expectedFields) {
     }
   }
   
-  // Priority 3: Partial match (contains)
-  for (const field of Object.keys(expectedFields)) {
-    const normalizedField = field.toLowerCase().replace(/[^a-z0-9]/g, '');
-    if (normalizedHeader.includes(normalizedField) || normalizedField.includes(normalizedHeader)) {
-      return {
-        field: field,
-        confidence: 75
-      };
-    }
-  }
-  
-  // Priority 4: Fuzzy match using Levenshtein distance
-  let bestMatch = null;
-  let bestDistance = Infinity;
-  
-  for (const field of Object.keys(expectedFields)) {
-    const normalizedField = field.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const distance = levenshteinDistance(normalizedHeader, normalizedField);
-    if (distance < bestDistance && distance <= 3) { // Max 3 character difference
-      bestDistance = distance;
-      bestMatch = field;
-    }
-  }
-  
-  if (bestMatch) {
-    const confidence = Math.max(50, 100 - (bestDistance * 15));
-    return {
-      field: bestMatch,
-      confidence: confidence
-    };
-  }
-  
   return null; // No match found
 }
 
 /**
- * Load fallback header definitions from data_headers.json
- * @returns {Object} Fallback headers configuration
- */
-function loadFallbackHeaders() {
-  try {
-    // In Apps Script, we'll need to store this in script properties or hardcode
-    // For now, hardcode the expected headers from data_headers.json
-    return {
-      CDK_DATA: {
-        HEADERS: [
-          "Deal No.", "Customer", "VIN", "Stock No.", "Status", "PLC",
-          "Contract Date", "Sale Type", "Year", "Model", "StockType",
-          "Front GP$", "Back GP$", "GP$", "Cash Price", "Trades",
-          "Service Contract", "Finance Institution", "Salesperson",
-          "FI Manager", "Term"
-        ]
-      }
-    };
-  } catch (error) {
-    logError('loadFallbackHeaders', error);
-    return { CDK_DATA: { HEADERS: [] } };
-  }
-}
-
-/**
  * Detects column mapping from header row
- * Maps CDK headers to expected field names using intelligent matching
+ * Simplified for standardized CDK exports - exact match + essential synonyms only
  *
  * @private
  * @param {Array<string>} headers - Column headers from CDK data
- * @param {Object} fallbackHeaders - Reference headers from data_headers.json (optional)
- * @returns {Object} {columnMap, unmatchedHeaders, lowConfidenceMatches, coverage}
+ * @returns {Object} {columnMap, unmatchedHeaders, coverage}
  */
-function detectColumnMapping(headers, fallbackHeaders) {
+function detectColumnMapping(headers) {
   try {
     logInfo('detectColumnMapping', 'Starting header detection', {
       headerCount: headers ? headers.length : 0
@@ -1417,7 +1252,6 @@ function detectColumnMapping(headers, fallbackHeaders) {
     
     const columnMap = {};
     const unmatchedHeaders = [];
-    const lowConfidenceMatches = [];
     
     // Normalize and match each header
     headers.forEach(function(header, index) {
@@ -1432,56 +1266,18 @@ function detectColumnMapping(headers, fallbackHeaders) {
       const match = matchHeaderName(normalized, expectedFields);
       
       if (match) {
-        if (match.confidence >= 80) {
-          // High confidence match - use it
-          columnMap[match.field] = index;
-          logInfo('detectColumnMapping', 'Matched header', {
-            header: header,
-            field: match.field,
-            index: index,
-            confidence: match.confidence
-          });
-        } else if (match.confidence >= 60) {
-          // Medium confidence - flag for review
-          lowConfidenceMatches.push({
-            header: header,
-            field: match.field,
-            index: index,
-            confidence: match.confidence
-          });
-          logWarning('detectColumnMapping', 'Low confidence match', {
-            header: header,
-            field: match.field,
-            confidence: match.confidence
-          });
-        }
+        // Accept any match (confidence 90-100 from simplified matchHeaderName)
+        columnMap[match.field] = index;
+        logInfo('detectColumnMapping', 'Matched header', {
+          header: header,
+          field: match.field,
+          index: index,
+          confidence: match.confidence
+        });
       } else {
         unmatchedHeaders.push({ header: header, index: index });
       }
     });
-    
-    // Use fallback headers from data_headers.json for missing required fields
-    if (fallbackHeaders && fallbackHeaders.CDK_DATA) {
-      const fallback = fallbackHeaders.CDK_DATA.HEADERS;
-      
-      for (const field in expectedFields) {
-        if (!columnMap[field] && expectedFields[field].required) {
-          // Try to find by position in fallback
-          const fallbackIndex = fallback.findIndex(function(h) {
-            const normalized = String(h).trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-            return normalized === field;
-          });
-          
-          if (fallbackIndex !== -1 && fallbackIndex < headers.length) {
-            columnMap[field] = fallbackIndex;
-            logInfo('detectColumnMapping', 'Used fallback mapping', {
-              field: field,
-              index: fallbackIndex
-            });
-          }
-        }
-      }
-    }
     
     const coverage = Object.keys(columnMap).length / Object.keys(expectedFields).length;
     
@@ -1495,7 +1291,6 @@ function detectColumnMapping(headers, fallbackHeaders) {
     return {
       columnMap: columnMap,
       unmatchedHeaders: unmatchedHeaders,
-      lowConfidenceMatches: lowConfidenceMatches,
       coverage: coverage
     };
     
@@ -1646,11 +1441,8 @@ function readCDKDataSheet() {
       );
     }
     
-    // Load fallback headers
-    const fallbackHeaders = loadFallbackHeaders();
-    
-    // Detect column mapping
-    const mappingResult = detectColumnMapping(headers, fallbackHeaders);
+    // Detect column mapping (no fallback logic needed)
+    const mappingResult = detectColumnMapping(headers);
     
     // Validate headers
     const validation = validateCDKHeaders(mappingResult.columnMap);
@@ -1685,8 +1477,7 @@ function readCDKDataSheet() {
       validation: validation,
       detectionReport: {
         coverage: (mappingResult.coverage * 100).toFixed(1),
-        unmatchedHeaders: mappingResult.unmatchedHeaders,
-        lowConfidenceMatches: mappingResult.lowConfidenceMatches
+        unmatchedHeaders: mappingResult.unmatchedHeaders
       }
     };
     
@@ -1695,59 +1486,6 @@ function readCDKDataSheet() {
     throw error;
   }
 }
-
-/**
- * Safely extracts a value from a row using column index
- * Returns default value if column index is undefined or value is empty
- *
- * @private
- * @param {Array} row - Data row array
- * @param {number} columnIndex - Column index to extract from
- * @param {*} defaultValue - Default value if extraction fails
- * @returns {*} Extracted value or default value
- */
-function extractValue(row, columnIndex, defaultValue) {
-  if (columnIndex === undefined || columnIndex === null) {
-    return defaultValue;
-  }
-  const value = row[columnIndex];
-  return (value !== null && value !== undefined && value !== '') ? value : defaultValue;
-}
-
-/**
- * Extracts and parses a numeric value from a row
- * Returns default value if parsing fails or value is not numeric
- * 
- * @private
- * @param {Array} row - Data row array
- * @param {number} columnIndex - Column index to extract from
- * @param {number} defaultValue - Default value if extraction/parsing fails
- * @returns {number} Parsed numeric value or default value
- */
-function extractNumericValue(row, columnIndex, defaultValue) {
-  const value = extractValue(row, columnIndex, null);
-  if (value === null) return defaultValue;
-  const parsed = parseFloat(value);
-  return isNaN(parsed) ? defaultValue : parsed;
-}
-
-/**
- * Extracts and parses an integer value from a row
- * Returns default value if parsing fails or value is not an integer
- * 
- * @private
- * @param {Array} row - Data row array
- * @param {number} columnIndex - Column index to extract from
- * @param {number} defaultValue - Default value if extraction/parsing fails
- * @returns {number} Parsed integer value or default value
- */
-function extractIntValue(row, columnIndex, defaultValue) {
-  const value = extractValue(row, columnIndex, null);
-  if (value === null) return defaultValue;
-  const parsed = parseInt(value);
-  return isNaN(parsed) ? defaultValue : parsed;
-}
-
 
 /**
  * Processes CDK data array and extracts records using dynamic column mapping
@@ -1806,24 +1544,24 @@ function processCDKData(cdkData, columnMap) {
         
         const record = {
           rowNumber: i,
-          contractDate: extractValue(row, columnMap.contractdate, null),
-          customerLastName: extractValue(row, columnMap.customer, ''),
-          stockNo: extractValue(row, columnMap.stockno, ''),
-          model: extractValue(row, columnMap.model, ''),
-          stockType: extractValue(row, columnMap.stocktype, ''),
-          frontGP: extractNumericValue(row, columnMap.frontgp, 0),
-          backGP: extractNumericValue(row, columnMap.backgp, 0),
-          totalGP: extractNumericValue(row, columnMap.totalgp, 0),
-          cashPrice: extractNumericValue(row, columnMap.cashprice, 0),
-          trades: extractNumericValue(row, columnMap.trades, 0),
-          serviceContract: extractNumericValue(row, columnMap.servicecontract, 0),
-          vin: extractValue(row, columnMap.vin, ''),
-          year: extractIntValue(row, columnMap.year, null),
-          financeInstitution: extractValue(row, columnMap.financeins, ''),
-          fiManager: extractValue(row, columnMap.fimanager, ''),
-          term: extractIntValue(row, columnMap.term, null),
-          dealNo: extractValue(row, columnMap.dealno, ''),
-          salesperson: extractValue(row, columnMap.salesperson, '')
+          contractDate: (columnMap.contractdate !== undefined && row[columnMap.contractdate] !== null && row[columnMap.contractdate] !== undefined && row[columnMap.contractdate] !== '') ? row[columnMap.contractdate] : null,
+          customerLastName: (columnMap.customer !== undefined && row[columnMap.customer] !== null && row[columnMap.customer] !== undefined && row[columnMap.customer] !== '') ? row[columnMap.customer] : '',
+          stockNo: (columnMap.stockno !== undefined && row[columnMap.stockno] !== null && row[columnMap.stockno] !== undefined && row[columnMap.stockno] !== '') ? row[columnMap.stockno] : '',
+          model: (columnMap.model !== undefined && row[columnMap.model] !== null && row[columnMap.model] !== undefined && row[columnMap.model] !== '') ? row[columnMap.model] : '',
+          stockType: (columnMap.stocktype !== undefined && row[columnMap.stocktype] !== null && row[columnMap.stocktype] !== undefined && row[columnMap.stocktype] !== '') ? row[columnMap.stocktype] : '',
+          frontGP: (columnMap.frontgp !== undefined && row[columnMap.frontgp] !== null && row[columnMap.frontgp] !== undefined && row[columnMap.frontgp] !== '') ? parseFloat(row[columnMap.frontgp]) || 0 : 0,
+          backGP: (columnMap.backgp !== undefined && row[columnMap.backgp] !== null && row[columnMap.backgp] !== undefined && row[columnMap.backgp] !== '') ? parseFloat(row[columnMap.backgp]) || 0 : 0,
+          totalGP: (columnMap.totalgp !== undefined && row[columnMap.totalgp] !== null && row[columnMap.totalgp] !== undefined && row[columnMap.totalgp] !== '') ? parseFloat(row[columnMap.totalgp]) || 0 : 0,
+          cashPrice: (columnMap.cashprice !== undefined && row[columnMap.cashprice] !== null && row[columnMap.cashprice] !== undefined && row[columnMap.cashprice] !== '') ? parseFloat(row[columnMap.cashprice]) || 0 : 0,
+          trades: (columnMap.trades !== undefined && row[columnMap.trades] !== null && row[columnMap.trades] !== undefined && row[columnMap.trades] !== '') ? parseFloat(row[columnMap.trades]) || 0 : 0,
+          serviceContract: (columnMap.servicecontract !== undefined && row[columnMap.servicecontract] !== null && row[columnMap.servicecontract] !== undefined && row[columnMap.servicecontract] !== '') ? parseFloat(row[columnMap.servicecontract]) || 0 : 0,
+          vin: (columnMap.vin !== undefined && row[columnMap.vin] !== null && row[columnMap.vin] !== undefined && row[columnMap.vin] !== '') ? row[columnMap.vin] : '',
+          year: (columnMap.year !== undefined && row[columnMap.year] !== null && row[columnMap.year] !== undefined && row[columnMap.year] !== '') ? parseInt(row[columnMap.year]) || null : null,
+          financeInstitution: (columnMap.financeins !== undefined && row[columnMap.financeins] !== null && row[columnMap.financeins] !== undefined && row[columnMap.financeins] !== '') ? row[columnMap.financeins] : '',
+          fiManager: (columnMap.fimanager !== undefined && row[columnMap.fimanager] !== null && row[columnMap.fimanager] !== undefined && row[columnMap.fimanager] !== '') ? row[columnMap.fimanager] : '',
+          term: (columnMap.term !== undefined && row[columnMap.term] !== null && row[columnMap.term] !== undefined && row[columnMap.term] !== '') ? parseInt(row[columnMap.term]) || null : null,
+          dealNo: (columnMap.dealno !== undefined && row[columnMap.dealno] !== null && row[columnMap.dealno] !== undefined && row[columnMap.dealno] !== '') ? row[columnMap.dealno] : '',
+          salesperson: (columnMap.salesperson !== undefined && row[columnMap.salesperson] !== null && row[columnMap.salesperson] !== undefined && row[columnMap.salesperson] !== '') ? row[columnMap.salesperson] : ''
         };
         
         if (record.stockNo) {
@@ -2063,12 +1801,13 @@ function updateProgress(sessionId, percent, message, stats = {}) {
 
 /**
  * Stores data in cache for a session
- * Implements chunking strategy for data exceeding 90KB to avoid CacheService 100KB limit
+ * Validates data size and directs users to CDK_DATA sheet workflow for large datasets
  *
  * @private
  * @param {string} sessionId - Session identifier
  * @param {string} key - Data key
  * @param {*} data - Data to store
+ * @throws {Error} If data exceeds cache size limit
  */
 function storeCachedData(sessionId, key, data) {
   try {
@@ -2087,86 +1826,34 @@ function storeCachedData(sessionId, key, data) {
     
     // CacheService has 100KB limit per entry - use 90KB threshold for safety
     const MAX_CACHE_SIZE = 90 * 1024; // 90KB - leave 10KB buffer
-    const CHUNK_SIZE = 80 * 1024; // 80KB per chunk - safe size with buffer
     
-    if (dataSize <= MAX_CACHE_SIZE) {
-      // Data is small enough, store in single entry
-      cache.put(cacheKey, jsonData, 21600); // 6 hours
+    if (dataSize > MAX_CACHE_SIZE) {
+      // Data exceeds cache limit - direct user to recommended workflow
+      const errorMessage =
+        'Data exceeds cache limit (' + (dataSize / 1024).toFixed(2) + ' KB). ' +
+        'Please use the CDK_DATA sheet workflow:\n\n' +
+        '1. In Google Sheets: File > Import > Upload\n' +
+        '2. Choose "Insert new sheet(s)"\n' +
+        '3. Rename the new sheet to "CDK_DATA"\n' +
+        '4. Try the merge again\n\n' +
+        'The CDK_DATA sheet workflow is designed for large datasets and provides better performance.';
       
-      logInfo('storeCachedData', 'Data stored in single cache entry', {
-        key: key,
-        sizeKB: (dataSize / 1024).toFixed(2)
-      });
-    } else {
-      // Data exceeds safe limit, implement chunking strategy
-      logInfo('storeCachedData', 'Data exceeds cache limit, implementing chunking', {
+      logError('storeCachedData', new Error('Data exceeds cache limit'), {
         key: key,
         sizeKB: (dataSize / 1024).toFixed(2),
-        thresholdKB: (MAX_CACHE_SIZE / 1024).toFixed(2)
+        maxSizeKB: (MAX_CACHE_SIZE / 1024).toFixed(2)
       });
       
-      // Calculate number of chunks needed
-      const numChunks = Math.ceil(dataSize / CHUNK_SIZE);
-      
-      // Store metadata about the chunks
-      const metadata = {
-        totalSize: dataSize,
-        numChunks: numChunks,
-        chunkSize: CHUNK_SIZE,
-        timestamp: new Date().getTime()
-      };
-      
-      const metaKey = `${cacheKey}_meta`;
-      cache.put(metaKey, JSON.stringify(metadata), 21600);
-      
-      // Split data into chunks and store each atomically
-      const storedChunks = [];
-      try {
-        for (let i = 0; i < numChunks; i++) {
-          const start = i * CHUNK_SIZE;
-          const end = Math.min(start + CHUNK_SIZE, dataSize);
-          const chunk = jsonData.substring(start, end);
-          const chunkKey = `${cacheKey}_chunk_${i}`;
-          
-          cache.put(chunkKey, chunk, 21600);
-          storedChunks.push(chunkKey);
-          
-          logInfo('storeCachedData', `Stored chunk ${i + 1}/${numChunks}`, {
-            chunkIndex: i,
-            chunkSizeKB: (chunk.length / 1024).toFixed(2)
-          });
-        }
-        
-        logInfo('storeCachedData', 'All chunks stored successfully', {
-          key: key,
-          numChunks: numChunks,
-          totalSizeKB: (dataSize / 1024).toFixed(2)
-        });
-        
-      } catch (chunkError) {
-        // Cleanup partial chunks on failure to maintain atomicity
-        logError('storeCachedData', chunkError, {
-          key: key,
-          failedAtChunk: storedChunks.length,
-          totalChunks: numChunks
-        });
-        
-        // Remove metadata
-        cache.remove(metaKey);
-        
-        // Remove all stored chunks
-        storedChunks.forEach(chunkKey => {
-          try {
-            cache.remove(chunkKey);
-          } catch (cleanupError) {
-            // Log but don't throw - best effort cleanup
-            logWarning('storeCachedData', 'Failed to cleanup chunk: ' + chunkKey);
-          }
-        });
-        
-        throw new Error(`Failed to store chunk ${storedChunks.length} of ${numChunks}. Cache operation aborted.`);
-      }
+      throw new Error(errorMessage);
     }
+    
+    // Data is within limit, store in single entry
+    cache.put(cacheKey, jsonData, 21600); // 6 hours
+    
+    logInfo('storeCachedData', 'Data stored successfully', {
+      key: key,
+      sizeKB: (dataSize / 1024).toFixed(2)
+    });
     
   } catch (error) {
     logError('storeCachedData', error, {
@@ -2180,97 +1867,33 @@ function storeCachedData(sessionId, key, data) {
 
 /**
  * Retrieves data from cache for a session
- * Handles both chunked (large) and single-entry (small) data with backward compatibility
+ * Returns null if data not found or expired
  *
  * @private
  * @param {string} sessionId - Session identifier
  * @param {string} key - Data key
- * @returns {*} Cached data or null
+ * @returns {*} Cached data or null if not found
  */
 function getCachedData(sessionId, key) {
   try {
     const cache = CacheService.getScriptCache();
     const cacheKey = `merge_data_${sessionId}_${key}`;
     
-    // Check for metadata first (indicates chunked data)
-    const metaKey = `${cacheKey}_meta`;
-    const metadataJson = cache.get(metaKey);
+    const data = cache.get(cacheKey);
     
-    if (metadataJson) {
-      // Data was stored in chunks, reassemble it
-      const metadata = JSON.parse(metadataJson);
-      
-      logInfo('getCachedData', 'Retrieving chunked data', {
+    if (data) {
+      logInfo('getCachedData', 'Retrieved cache entry', {
         key: key,
-        numChunks: metadata.numChunks,
-        totalSizeKB: (metadata.totalSize / 1024).toFixed(2)
+        sizeKB: (data.length / 1024).toFixed(2)
       });
-      
-      let reconstructedData = '';
-      let missingChunks = [];
-      
-      // Retrieve and concatenate all chunks
-      for (let i = 0; i < metadata.numChunks; i++) {
-        const chunkKey = `${cacheKey}_chunk_${i}`;
-        const chunk = cache.get(chunkKey);
-        
-        if (!chunk) {
-          missingChunks.push(i);
-          logWarning('getCachedData', `Missing chunk ${i}`, {
-            key: key,
-            chunkIndex: i,
-            totalChunks: metadata.numChunks
-          });
-        } else {
-          reconstructedData += chunk;
-        }
-      }
-      
-      // If any chunks are missing, data is incomplete
-      if (missingChunks.length > 0) {
-        logError('getCachedData', new Error('Incomplete chunked data'), {
-          key: key,
-          missingChunks: missingChunks,
-          totalChunks: metadata.numChunks
-        });
-        return null;
-      }
-      
-      // Verify reconstructed size matches metadata
-      if (reconstructedData.length !== metadata.totalSize) {
-        logError('getCachedData', new Error('Size mismatch after reassembly'), {
-          key: key,
-          expectedSize: metadata.totalSize,
-          actualSize: reconstructedData.length
-        });
-        return null;
-      }
-      
-      logInfo('getCachedData', 'Successfully reassembled chunked data', {
-        key: key,
-        numChunks: metadata.numChunks,
-        reconstructedSizeKB: (reconstructedData.length / 1024).toFixed(2)
-      });
-      
-      return JSON.parse(reconstructedData);
-      
+      return JSON.parse(data);
     } else {
-      // No metadata found - try single entry retrieval (backward compatibility)
-      const data = cache.get(cacheKey);
-      
-      if (data) {
-        logInfo('getCachedData', 'Retrieved single cache entry', {
-          key: key,
-          sizeKB: (data.length / 1024).toFixed(2)
-        });
-        return JSON.parse(data);
-      } else {
-        logInfo('getCachedData', 'No data found in cache', {
-          key: key,
-          sessionId: sessionId
-        });
-        return null;
-      }
+      logInfo('getCachedData', 'No data found in cache', {
+        key: key,
+        sessionId: sessionId,
+        hint: 'Data may have expired (6 hour TTL) or was never stored. For large datasets, use the CDK_DATA sheet workflow.'
+      });
+      return null;
     }
     
   } catch (error) {

@@ -3,9 +3,19 @@
 /**
  * Stock Number Matching Algorithm Module
  * Implements a 3-phase matching approach for reconciling sales log and CDK stock numbers
- * 
+ *
  * @module stock_matcher
  * @requires error_logger
+ * @requires utilities_string
+ */
+
+/**
+ * String utility functions are provided by utilities_string.js:
+ * - normalizeStockNumber() - Normalizes stock numbers for comparison
+ * - normalizeStockType() - Normalizes stock types ('NEW'/'USED')
+ * - extractNumericPortion() - Extracts numeric portion from stock numbers
+ * - calculateStringSimilarity() - Calculates similarity score (0-1) using Levenshtein distance
+ * - levenshteinDistance() - Computes edit distance between strings
  */
 
 /**
@@ -71,7 +81,7 @@ function matchStockNumbers(salesLogRecords, cdkRecords, options = {}) {
         if (matchedCDKIndices.has(j)) continue;
 
         const cdkRecord = cdkRecords[j];
-        const matchResult = performExactMatch(salesRecord, cdkRecord, config);
+        const matchResult = performMatch(salesRecord, cdkRecord, 'exact', config);
 
         if (matchResult.isMatch) {
           matches.push({
@@ -95,7 +105,7 @@ function matchStockNumbers(salesLogRecords, cdkRecords, options = {}) {
           if (matchedCDKIndices.has(j)) continue;
 
           const cdkRecord = cdkRecords[j];
-          const matchResult = performNumericMatch(salesRecord, cdkRecord, config);
+          const matchResult = performMatch(salesRecord, cdkRecord, 'numeric', config);
 
           if (matchResult.isMatch && matchResult.confidence >= config.minConfidence) {
             matches.push({
@@ -124,7 +134,7 @@ function matchStockNumbers(salesLogRecords, cdkRecords, options = {}) {
           if (matchedCDKIndices.has(j)) continue;
 
           const cdkRecord = cdkRecords[j];
-          const matchResult = performPartialMatch(salesRecord, cdkRecord, config);
+          const matchResult = performMatch(salesRecord, cdkRecord, 'partial', config);
 
           if (matchResult.isMatch && matchResult.confidence > bestConfidence) {
             bestMatch = matchResult;
@@ -179,21 +189,28 @@ function matchStockNumbers(salesLogRecords, cdkRecords, options = {}) {
 }
 
 /**
- * Performs exact match comparison between two stock numbers
- * 
+ * Performs stock number matching with specified match type
+ * Consolidates exact, numeric, and partial matching into a single parameterized function
+ * Uses shared utility functions from utilities_string.js for all string operations
+ *
  * @private
- * @param {Object} salesRecord - Sales log record
- * @param {Object} cdkRecord - CDK record
- * @param {Object} config - Configuration object
- * 
- * @returns {Object} Match result with isMatch boolean and confidence score
+ * @param {Object} salesRecord - Sales log record with stockNumber and stockType
+ * @param {Object} cdkRecord - CDK record with stockNo and stockType
+ * @param {string} matchType - Type of match to perform: 'exact', 'numeric', or 'partial'
+ * @param {Object} config - Configuration object with validateStockType, minConfidence
+ *
+ * @returns {Object} Match result:
+ *   - isMatch {boolean} - Whether the records match
+ *   - confidence {number} - Match confidence score (0-100)
+ *   - normalizedStock {string|null} - Normalized stock number if matched, null otherwise
  */
-function performExactMatch(salesRecord, cdkRecord, config) {
+function performMatch(salesRecord, cdkRecord, matchType, config) {
   try {
+    // Normalize stock numbers using shared utility
     const salesStock = normalizeStockNumber(salesRecord.stockNumber);
     const cdkStock = normalizeStockNumber(cdkRecord.stockNo);
 
-    // Check stock type match if validation is enabled
+    // Validate stock type if enabled
     if (config.validateStockType) {
       const salesType = normalizeStockType(salesRecord.stockType);
       const cdkType = normalizeStockType(cdkRecord.stockType);
@@ -202,304 +219,46 @@ function performExactMatch(salesRecord, cdkRecord, config) {
       }
     }
 
-    // Perform exact comparison
-    if (salesStock === cdkStock) {
-      return {
-        isMatch: true,
-        confidence: 100,
-        normalizedStock: salesStock
-      };
-    }
-
-    return { isMatch: false, confidence: 0, normalizedStock: null };
-
-  } catch (error) {
-    logError('performExactMatch', error);
-    return { isMatch: false, confidence: 0, normalizedStock: null };
-  }
-}
-
-/**
- * Performs numeric match comparison by extracting and comparing numeric portions
- * 
- * @private
- * @param {Object} salesRecord - Sales log record
- * @param {Object} cdkRecord - CDK record
- * @param {Object} config - Configuration object
- * 
- * @returns {Object} Match result with isMatch boolean and confidence score
- */
-function performNumericMatch(salesRecord, cdkRecord, config) {
-  try {
-    const salesNumeric = extractNumericPortion(salesRecord.stockNumber);
-    const cdkNumeric = extractNumericPortion(cdkRecord.stockNo);
-
-    // Check stock type match if validation is enabled
-    if (config.validateStockType) {
-      const salesType = normalizeStockType(salesRecord.stockType);
-      const cdkType = normalizeStockType(cdkRecord.stockType);
-      if (salesType !== cdkType) {
-        return { isMatch: false, confidence: 0, normalizedStock: null };
-      }
-    }
-
-    if (!salesNumeric || !cdkNumeric) {
-      return { isMatch: false, confidence: 0, normalizedStock: null };
-    }
-
-    // Compare numeric portions
-    if (salesNumeric === cdkNumeric) {
-      return {
-        isMatch: true,
-        confidence: 95,
-        normalizedStock: normalizeStockNumber(salesRecord.stockNumber)
-      };
-    }
-
-    return { isMatch: false, confidence: 0, normalizedStock: null };
-
-  } catch (error) {
-    logError('performNumericMatch', error);
-    return { isMatch: false, confidence: 0, normalizedStock: null };
-  }
-}
-
-/**
- * Performs partial/fuzzy match using string similarity algorithms
- * 
- * @private
- * @param {Object} salesRecord - Sales log record
- * @param {Object} cdkRecord - CDK record
- * @param {Object} config - Configuration object
- * 
- * @returns {Object} Match result with isMatch boolean and confidence score
- */
-function performPartialMatch(salesRecord, cdkRecord, config) {
-  try {
-    const salesStock = normalizeStockNumber(salesRecord.stockNumber);
-    const cdkStock = normalizeStockNumber(cdkRecord.stockNo);
-
-    // Check stock type match if validation is enabled
-    if (config.validateStockType) {
-      const salesType = normalizeStockType(salesRecord.stockType);
-      const cdkType = normalizeStockType(cdkRecord.stockType);
-      if (salesType !== cdkType) {
-        return { isMatch: false, confidence: 0, normalizedStock: null };
-      }
-    }
-
-    // Calculate similarity score using Levenshtein distance
-    const similarity = calculateStringSimilarity(salesStock, cdkStock);
-    const confidence = Math.round(similarity * 100);
-
-    // Require at least 75% similarity for partial matches
-    if (confidence >= 75) {
-      return {
-        isMatch: true,
-        confidence: confidence,
-        normalizedStock: salesStock
-      };
-    }
-
-    return { isMatch: false, confidence: 0, normalizedStock: null };
-
-  } catch (error) {
-    logError('performPartialMatch', error);
-    return { isMatch: false, confidence: 0, normalizedStock: null };
-  }
-}
-
-/**
- * Normalizes a stock number for comparison
- * Handles: trim, uppercase, remove spaces/dashes, convert to string
- * 
- * @param {*} stockNum - Stock number to normalize
- * 
- * @returns {string} Normalized stock number
- */
-function normalizeStockNumber(stockNum) {
-  try {
-    if (stockNum === null || stockNum === undefined) {
-      return '';
-    }
-
-    return String(stockNum)
-      .trim()
-      .toUpperCase()
-      .replace(/[\s\-\.]/g, '') // Remove spaces, dashes, and dots
-      .replace(/[^A-Z0-9]/g, ''); // Remove special characters except alphanumeric
-
-  } catch (error) {
-    logError('normalizeStockNumber', error);
-    return '';
-  }
-}
-
-/**
- * Normalizes stock type for comparison
- * 
- * @private
- * @param {*} stockType - Stock type to normalize
- * 
- * @returns {string} Normalized stock type ('NEW' or 'USED')
- */
-function normalizeStockType(stockType) {
-  try {
-    if (!stockType) return '';
-    
-    const normalized = String(stockType).trim().toUpperCase();
-    
-    // Map common variations
-    if (normalized.includes('NEW')) return 'NEW';
-    if (normalized.includes('USED')) return 'USED';
-    
-    return normalized;
-
-  } catch (error) {
-    logError('normalizeStockType', error);
-    return '';
-  }
-}
-
-/**
- * Extracts the numeric portion from a stock number
- * Handles prefixes (N/U/R) and suffixes
- * 
- * @param {*} stockNum - Stock number to extract from
- * 
- * @returns {string} Extracted numeric portion without leading zeros
- */
-function extractNumericPortion(stockNum) {
-  try {
-    if (stockNum === null || stockNum === undefined) {
-      return '';
-    }
-
-    const normalized = normalizeStockNumber(stockNum);
-    
-    // Remove common prefixes (N, U, R, etc.)
-    let numeric = normalized.replace(/^[A-Z]+/, '');
-    
-    // Remove common suffixes (letters at the end)
-    numeric = numeric.replace(/[A-Z]+$/, '');
-    
-    // Remove leading zeros but keep at least one digit
-    numeric = numeric.replace(/^0+/, '') || '0';
-    
-    return numeric;
-
-  } catch (error) {
-    logError('extractNumericPortion', error);
-    return '';
-  }
-}
-
-/**
- * Calculates match confidence based on match type and similarity
- * 
- * @param {string} salesLogStock - Normalized sales log stock number
- * @param {string} cdkStock - Normalized CDK stock number
- * @param {string} matchType - Type of match ('exact', 'numeric', or 'partial')
- * 
- * @returns {number} Confidence score from 0-100
- */
-function calculateMatchConfidence(salesLogStock, cdkStock, matchType) {
-  try {
-    if (!salesLogStock || !cdkStock) {
-      return 0;
-    }
-
+    // Perform match based on type
     switch (matchType) {
       case 'exact':
-        return salesLogStock === cdkStock ? 100 : 0;
+        // Exact match comparison
+        if (salesStock === cdkStock) {
+          return { isMatch: true, confidence: 100, normalizedStock: salesStock };
+        }
+        break;
 
       case 'numeric':
-        const salesNumeric = extractNumericPortion(salesLogStock);
-        const cdkNumeric = extractNumericPortion(cdkStock);
-        return salesNumeric === cdkNumeric ? 95 : 0;
+        // Numeric portion match
+        const salesNumeric = extractNumericPortion(salesRecord.stockNumber);
+        const cdkNumeric = extractNumericPortion(cdkRecord.stockNo);
+        
+        if (salesNumeric && cdkNumeric && salesNumeric === cdkNumeric) {
+          return { isMatch: true, confidence: 95, normalizedStock: salesStock };
+        }
+        break;
 
       case 'partial':
-        return Math.round(calculateStringSimilarity(salesLogStock, cdkStock) * 100);
+        // Fuzzy match using string similarity
+        const similarity = calculateStringSimilarity(salesStock, cdkStock);
+        const confidence = Math.round(similarity * 100);
+        
+        // Require at least 75% similarity for partial matches
+        if (confidence >= 75) {
+          return { isMatch: true, confidence: confidence, normalizedStock: salesStock };
+        }
+        break;
 
       default:
-        return 0;
+        logError('performMatch', new Error('Invalid match type: ' + matchType));
+        return { isMatch: false, confidence: 0, normalizedStock: null };
     }
+
+    return { isMatch: false, confidence: 0, normalizedStock: null };
 
   } catch (error) {
-    logError('calculateMatchConfidence', error);
-    return 0;
-  }
-}
-
-/**
- * Calculates string similarity using Levenshtein distance algorithm
- * Returns a value between 0 and 1, where 1 is identical
- * 
- * @private
- * @param {string} str1 - First string
- * @param {string} str2 - Second string
- * 
- * @returns {number} Similarity score between 0 and 1
- */
-function calculateStringSimilarity(str1, str2) {
-  try {
-    if (!str1 || !str2) return 0;
-
-    const len1 = str1.length;
-    const len2 = str2.length;
-    const maxLen = Math.max(len1, len2);
-
-    if (maxLen === 0) return 1;
-
-    const distance = levenshteinDistance(str1, str2);
-    return 1 - (distance / maxLen);
-
-  } catch (error) {
-    logError('calculateStringSimilarity', error);
-    return 0;
-  }
-}
-
-/**
- * Calculates Levenshtein distance between two strings
- * 
- * @private
- * @param {string} str1 - First string
- * @param {string} str2 - Second string
- * 
- * @returns {number} Levenshtein distance
- */
-function levenshteinDistance(str1, str2) {
-  try {
-    const len1 = str1.length;
-    const len2 = str2.length;
-    const matrix = [];
-
-    // Initialize first column and row
-    for (let i = 0; i <= len1; i++) {
-      matrix[i] = [i];
-    }
-    for (let j = 0; j <= len2; j++) {
-      matrix[0][j] = j;
-    }
-
-    // Fill in the rest of the matrix
-    for (let i = 1; i <= len1; i++) {
-      for (let j = 1; j <= len2; j++) {
-        const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j] + 1,      // deletion
-          matrix[i][j - 1] + 1,      // insertion
-          matrix[i - 1][j - 1] + cost // substitution
-        );
-      }
-    }
-
-    return matrix[len1][len2];
-
-  } catch (error) {
-    logError('levenshteinDistance', error);
-    return 0;
+    logError('performMatch', error, { matchType });
+    return { isMatch: false, confidence: 0, normalizedStock: null };
   }
 }
 
