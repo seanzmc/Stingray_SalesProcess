@@ -268,28 +268,93 @@ function startMergeProcess(config) {
       logInfo('startMergeProcess', 'Reading CDK data from CDK_DATA sheet...');
       
       try {
-        const cdkSheetData = readCDKDataSheet();
+        // Check if user provided column mappings via UI
+        const hasUserMapping = config.columnMapping &&
+          (config.columnMapping.stockColumn !== undefined ||
+           config.columnMapping.typeColumn !== undefined ||
+           config.columnMapping.frontGPColumn !== undefined ||
+           config.columnMapping.backGPColumn !== undefined ||
+           config.columnMapping.totalGPColumn !== undefined);
         
-        // Store column map for processCDKData
-        columnMap = cdkSheetData.columnMap;
+        let cdkSheetData;
         
-        // Log detection report
-        logInfo('startMergeProcess', 'Column detection complete', {
-          coverage: cdkSheetData.detectionReport.coverage + '%',
-          mappedFields: Object.keys(columnMap).length
-        });
-        
-        if (cdkSheetData.detectionReport.lowConfidenceMatches.length > 0) {
-          logWarning('startMergeProcess', 'Low confidence matches found', {
-            matches: cdkSheetData.detectionReport.lowConfidenceMatches
+        if (hasUserMapping) {
+          // FIXED: User provided column selections - use them instead of auto-detection
+          logInfo('startMergeProcess', 'Using user-provided column mappings', {
+            stockColumn: config.columnMapping.stockColumn,
+            typeColumn: config.columnMapping.typeColumn,
+            frontGPColumn: config.columnMapping.frontGPColumn,
+            backGPColumn: config.columnMapping.backGPColumn,
+            totalGPColumn: config.columnMapping.totalGPColumn
           });
+          
+          // Read raw data from CDK_DATA sheet without auto-detection
+          const lastRow = cdkSheet.getLastRow();
+          const lastCol = cdkSheet.getLastColumn();
+          
+          if (lastRow < 2) {
+            throw new Error('CDK_DATA sheet appears to be empty or has no data rows.');
+          }
+          
+          const allData = cdkSheet.getRange(1, 1, lastRow, lastCol).getValues();
+          
+          // Construct columnMap from user selections
+          columnMap = {};
+          
+          if (config.columnMapping.stockColumn !== undefined && config.columnMapping.stockColumn !== null) {
+            columnMap.stockno = config.columnMapping.stockColumn;
+          }
+          if (config.columnMapping.typeColumn !== undefined && config.columnMapping.typeColumn !== null) {
+            columnMap.stocktype = config.columnMapping.typeColumn;
+          }
+          if (config.columnMapping.frontGPColumn !== undefined && config.columnMapping.frontGPColumn !== null) {
+            columnMap.frontgp = config.columnMapping.frontGPColumn;
+          }
+          if (config.columnMapping.backGPColumn !== undefined && config.columnMapping.backGPColumn !== null) {
+            columnMap.backgp = config.columnMapping.backGPColumn;
+          }
+          if (config.columnMapping.totalGPColumn !== undefined && config.columnMapping.totalGPColumn !== null) {
+            columnMap.totalgp = config.columnMapping.totalGPColumn;
+          }
+          
+          // Create cdkSheetData object with user mappings
+          cdkSheetData = {
+            data: allData,
+            columnMap: columnMap
+          };
+          
+          logInfo('startMergeProcess', 'User column mappings applied', {
+            mappedFields: Object.keys(columnMap).length,
+            mappings: columnMap
+          });
+          
+        } else {
+          // No user mappings - fallback to auto-detection (existing behavior)
+          logInfo('startMergeProcess', 'No user mappings found, using auto-detection');
+          cdkSheetData = readCDKDataSheet();
+          
+          // Store column map for processCDKData
+          columnMap = cdkSheetData.columnMap;
+          
+          // Log detection report
+          logInfo('startMergeProcess', 'Column detection complete', {
+            coverage: cdkSheetData.detectionReport.coverage + '%',
+            mappedFields: Object.keys(columnMap).length
+          });
+          
+          if (cdkSheetData.detectionReport.lowConfidenceMatches.length > 0) {
+            logWarning('startMergeProcess', 'Low confidence matches found', {
+              matches: cdkSheetData.detectionReport.lowConfidenceMatches
+            });
+          }
         }
         
-        // Process CDK data with column map
+        // Process CDK data with column map (either user-provided or auto-detected)
         cdkRecords = processCDKData(cdkSheetData.data, columnMap);
         
         logInfo('startMergeProcess', 'CDK data processed from sheet', {
-          recordCount: cdkRecords.length
+          recordCount: cdkRecords.length,
+          usedUserMapping: hasUserMapping
         });
         
       } catch (sheetError) {
