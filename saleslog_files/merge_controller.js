@@ -498,11 +498,40 @@ function startMergeProcess(config) {
     };
     
   } catch (error) {
-    const errorLog = logError('startMergeProcess', error, { sessionId: config.sessionId });
-    const errorMessage = errorLog?.message || 'Unknown error occurred';
-    const technicalDetails = errorLog?.fullLog || 'No technical details available';
+    // DIAGNOSTIC: Enhanced catch-all error handler with detailed logging
+    logError('startMergeProcess', error, {
+      sessionId: config ? config.sessionId : 'unknown',
+      errorType: error ? error.constructor.name : 'unknown',
+      errorName: error ? error.name : 'unknown',
+      errorMessage: error ? error.message : 'unknown',
+      errorStack: error ? error.stack : 'no stack',
+      hasConfig: !!config,
+      configKeys: config ? Object.keys(config).join(', ') : 'none'
+    });
     
-    updateProgress(config.sessionId, 0, 'Error: ' + errorMessage, {});
+    // Extract error details with multiple fallbacks
+    const errorMessage = (error && error.message) ? error.message :
+                        (error && error.toString) ? error.toString() :
+                        'Unknown error occurred';
+    
+    const technicalDetails = (error && error.stack) ? error.stack :
+                            (error && error.message) ? error.message :
+                            'No technical details available';
+    
+    // Log the exact values being returned for debugging
+    logInfo('startMergeProcess', 'Returning error response', {
+      errorMessage: errorMessage,
+      technicalDetailsLength: technicalDetails.length,
+      technicalDetailsPreview: technicalDetails.substring(0, 200)
+    });
+    
+    try {
+      updateProgress(config.sessionId, 0, 'Error: ' + errorMessage, {});
+    } catch (progressError) {
+      logWarning('startMergeProcess', 'Failed to update progress on error', {
+        progressError: progressError.message
+      });
+    }
     
     return {
       success: false,
@@ -1497,6 +1526,14 @@ function readCDKDataSheet() {
  */
 function processCDKData(cdkData, columnMap) {
   try {
+    // DIAGNOSTIC: Log function entry with parameters
+    logInfo('processCDKData', 'Function entry', {
+      hasData: !!cdkData,
+      dataLength: cdkData ? cdkData.length : 0,
+      hasColumnMap: !!columnMap,
+      columnMapKeys: columnMap ? Object.keys(columnMap).join(', ') : 'none'
+    });
+    
     if (!Array.isArray(cdkData) || cdkData.length < 2) {
       throw new Error('Invalid CDK data format');
     }
@@ -1539,10 +1576,31 @@ function processCDKData(cdkData, columnMap) {
       }
     } else {
       // Use dynamic column mapping
+      logInfo('processCDKData', 'Starting dynamic column mapping', {
+        rowCount: cdkData.length - 1,
+        columnMap: columnMap
+      });
+      
       for (let i = 1; i < cdkData.length; i++) {
         const row = cdkData[i];
         
-        const record = {
+        // DIAGNOSTIC: Log first row processing in detail
+        if (i === 1) {
+          logInfo('processCDKData', 'Processing first data row', {
+            rowIndex: i,
+            rowLength: row ? row.length : 0,
+            sampleValues: row ? {
+              first3: row.slice(0, 3),
+              stockNoIndex: columnMap.stockno,
+              stockNoValue: columnMap.stockno !== undefined ? row[columnMap.stockno] : 'undefined'
+            } : 'row is null'
+          });
+        }
+        
+        // DIAGNOSTIC: Wrap record creation in try-catch to isolate field errors
+        let record;
+        try {
+          record = {
           rowNumber: i,
           contractDate: (columnMap.contractdate !== undefined && row[columnMap.contractdate] !== null && row[columnMap.contractdate] !== undefined && row[columnMap.contractdate] !== '') ? row[columnMap.contractdate] : null,
           customerLastName: (columnMap.customer !== undefined && row[columnMap.customer] !== null && row[columnMap.customer] !== undefined && row[columnMap.customer] !== '') ? row[columnMap.customer] : '',
@@ -1563,6 +1621,16 @@ function processCDKData(cdkData, columnMap) {
           dealNo: (columnMap.dealno !== undefined && row[columnMap.dealno] !== null && row[columnMap.dealno] !== undefined && row[columnMap.dealno] !== '') ? row[columnMap.dealno] : '',
           salesperson: (columnMap.salesperson !== undefined && row[columnMap.salesperson] !== null && row[columnMap.salesperson] !== undefined && row[columnMap.salesperson] !== '') ? row[columnMap.salesperson] : ''
         };
+        } catch (recordError) {
+          // DIAGNOSTIC: Catch and log field-level errors
+          logError('processCDKData', recordError, {
+            rowIndex: i,
+            step: 'record_creation',
+            columnMapKeys: Object.keys(columnMap),
+            rowLength: row ? row.length : 0
+          });
+          throw new Error(`Failed to create record for row ${i}: ${recordError.message}`);
+        }
         
         if (record.stockNo) {
           records.push(record);
@@ -1570,15 +1638,28 @@ function processCDKData(cdkData, columnMap) {
       }
     }
     
-    logInfo('processCDKData', 'Extracted CDK records', {
+    logInfo('processCDKData', 'Successfully extracted CDK records', {
       recordCount: records.length,
-      usedDynamicMapping: !!columnMap
+      usedDynamicMapping: !!columnMap,
+      firstRecordSample: records.length > 0 ? {
+        stockNo: records[0].stockNo,
+        stockType: records[0].stockType,
+        hasGP: !!(records[0].frontGP || records[0].backGP || records[0].totalGP)
+      } : 'no records'
     });
     
     return records;
     
   } catch (error) {
-    logError('processCDKData', error);
+    // DIAGNOSTIC: Enhanced error logging with full context
+    logError('processCDKData', error, {
+      errorName: error.name,
+      errorMessage: error.message,
+      errorStack: error.stack,
+      hasColumnMap: !!columnMap,
+      columnMapKeys: columnMap ? Object.keys(columnMap).join(', ') : 'none',
+      dataLength: cdkData ? cdkData.length : 0
+    });
     throw error;
   }
 }
