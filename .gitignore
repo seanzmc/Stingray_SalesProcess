@@ -1,0 +1,6 @@
+.clasp.json
+.claspignore
+work_handbook/*
+programIdeas/*
+*.csv
+*.xlsx
