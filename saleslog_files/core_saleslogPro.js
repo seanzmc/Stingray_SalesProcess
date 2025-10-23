@@ -1477,7 +1477,7 @@ function recalcMtdFromMonthly() {
       // === NEW: Analytics Prompt and Execution ===
       // Get UI reference
       const ui = SpreadsheetApp.getUi();
-      
+
       // Prompt user to refresh analytics
       const analyticsResponse = ui.alert(
         "Update Monthly Analytics?",
@@ -1491,19 +1491,19 @@ function recalcMtdFromMonthly() {
         "This typically takes 5-10 seconds.",
         ui.ButtonSet.YES_NO
       );
-      
+
       if (analyticsResponse === ui.Button.YES) {
         try {
           toastInfo("Refreshing analytics...", "Working", 5);
-          
+
           // Call the internal analytics helper (imported from sales_analytics.js)
           const analyticsResult = refreshAnalyticsInternal(sheets);
-          
+
           if (analyticsResult.success) {
             // Show summary dialog
             const analytics = analyticsResult.data;
             const topPerformer = analytics.salespersonMetrics[0] || { displayCode: "N/A", totalSales: 0 };
-            
+
             ui.alert(
               "Update Complete",
               "MTD and Analytics have been updated successfully!\n\n" +
@@ -1518,7 +1518,7 @@ function recalcMtdFromMonthly() {
               `• Top Performer: ${topPerformer.displayCode} (${topPerformer.totalSales} units)`,
               ui.ButtonSet.OK
             );
-            
+
             toastInfo("MTD and Analytics update complete!", "Complete", 5);
           } else {
             // Analytics failed but MTD succeeded
@@ -1746,7 +1746,7 @@ function onOpen() {
         .addSeparator()
         .addItem("Start New Month (Rollover)", "rolloverMonth")
         .addSeparator()
-        .addItem("📋 Normalize Sales Log", "reformatDailySales")
+        .addItem("Merge Monthly data with CDK", "reformatDailySales")
         .addSeparator()
         .addItem("⚙️ Settings", "openConfigurationSidebar")
         .addToUi();

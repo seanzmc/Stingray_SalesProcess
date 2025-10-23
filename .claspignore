@@ -11,3 +11,7 @@ package.json
 .markdownlint.json
 *.csv
 *.xlsx
+dep/*
+work_handbook/*
+chatCDKmerge.js
+mergeCDKDataOptimized.js
