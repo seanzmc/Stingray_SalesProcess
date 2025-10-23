@@ -1,10 +1,10 @@
 /*This is how to clean and normalize the MONTHLY sales data before merging with the CDK_DATA sheet.*/
 function reformatDailySales() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName('MONTHLY');
-  const data = sheet.getDataRange().getValues();
+  const sheet = ss.getSheetByName("MONTHLY");
+  const data = sheet.getRange("A:N").getValues();
   const output = [];
-  let currentDate = '';
+  let currentDate = "";
 
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
@@ -16,26 +16,37 @@ function reformatDailySales() {
     }
 
     // Skip blank rows
-    const isEmpty = row.join('').trim() === '';
+    const isEmpty = row.join("").trim() === "";
     if (isEmpty) continue;
 
     // NEW sale block (columns B–G → indexes 1–6)
     const newData = row.slice(1, 7);
-    if (newData.join('').trim() !== '') {
+    const hasFI = newData[1] && /[a-zA-Z]/.test(String(newData[1]));
+    if (newData.join('').trim() !== '' && hasFI) {
       output.push([currentDate, 'NEW', ...newData]);
     }
 
     // USED sale block (columns I–N → indexes 8–13)
     const usedData = row.slice(8, 14);
-    if (usedData.join('').trim() !== '') {
+    const hasFI = usedData[1] && /[a-zA-Z]/.test(String(usedData[1]));
+    if (usedData.join('').trim() !== '' && hasFI) {
       output.push([currentDate, 'USED', ...usedData]);
     }
   }
 
   // Create new sheet for clean data
-  const cleaned = ss.getSheetByName('CLEANED') || ss.insertSheet('CLEANED');
+  const cleaned = ss.getSheetByName("CLEANED") || ss.insertSheet("CLEANED");
   cleaned.clear();
-  const headers = ['Date', 'Type', 'Customer', 'FI', 'Model', 'StockNo', 'Trade', 'Sales'];
+  const headers = [
+    "Date",
+    "Type",
+    "Customer",
+    "FI",
+    "Model",
+    "StockNo",
+    "Trade",
+    "Sales Person",
+  ];
   cleaned.appendRow(headers);
   cleaned.getRange(2, 1, output.length, output[0].length).setValues(output);
 
