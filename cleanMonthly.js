@@ -140,18 +140,22 @@ function mergeCDKData() {
   // === MERGE LOGIC with TRACKING (hybrid) ===
   let matchCount = 0;
   let noMatchCount = 0;
+  const unmatchedCleanedRows = []; // Track unmatched CLEANED row indices (1-based, accounting for header)
+  const matchedCDKKeys = new Set(); // Track which CDK Stock No. values were matched
 
-  const mergedData = cleanedData.map(cleanedRow => {
+  const mergedData = cleanedData.map((cleanedRow, index) => {
     const key = String(cleanedRow[cleanedKeyIndex]).trim().toUpperCase(); // Case insensitive
     const cdkRow = cdkMap.get(key);
 
     if (cdkRow) {
       matchCount++;
+      matchedCDKKeys.add(key); // Track this CDK key as matched
       // FIX: Only take first 8 columns from CLEANED (A-H), then append CDK data (I-AC)
       // This prevents CDK data from being appended after empty columns 9-29
       return [...cleanedRow.slice(0, 8), ...cdkRow];
     } else {
       noMatchCount++;
+      unmatchedCleanedRows.push(index + 2); // +2 because: +1 for 0-based to 1-based, +1 for header row
       if (key) Logger.log(`No match found for Stock No: ${key}`);
       // For unmatched rows, also only keep first 8 columns to maintain consistency
       return cleanedRow.slice(0, 8);
@@ -172,6 +176,53 @@ function mergeCDKData() {
     // === WRITE BACK (batch operation) ===
     cleanedSheet.getRange(2, 1, paddedData.length, maxCols).setValues(paddedData);
     SpreadsheetApp.flush(); // Ensure write completion
+
+    // === CLEAR EXISTING BACKGROUND COLORS ===
+    // Clear backgrounds from CLEANED sheet (data rows only, preserve header)
+    const cleanedLastRow = cleanedSheet.getLastRow();
+    const cleanedLastCol = cleanedSheet.getLastColumn();
+    if (cleanedLastRow > 1 && cleanedLastCol > 0) {
+      cleanedSheet.getRange(2, 1, cleanedLastRow - 1, cleanedLastCol).setBackground(null);
+    }
+
+    // Clear backgrounds from CDK_DATA sheet (data rows only, preserve header)
+    const cdkLastRow = cdkSheet.getLastRow();
+    const cdkLastCol = cdkSheet.getLastColumn();
+    if (cdkLastRow > 1 && cdkLastCol > 0) {
+      cdkSheet.getRange(2, 1, cdkLastRow - 1, cdkLastCol).setBackground(null);
+    }
+
+    Logger.log('Cleared existing background colors from both sheets');
+
+    // === CONDITIONAL FORMATTING for unmatched rows ===
+    // Format unmatched rows in CLEANED sheet with light yellow background
+    if (unmatchedCleanedRows.length > 0) {
+      const cleanedRanges = unmatchedCleanedRows.map(rowIndex =>
+        cleanedSheet.getRange(rowIndex, 1, 1, maxCols)
+      );
+      const cleanedRangeList = cleanedSheet.getRangeList(cleanedRanges.map(r => r.getA1Notation()));
+      cleanedRangeList.setBackground('#FFFFE0');
+      Logger.log(`Highlighted ${unmatchedCleanedRows.length} unmatched rows in CLEANED sheet`);
+    }
+
+    // Format unmatched rows in CDK_DATA sheet
+    const unmatchedCDKRows = [];
+    cdkData.forEach((row, index) => {
+      const key = String(row[cdkKeyIndex]).trim().toUpperCase();
+      if (key && !matchedCDKKeys.has(key)) {
+        unmatchedCDKRows.push(index + 2); // +2 for 0-based to 1-based, +1 for header
+      }
+    });
+
+    if (unmatchedCDKRows.length > 0) {
+      const cdkMaxCols = cdkSheet.getLastColumn();
+      const cdkRanges = unmatchedCDKRows.map(rowIndex =>
+        cdkSheet.getRange(rowIndex, 1, 1, cdkMaxCols)
+      );
+      const cdkRangeList = cdkSheet.getRangeList(cdkRanges.map(r => r.getA1Notation()));
+      cdkRangeList.setBackground('#FFFFE0');
+      Logger.log(`Highlighted ${unmatchedCDKRows.length} unmatched rows in CDK_DATA sheet`);
+    }
   }
 
   // === COMPREHENSIVE LOGGING (from Function 2) ===
