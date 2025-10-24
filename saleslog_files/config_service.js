@@ -228,17 +228,17 @@ function updateConfiguration(updates) {
     props.setProperty(CONFIG_PROPERTY_KEY, JSON.stringify(updatedConfig));
     props.setProperty(CONFIG_VERSION_KEY, updatedConfig.version);
     
-    // Invalidate cache with defensive error handling
+    // Invalidate cache - CRITICAL operation that must succeed
+    // Throwing error prevents stale data from being served after config changes
     try {
       CacheService.getScriptCache().remove(CONFIG_CACHE_KEY);
     } catch (error) {
       logError('updateConfiguration', error, {
         severity: 'CRITICAL',
         operation: 'cache_invalidation',
-        cacheKey: CONFIG_CACHE_KEY,
-        impact: 'Stale config data may be served until cache expires naturally (10 minutes)'
+        cacheKey: CONFIG_CACHE_KEY
       });
-      // Continue execution - configuration save succeeded, cache invalidation is non-fatal
+      throw new Error('Cache invalidation failed for config cache. Configuration was saved but stale data may be served. Please refresh and try again. Error: ' + error.message);
     }
     
     // Invalidate visual config cache if visual settings were updated
@@ -249,10 +249,9 @@ function updateConfiguration(updates) {
         logError('updateConfiguration', error, {
           severity: 'CRITICAL',
           operation: 'cache_invalidation',
-          cacheKey: 'visualConfig',
-          impact: 'Stale visual config may be served until cache expires naturally (5 minutes)'
+          cacheKey: 'visualConfig'
         });
-        // Continue execution - configuration save succeeded, cache invalidation is non-fatal
+        throw new Error('Cache invalidation failed for visual config cache. Configuration was saved but stale data may be served. Please refresh and try again. Error: ' + error.message);
       }
     }
     
@@ -700,54 +699,7 @@ function getWcagCompliantTextColor(bgColorHex) {
   return contrastWithBlack > contrastWithWhite ? "#000000" : "#FFFFFF";
 }
 
-/**
- * Checks if an alias conflicts with existing salespeople
- * 
- * @param {string} aliasesStr - Comma-separated aliases to check
- * @param {string|null} excludeFullName - Full name to exclude from conflict check (for updates)
- * @returns {string|null} Conflict description or null if no conflict
- */
-function checkAliasConflict(aliasesStr, excludeFullName) {
-  try {
-    if (!aliasesStr || !aliasesStr.trim()) {
-      return null; // No aliases to check
-    }
-    
-    const newAliases = aliasesStr.split(',').map(a => a.trim().toUpperCase()).filter(a => a);
-    const config = getConfiguration();
-    const salespeople = config.salespeople || [];
-    
-    for (const sp of salespeople) {
-      // Skip the salesperson being updated
-      if (excludeFullName && sp.fullName === excludeFullName) {
-        continue;
-      }
-      
-      // Check against full name
-      if (newAliases.includes(sp.fullName.toUpperCase())) {
-        return 'Alias "' + sp.fullName + '" conflicts with existing salesperson name';
-      }
-      
-      // Check against display code
-      if (newAliases.includes(sp.displayCode.toUpperCase())) {
-        return 'Alias "' + sp.displayCode + '" conflicts with existing display code for ' + sp.fullName;
-      }
-      
-      // Check against existing aliases
-      const existingAliases = sp.aliases.split(',').map(a => a.trim().toUpperCase()).filter(a => a);
-      for (const newAlias of newAliases) {
-        if (existingAliases.includes(newAlias)) {
-          return 'Alias "' + newAlias + '" is already used by ' + sp.fullName;
-        }
-      }
-    }
-    
-    return null; // No conflicts
-  } catch (e) {
-    logError('checkAliasConflict', e, { aliases: aliasesStr });
-    return 'Error checking aliases: ' + e.message;
-  }
-}
+// checkAliasConflict() moved to validation_rules.js
 
 /**
  * Validates the complete configuration object
@@ -826,181 +778,13 @@ function validateConfiguration(config) {
 // SYNC METADATA MANAGEMENT
 // ============================================================================
 
-/**
- * Gets sync metadata from Properties Service
- * Used to track salesperson modifications for bidirectional sync
- *
- * @returns {Object} Sync metadata structure
- */
-function getSyncMetadataFromProperties() {
-  try {
-    const props = PropertiesService.getDocumentProperties();
-    const metadataJson = props.getProperty('SALES_LOG_SYNC_META');
-    
-    if (metadataJson) {
-      return JSON.parse(metadataJson);
-    } else {
-      return {}; // Empty metadata
-    }
-  } catch (e) {
-    logWarning('getSyncMetadataFromProperties', 'Error reading sync metadata', { error: e.toString() });
-    return {};
-  }
-}
-
-/**
- * Cleans up old sync metadata entries to reduce size.
- * Removes entries older than 30 days and orphaned entries.
- *
- * @param {Object} metadata - Current metadata object
- * @returns {Object} Cleaned metadata object
- */
-function cleanupOldMetadata(metadata) {
-  try {
-    const RETENTION_DAYS = 30;
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - RETENTION_DAYS);
-    const cutoffTime = cutoffDate.getTime();
-    
-    const cleaned = {};
-    let removedCount = 0;
-    let keptCount = 0;
-    
-    // Preserve _stats if it exists
-    if (metadata._stats) {
-      cleaned._stats = metadata._stats;
-    }
-    
-    // Filter metadata entries
-    for (const key in metadata) {
-      if (!metadata.hasOwnProperty(key)) continue;
-      
-      // Skip special keys
-      if (key === '_stats') continue;
-      
-      const value = metadata[key];
-      
-      // Check if entry has lastModified timestamp
-      if (value && value.lastModified) {
-        const entryTime = new Date(value.lastModified).getTime();
-        
-        // Keep if within retention period
-        if (entryTime >= cutoffTime) {
-          cleaned[key] = value;
-          keptCount++;
-        } else {
-          removedCount++;
-        }
-      } else {
-        // Keep entries without timestamp (shouldn't happen, but defensive)
-        cleaned[key] = value;
-        keptCount++;
-      }
-    }
-    
-    Logger.log('[cleanupOldMetadata] Removed ' + removedCount + ' old entries, kept ' + keptCount + ' entries');
-    
-    return cleaned;
-    
-  } catch (error) {
-    logWarning('cleanupOldMetadata', 'Error during cleanup', { error: error.toString() });
-    // Return original metadata if cleanup fails
-    return metadata;
-  }
-}
-
-/**
- * Saves sync metadata to Properties Service with size validation.
- * Performs automatic cleanup of old metadata if size limit is approached.
- *
- * @param {Object} metadata - Sync metadata structure to save
- * @throws {Error} If metadata exceeds size limits even after cleanup
- */
-function saveSyncMetadata(metadata) {
-  try {
-    const props = PropertiesService.getDocumentProperties();
-    
-    // Convert to JSON for size checking
-    let metadataJson = JSON.stringify(metadata);
-    let metadataSize = metadataJson.length;
-    
-    // Size validation: 8KB threshold (9KB hard limit with safety margin)
-    const SIZE_LIMIT = 8192;  // 8KB in bytes
-    const SIZE_WARNING = 6144; // 6KB (75% of limit)
-    
-    // If approaching or exceeding limit, attempt cleanup
-    if (metadataSize >= SIZE_WARNING) {
-      Logger.log('[saveSyncMetadata] Metadata size: ' + metadataSize + ' bytes (' + (metadataSize/1024).toFixed(2) + ' KB)');
-      
-      if (metadataSize >= SIZE_LIMIT) {
-        // Attempt automatic cleanup
-        Logger.log('[saveSyncMetadata] Size limit reached. Attempting cleanup...');
-        metadata = cleanupOldMetadata(metadata);
-        metadataJson = JSON.stringify(metadata);
-        metadataSize = metadataJson.length;
-        
-        // If still too large after cleanup, throw error
-        if (metadataSize >= SIZE_LIMIT) {
-          throw new Error(
-            'Sync metadata exceeds size limit: ' + metadataSize + ' bytes (max: ' + SIZE_LIMIT + '). ' +
-            'Consider reducing retention period or implementing chunking.'
-          );
-        }
-        
-        Logger.log('[saveSyncMetadata] After cleanup: ' + metadataSize + ' bytes (' + (metadataSize/1024).toFixed(2) + ' KB)');
-      } else {
-        // Warning level - log but continue
-        logWarning('saveSyncMetadata', 'Approaching size limit', {
-          currentSize: metadataSize,
-          limit: SIZE_LIMIT,
-          percentUsed: ((metadataSize / SIZE_LIMIT) * 100).toFixed(1) + '%'
-        });
-      }
-    }
-    
-    // Write to Properties Service
-    props.setProperty('SALES_LOG_SYNC_META', metadataJson);
-    
-    // Log successful write with size info
-    if (metadataSize >= SIZE_WARNING) {
-      Logger.log('[saveSyncMetadata] Successfully saved metadata (' + metadataSize + ' bytes)');
-    }
-    
-  } catch (error) {
-    logError('saveSyncMetadata', error, {
-      operation: 'properties_write',
-      attemptedSize: metadataJson ? metadataJson.length : 'unknown'
-    });
-    throw error;
-  }
-}
-
-/**
- * Updates sync metadata for a salesperson
- * Tracks modifications for conflict detection and bidirectional sync
- *
- * @param {string} fullName - Salesperson full name
- * @param {string} source - Modification source: 'sheet' or 'sidebar'
- * @returns {void}
- */
-function updateSyncMetadata(fullName, source) {
-  try {
-    const metadata = getSyncMetadataFromProperties();
-    
-    metadata[fullName] = {
-      lastModified: new Date().toISOString(),
-      modifiedBy: getSafeUserEmail(),
-      source: source,
-      version: (metadata[fullName] && metadata[fullName].version) ? metadata[fullName].version + 1 : 1
-    };
-    
-    saveSyncMetadata(metadata);
-    Logger.log('Updated sync metadata for ' + fullName + ' (source: ' + source + ')');
-  } catch (e) {
-    logWarning('updateSyncMetadata', 'Error updating sync metadata', { error: e.toString(), fullName });
-    // Don't throw - metadata tracking failure shouldn't break CRUD operations
-  }
-}
+// ============================================================================
+// SYNC METADATA MANAGEMENT
+// ============================================================================
+// NOTE: Sync metadata functions have been extracted to sync_metadata.js
+// The functions getSyncMetadataFromProperties(), cleanupOldMetadata(),
+// saveSyncMetadata(), and updateSyncMetadata() are now available globally
+// from the sync_metadata.js module (Google Apps Script shares global scope).
 
 // ============================================================================
 // MIGRATION & SYNC FUNCTIONS
@@ -1094,13 +878,31 @@ function migrateToConfigUI() {
 /**
  * Syncs configuration salespeople to SALESPEOPLE sheet for backward compatibility
  * Properties Service remains the source of truth, sheet is secondary storage
+ * Includes conflict detection to prevent overwriting recent sheet edits
  * Invalidates salesperson maps cache after sync to force refresh
  *
  * @param {Object} config - Configuration object containing salespeople array
  * @returns {void}
+ * @throws {Error} If conflict detected or cache invalidation fails
  */
 function syncToSalespeopleSheet(config) {
+  // Acquire lock first to prevent race conditions
+  const lockResult = acquireScriptLockWithRetry();
+  
+  if (!lockResult.success) {
+    const errorMsg = 'Failed to acquire lock for sheet sync after ' +
+                     lockResult.attempts + ' attempts (' + lockResult.totalTime + 'ms). ' +
+                     'Another operation may be in progress. Please try again.';
+    logError('syncToSalespeopleSheet', new Error(errorMsg), {
+      lockAttempts: lockResult.attempts,
+      lockTotalTime: lockResult.totalTime
+    });
+    throw new Error(errorMsg);
+  }
+  
   try {
+    Logger.log('syncToSalespeopleSheet lock acquired on attempt ' + lockResult.attempts);
+    
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const salesSheet = ss.getSheetByName('SALESPEOPLE');
     
@@ -1110,6 +912,49 @@ function syncToSalespeopleSheet(config) {
     }
     
     const salespeople = config.salespeople || [];
+    
+    // CONFLICT DETECTION: Check sync metadata for recent sheet edits
+    const metadata = getSyncMetadataFromProperties();
+    const now = new Date();
+    const CONFLICT_WINDOW_SECONDS = 60;
+    
+    let recentSheetEdit = false;
+    let recentEditPerson = null;
+    
+    // Check if any salesperson was recently edited from sheet
+    for (const fullName in metadata) {
+      if (fullName === '_stats') continue; // Skip stats object
+      
+      const entry = metadata[fullName];
+      if (entry && entry.source === 'sheet' && entry.lastModified) {
+        const lastModTime = new Date(entry.lastModified);
+        const timeDiffSeconds = (now - lastModTime) / 1000;
+        
+        if (timeDiffSeconds <= CONFLICT_WINDOW_SECONDS) {
+          recentSheetEdit = true;
+          recentEditPerson = fullName;
+          Logger.log('[Sync] Recent sheet edit detected for "' + fullName + '" (' +
+                     timeDiffSeconds.toFixed(1) + 's ago)');
+          break;
+        }
+      }
+    }
+    
+    // If recent sheet edit detected, compare current sheet data with data to be written
+    if (recentSheetEdit) {
+      Logger.log('[Sync] Checking if data differs from recent sheet edit...');
+      
+      const currentSheetData = readCurrentSheetData(salesSheet);
+      
+      if (!sheetDataMatches(currentSheetData, salespeople)) {
+        const errorMsg = 'Cannot sync: SALESPEOPLE sheet was recently edited (' +
+                        recentEditPerson + '). Please review changes before saving from sidebar.';
+        Logger.log('[Sync] CONFLICT DETECTED: ' + errorMsg);
+        throw new Error(errorMsg);
+      }
+      
+      Logger.log('[Sync] Data matches - no actual conflict');
+    }
     
     // Clear existing data (except header)
     const lastRow = salesSheet.getLastRow();
@@ -1130,24 +975,92 @@ function syncToSalespeopleSheet(config) {
     
     Logger.log('Synced ' + salespeople.length + ' salespeople to SALESPEOPLE sheet');
     
-    // Invalidate the salesperson maps cache to force refresh
+    // Invalidate the salesperson maps cache - CRITICAL operation
     try {
       CacheService.getScriptCache().remove('salespersonMaps');
     } catch (error) {
       logError('syncToSalespeopleSheet', error, {
-        severity: 'HIGH',
+        severity: 'CRITICAL',
         operation: 'cache_invalidation',
-        cacheKey: 'salespersonMaps',
-        impact: 'Stale salesperson maps may be served until cache expires naturally (5 minutes)',
-        context: 'After syncing salespeople to SALESPEOPLE sheet'
+        cacheKey: 'salespersonMaps'
       });
-      // Continue execution - sheet sync succeeded, cache invalidation is non-fatal
+      throw new Error('Cache invalidation failed for salesperson maps. Configuration was saved but stale data may be served. Please refresh and try again. Error: ' + error.message);
     }
     
   } catch (e) {
-    logWarning('syncToSalespeopleSheet', 'Error syncing to SALESPEOPLE sheet', { error: e.toString(), count: config?.salespeople?.length });
-    // Don't throw - sync is secondary operation
+    logWarning('syncToSalespeopleSheet', 'Error syncing to SALESPEOPLE sheet', {
+      error: e.toString(),
+      count: config?.salespeople?.length
+    });
+    throw e; // Re-throw to ensure caller knows about the failure
+  } finally {
+    // Always release lock, even if operation failed
+    lockResult.lock.releaseLock();
   }
+}
+
+/**
+ * Reads current data from SALESPEOPLE sheet
+ * Helper function for conflict detection
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet - SALESPEOPLE sheet
+ * @returns {Array} Array of salesperson objects from sheet
+ */
+function readCurrentSheetData(sheet) {
+  try {
+    const lastRow = sheet.getLastRow();
+    if (lastRow < 2) {
+      return []; // No data rows
+    }
+    
+    const data = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+    return data
+      .filter(row => row[0] && String(row[0]).trim()) // Has full name
+      .map(row => ({
+        fullName: String(row[0]).trim(),
+        aliases: String(row[1] || '').trim(),
+        displayCode: String(row[2] || '').trim().toUpperCase()
+      }));
+  } catch (error) {
+    Logger.log('Error reading current sheet data: ' + error.toString());
+    return [];
+  }
+}
+
+/**
+ * Compares sheet data with Properties data for conflict detection
+ *
+ * @param {Array} sheetData - Current data from sheet
+ * @param {Array} propsData - Data to be written from Properties
+ * @returns {boolean} True if data matches, false if there are differences
+ */
+function sheetDataMatches(sheetData, propsData) {
+  if (sheetData.length !== propsData.length) {
+    Logger.log('[Sync] Length mismatch: sheet=' + sheetData.length + ', props=' + propsData.length);
+    return false;
+  }
+  
+  for (let i = 0; i < sheetData.length; i++) {
+    const sheet = sheetData[i];
+    const props = propsData[i];
+    
+    if (sheet.fullName !== props.fullName) {
+      Logger.log('[Sync] fullName mismatch at index ' + i + ': "' + sheet.fullName + '" vs "' + props.fullName + '"');
+      return false;
+    }
+    
+    if (sheet.aliases !== props.aliases) {
+      Logger.log('[Sync] aliases mismatch at index ' + i + ': "' + sheet.aliases + '" vs "' + props.aliases + '"');
+      return false;
+    }
+    
+    if (sheet.displayCode !== props.displayCode) {
+      Logger.log('[Sync] displayCode mismatch at index ' + i + ': "' + sheet.displayCode + '" vs "' + props.displayCode + '"');
+      return false;
+    }
+  }
+  
+  return true; // All data matches
 }
 
 // ============================================================================

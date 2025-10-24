@@ -218,3 +218,101 @@ const VALIDATION_LIMITS = {
   DISPLAYCODE_MIN_LENGTH: 2,
   DISPLAYCODE_MAX_LENGTH: 4
 };
+
+// ============================================================================
+// ALIAS CONFLICT CHECKING
+// ============================================================================
+
+/**
+ * Checks if aliases conflict with existing salespeople identifiers
+ *
+ * This function performs comprehensive conflict detection across three levels:
+ * 1. Full Names: Aliases cannot match any salesperson's full name
+ * 2. Display Codes: Aliases cannot match any salesperson's display code
+ * 3. Existing Aliases: Aliases cannot duplicate aliases already assigned to other salespeople
+ *
+ * All comparisons are case-insensitive (converted to uppercase) to prevent
+ * confusion and ensure consistent matching behavior.
+ *
+ * Used by both config_service.js (sidebar operations) and sync_service.js (sheet edits)
+ * to maintain consistent alias validation across all data entry points.
+ *
+ * @param {string} aliasesStr - Comma-separated list of aliases to validate.
+ *                               Can be empty/null (no aliases is valid).
+ *                               Example: "JS, Johnny, John Smith"
+ * @param {string|null} excludeFullName - Optional full name of salesperson to exclude
+ *                                         from conflict checking. Used when updating an
+ *                                         existing salesperson to prevent their own data
+ *                                         from being flagged as a conflict.
+ *                                         Pass null for new salesperson additions.
+ *
+ * @returns {string|null} Returns null if no conflicts found (valid).
+ *                        Returns descriptive error message string if conflict detected:
+ *                        - "Alias \"X\" conflicts with existing salesperson name"
+ *                        - "Alias \"X\" conflicts with existing display code for Y"
+ *                        - "Alias \"X\" is already used by Y"
+ *
+ * @example
+ * // Check new aliases for a new salesperson (no exclusion)
+ * const conflict = checkAliasConflict("JS, Johnny", null);
+ * if (conflict) {
+ *   console.log("Error: " + conflict);
+ * }
+ *
+ * @example
+ * // Check updated aliases for existing salesperson (exclude their current data)
+ * const conflict = checkAliasConflict("JS, Johnny, John", "John Smith");
+ * // Will not flag conflicts with "John Smith"'s own existing data
+ */
+function checkAliasConflict(aliasesStr, excludeFullName) {
+  try {
+    // Empty or null aliases are valid - nothing to check
+    if (!aliasesStr || !aliasesStr.trim()) {
+      return null;
+    }
+    
+    // Parse and normalize aliases: split by comma, trim whitespace, convert to uppercase, remove empties
+    const newAliases = aliasesStr.split(',').map(a => a.trim().toUpperCase()).filter(a => a);
+    
+    // Get current configuration to access all salespeople
+    const config = getConfiguration();
+    const salespeople = config.salespeople || [];
+    
+    // Check each salesperson for conflicts with the new aliases
+    for (const sp of salespeople) {
+      // Skip the salesperson being updated (if excludeFullName is provided)
+      // This prevents flagging their own data as a conflict
+      if (excludeFullName && sp.fullName === excludeFullName) {
+        continue;
+      }
+      
+      // CONFLICT CHECK 1: Alias vs Full Name
+      // Aliases cannot match any salesperson's full name
+      if (newAliases.includes(sp.fullName.toUpperCase())) {
+        return `Alias "${sp.fullName}" conflicts with existing salesperson name`;
+      }
+      
+      // CONFLICT CHECK 2: Alias vs Display Code
+      // Aliases cannot match any salesperson's display code
+      if (newAliases.includes(sp.displayCode.toUpperCase())) {
+        return `Alias "${sp.displayCode}" conflicts with existing display code for ${sp.fullName}`;
+      }
+      
+      // CONFLICT CHECK 3: Alias vs Existing Aliases
+      // Aliases cannot duplicate aliases already assigned to other salespeople
+      const existingAliases = sp.aliases.split(',').map(a => a.trim().toUpperCase()).filter(a => a);
+      for (const newAlias of newAliases) {
+        if (existingAliases.includes(newAlias)) {
+          return `Alias "${newAlias}" is already used by ${sp.fullName}`;
+        }
+      }
+    }
+    
+    // No conflicts found - aliases are valid
+    return null;
+    
+  } catch (error) {
+    logError('checkAliasConflict', error, { aliases: aliasesStr });
+    return `Error checking aliases: ${error.message}`;
+  }
+}

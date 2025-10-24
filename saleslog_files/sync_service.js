@@ -13,7 +13,6 @@
  */
 
 // Constants
-const SYNC_METADATA_KEY = 'SALES_LOG_SYNC_META';
 const SALESPEOPLE_SHEET_NAME = 'SALESPEOPLE';
 
 // Column indices for SALESPEOPLE sheet (0-based)
@@ -486,7 +485,7 @@ function syncRowToProperties(row, rowData, oldValue) {
     
     // Check for alias conflicts with existing names, codes, and other aliases
     // Aliases must not conflict with any identifier in the system
-    const aliasConflict = checkAliasConflictForSync(
+    const aliasConflict = checkAliasConflict(
       sanitized.aliases,
       existingSalesperson ? existingSalesperson.fullName : null
     );
@@ -678,55 +677,7 @@ function handleRowDeletion(row) {
   }
 }
 
-/**
- * Checks for alias conflicts (version for sync service)
- * Similar to checkAliasConflict in config_service.js but adapted for sync
- * 
- * @param {string} aliasesStr - Comma-separated aliases
- * @param {string|null} excludeFullName - Full name to exclude from check
- * @returns {string|null} Conflict description or null
- */
-function checkAliasConflictForSync(aliasesStr, excludeFullName) {
-  try {
-    if (!aliasesStr || !aliasesStr.trim()) {
-      return null;
-    }
-    
-    const newAliases = aliasesStr.split(',').map(a => a.trim().toUpperCase()).filter(a => a);
-    const config = getConfiguration();
-    const salespeople = config.salespeople || [];
-    
-    for (const sp of salespeople) {
-      // Skip the salesperson being updated
-      if (excludeFullName && sp.fullName === excludeFullName) {
-        continue;
-      }
-      
-      // Check against full name
-      if (newAliases.includes(sp.fullName.toUpperCase())) {
-        return 'Alias "' + sp.fullName + '" conflicts with existing salesperson name';
-      }
-      
-      // Check against display code
-      if (newAliases.includes(sp.displayCode.toUpperCase())) {
-        return 'Alias "' + sp.displayCode + '" conflicts with existing display code for ' + sp.fullName;
-      }
-      
-      // Check against existing aliases
-      const existingAliases = sp.aliases.split(',').map(a => a.trim().toUpperCase()).filter(a => a);
-      for (const newAlias of newAliases) {
-        if (existingAliases.includes(newAlias)) {
-          return 'Alias "' + newAlias + '" is already used by ' + sp.fullName;
-        }
-      }
-    }
-    
-    return null;
-  } catch (error) {
-    logError('checkAliasConflictForSync', error, { aliases: aliasesStr });
-    return 'Error checking aliases: ' + error.message;
-  }
-}
+// checkAliasConflict() now in validation_rules.js (was checkAliasConflictForSync)
 
 // ============================================================================
 // CACHE COORDINATION
@@ -768,38 +719,17 @@ function invalidateAllCaches() {
 // SYNC METADATA MANAGEMENT
 // ============================================================================
 
-/**
- * Creates or updates sync metadata for tracking
- * 
- * @param {string} fullName - Salesperson full name
- * @param {string} source - 'sheet' or 'sidebar'
- */
-function updateSyncMetadata(fullName, source) {
-  try {
-    const metadata = getSyncMetadataFromProperties();
-    
-    // Create or update entry for this salesperson
-    metadata[fullName] = {
-      lastModified: new Date().toISOString(),
-      modifiedBy: getSafeUserEmail(),
-      source: source,
-      version: (metadata[fullName] && metadata[fullName].version) ? metadata[fullName].version + 1 : 1
-    };
-    
-    // Save back to Properties
-    saveSyncMetadata(metadata);
-    
-    Logger.log('[Sync] Updated metadata for ' + fullName + ' (source: ' + source + ')');
-    
-  } catch (error) {
-    logWarning('updateSyncMetadata', 'Error updating sync metadata', { error: error.toString(), fullName });
-    // Don't throw - metadata tracking failure shouldn't break sync
-  }
-}
+// ============================================================================
+// SYNC METADATA MANAGEMENT
+// ============================================================================
+// NOTE: Core sync metadata functions have been extracted to sync_metadata.js
+// The functions getSyncMetadataFromProperties(), cleanupOldMetadata(),
+// saveSyncMetadata(), and updateSyncMetadata() are now available globally
+// from the sync_metadata.js module (Google Apps Script shares global scope).
 
 /**
  * Gets sync metadata for a salesperson
- * 
+ *
  * @param {string} fullName - Salesperson full name
  * @returns {Object|null} Metadata or null
  */
@@ -810,155 +740,6 @@ function getSyncMetadata(fullName) {
   } catch (error) {
     logWarning('getSyncMetadata', 'Error getting sync metadata', { error: error.toString(), fullName });
     return null;
-  }
-}
-
-/**
- * Gets all sync metadata from Properties Service
- * Returns empty object if no metadata exists
- *
- * @returns {Object} Sync metadata structure mapping fullName to metadata objects
- */
-function getSyncMetadataFromProperties() {
-  try {
-    const props = PropertiesService.getDocumentProperties();
-    const metadataJson = props.getProperty(SYNC_METADATA_KEY);
-    
-    if (metadataJson) {
-      return JSON.parse(metadataJson);
-    } else {
-      return {}; // Empty metadata
-    }
-  } catch (error) {
-    logWarning('getSyncMetadataFromProperties', 'Error reading sync metadata', { error: error.toString() });
-    return {};
-  }
-}
-
-/**
- * Cleans up old sync metadata entries to reduce size.
- * Removes entries older than 30 days and orphaned entries.
- *
- * @param {Object} metadata - Current metadata object
- * @returns {Object} Cleaned metadata object
- */
-function cleanupOldMetadata(metadata) {
-  try {
-    const RETENTION_DAYS = 30;
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - RETENTION_DAYS);
-    const cutoffTime = cutoffDate.getTime();
-    
-    const cleaned = {};
-    let removedCount = 0;
-    let keptCount = 0;
-    
-    // Preserve _stats if it exists
-    if (metadata._stats) {
-      cleaned._stats = metadata._stats;
-    }
-    
-    // Filter metadata entries
-    for (const key in metadata) {
-      if (!metadata.hasOwnProperty(key)) continue;
-      
-      // Skip special keys
-      if (key === '_stats') continue;
-      
-      const value = metadata[key];
-      
-      // Check if entry has lastModified timestamp
-      if (value && value.lastModified) {
-        const entryTime = new Date(value.lastModified).getTime();
-        
-        // Keep if within retention period
-        if (entryTime >= cutoffTime) {
-          cleaned[key] = value;
-          keptCount++;
-        } else {
-          removedCount++;
-        }
-      } else {
-        // Keep entries without timestamp (shouldn't happen, but defensive)
-        cleaned[key] = value;
-        keptCount++;
-      }
-    }
-    
-    Logger.log('[cleanupOldMetadata] Removed ' + removedCount + ' old entries, kept ' + keptCount + ' entries');
-    
-    return cleaned;
-    
-  } catch (error) {
-    logWarning('cleanupOldMetadata', 'Error during cleanup', { error: error.toString() });
-    // Return original metadata if cleanup fails
-    return metadata;
-  }
-}
-
-/**
- * Saves sync metadata to Properties Service with size validation.
- * Performs automatic cleanup of old metadata if size limit is approached.
- *
- * @param {Object} metadata - Sync metadata structure to save
- * @throws {Error} If metadata exceeds size limits even after cleanup
- */
-function saveSyncMetadata(metadata) {
-  try {
-    const props = PropertiesService.getDocumentProperties();
-    
-    // Convert to JSON for size checking
-    let metadataJson = JSON.stringify(metadata);
-    let metadataSize = metadataJson.length;
-    
-    // Size validation: 8KB threshold (9KB hard limit with safety margin)
-    const SIZE_LIMIT = 8192;  // 8KB in bytes
-    const SIZE_WARNING = 6144; // 6KB (75% of limit)
-    
-    // If approaching or exceeding limit, attempt cleanup
-    if (metadataSize >= SIZE_WARNING) {
-      Logger.log('[saveSyncMetadata] Metadata size: ' + metadataSize + ' bytes (' + (metadataSize/1024).toFixed(2) + ' KB)');
-      
-      if (metadataSize >= SIZE_LIMIT) {
-        // Attempt automatic cleanup
-        Logger.log('[saveSyncMetadata] Size limit reached. Attempting cleanup...');
-        metadata = cleanupOldMetadata(metadata);
-        metadataJson = JSON.stringify(metadata);
-        metadataSize = metadataJson.length;
-        
-        // If still too large after cleanup, throw error
-        if (metadataSize >= SIZE_LIMIT) {
-          throw new Error(
-            'Sync metadata exceeds size limit: ' + metadataSize + ' bytes (max: ' + SIZE_LIMIT + '). ' +
-            'Consider reducing retention period or implementing chunking.'
-          );
-        }
-        
-        Logger.log('[saveSyncMetadata] After cleanup: ' + metadataSize + ' bytes (' + (metadataSize/1024).toFixed(2) + ' KB)');
-      } else {
-        // Warning level - log but continue
-        logWarning('saveSyncMetadata', 'Approaching size limit', {
-          currentSize: metadataSize,
-          limit: SIZE_LIMIT,
-          percentUsed: ((metadataSize / SIZE_LIMIT) * 100).toFixed(1) + '%'
-        });
-      }
-    }
-    
-    // Write to Properties Service
-    props.setProperty(SYNC_METADATA_KEY, metadataJson);
-    
-    // Log successful write with size info
-    if (metadataSize >= SIZE_WARNING) {
-      Logger.log('[saveSyncMetadata] Successfully saved metadata (' + metadataSize + ' bytes)');
-    }
-    
-  } catch (error) {
-    logError('saveSyncMetadata', error, {
-      operation: 'properties_write',
-      attemptedSize: metadataJson ? metadataJson.length : 'unknown'
-    });
-    throw error;
   }
 }
 
