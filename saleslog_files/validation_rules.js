@@ -79,6 +79,23 @@ function validateDisplayCode(displayCode) {
   
   return null; // Valid
 }
+/**
+ * Validates FI (Finance & Insurance) flag field
+ * Accepts single uppercase letters (A-Z) or the special value "BD"
+ * @param {string} fiFlag - FI flag to validate
+ * @returns {boolean} True if valid, false otherwise
+ */
+function isValidFIFlag(fiFlag) {
+  if (!fiFlag || typeof fiFlag !== 'string') {
+    return false;
+  }
+  
+  const trimmed = fiFlag.trim().toUpperCase();
+  
+  // Accept single letters A-Z or special value "BD"
+  return /^[A-Z]$/.test(trimmed) || trimmed === 'BD';
+}
+
 
 // ============================================================================
 // COMBINED VALIDATOR

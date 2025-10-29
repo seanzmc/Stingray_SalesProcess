@@ -327,7 +327,7 @@ function processMonthlyDataForAnalytics(monthlyData, aliasMap) {
       const newFI = String(row[2] || "").trim().toUpperCase(); // Col C (index 2)
       const newSalesperson = String(row[6] || "").trim(); // Col G (index 6)
 
-      if (/^[A-Z]$/.test(newFI) && newSalesperson) {
+      if (isValidFIFlag(newFI) && newSalesperson) {
         processNewSale(newSalesperson, metrics, aliasMap);
         metrics.deliveredRowsProcessed++;
       }
@@ -336,9 +336,9 @@ function processMonthlyDataForAnalytics(monthlyData, aliasMap) {
       const usedFI = String(row[9] || "").trim().toUpperCase(); // Col J (index 9)
       const usedSalesperson = String(row[13] || "").trim(); // Col N (index 13)
 
-      if (/^[A-Z]$/.test(usedFI) && usedSalesperson) {
+      if (isValidFIFlag(usedFI) && usedSalesperson) {
         processUsedSale(usedSalesperson, metrics, aliasMap);
-        if (!/^[A-Z]$/.test(newFI)) {
+        if (!isValidFIFlag(newFI)) {
           // Only increment if not already counted from new section
           metrics.deliveredRowsProcessed++;
         }

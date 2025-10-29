@@ -507,7 +507,7 @@ function tallyCounts(rows, aliasMap, sides) {
       const fiFlag = String(row[fiIdx] || "")
         .trim()
         .toUpperCase();
-      if (!/^[A-Z]$/.test(fiFlag)) return; // Only delivered
+      if (!isValidFIFlag(fiFlag)) return; // Only delivered
       const salespersonInput = String(row[saleIdx] || "").trim();
       if (!salespersonInput) return;
       const parts = salespersonInput.split("/").map((s) => s.trim().toUpperCase());
@@ -544,8 +544,8 @@ function summarizeRows(rows) {
         : "";
     const newHasContent = row.length > 1 && row.slice(1, Math.min(7, row.length)).some((val) => val && String(val).trim() !== "");
     const usedHasContent = row.length > 8 && row.slice(8, Math.min(14, row.length)).some((val) => val && String(val).trim() !== "");
-    let newDelivered = /^[A-Z]$/.test(newFi) && newHasContent;
-    let usedDelivered = /^[A-Z]$/.test(usedFi) && usedHasContent;
+    let newDelivered = isValidFIFlag(newFi) && newHasContent;
+    let usedDelivered = isValidFIFlag(usedFi) && usedHasContent;
     if (newDelivered) {
       newCount++;
       const tradeNew =
@@ -606,7 +606,7 @@ function processCarSection(
   // Extract section data
   const fiFlag = rowData.length > fiIndex ? String(rowData[fiIndex] || "").trim().toUpperCase() : "";
   const salespersonInput = rowData.length > salespersonIndex ? String(rowData[salespersonIndex] || "").trim() : "";
-  const isDelivered = /^[A-Z]$/.test(fiFlag);
+  const isDelivered = isValidFIFlag(fiFlag);
   const hasData = rowData.length > dataStartIndex &&
                   rowData.slice(dataStartIndex, dataEndIndex).some((cell) => cell && String(cell).trim() !== "");
 
