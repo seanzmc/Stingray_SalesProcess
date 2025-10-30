@@ -13,7 +13,7 @@
  * 
  * Key Features:
  * - Date row detection using instanceof Date check
- * - FI flag validation with regex /^[A-Za-z]$/
+ * - FI flag validation using isValidFIFlag() (accepts A-Z or "BD")
  * - Separate extraction for New (B-G) and Used (I-N) columns
  * - Case-insensitive stock number matching
  * - Automatic unmatched row highlighting (#FFFFE0)
@@ -32,7 +32,7 @@
  * 1. Reads all data from MONTHLY sheet (columns A:N)
  * 2. Detects date rows (merged cells with Date objects)
  * 3. Extracts New car sales (columns B-G) and Used car sales (columns I-N)
- * 4. Validates FI flags using /^[A-Za-z]$/ regex
+ * 4. Validates FI flags using isValidFIFlag() (accepts A-Z or "BD")
  * 5. Creates/replaces CLEANED sheet with normalized data
  * 6. Applies header formatting (bold, centered)
  * 7. Automatically calls mergeCDKData() for integration
@@ -95,7 +95,7 @@ function reformatDailySales() {
         // NEW sale block (columns B-G → indexes 1-6)
         const newData = row.slice(1, 7);
         // Filter out rows that do not have a valid FI initial
-        const hasNewFI = newData[1] && /^[A-Za-z]$/.test(String(newData[1]));
+        const hasNewFI = newData[1] && isValidFIFlag(String(newData[1]));
         if (newData.join('').trim() !== '' && hasNewFI) {
           output.push([currentDate, 'NEW', ...newData]);
         }
@@ -103,7 +103,7 @@ function reformatDailySales() {
         // USED sale block (columns I-N → indexes 8-13)
         const usedData = row.slice(8, 14);
         // Filter out rows that do not have a valid FI initial
-        const hasUsedFI = usedData[1] && /^[A-Za-z]$/.test(String(usedData[1]));
+        const hasUsedFI = usedData[1] && isValidFIFlag(String(usedData[1]));
         if (usedData.join('').trim() !== '' && hasUsedFI) {
           output.push([currentDate, 'USED', ...usedData]);
         }
@@ -117,7 +117,7 @@ function reformatDailySales() {
         showCustomAlert(
           'No Data Found',
           'No valid sales records found in MONTHLY sheet. ' +
-          'Ensure the sheet has data with valid FI flags (single letters).'
+          'Ensure the sheet has data with valid FI flags (single letters A-Z or "BD").'
         );
         return;
       }
