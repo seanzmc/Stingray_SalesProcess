@@ -1,6 +1,6 @@
 function mergeCDKDataIntoCleaned() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const cleanedSheet = ss.getSheetByName('CLEANED');
+  const cleanedSheet = ss.getSheetByName('CDK_MERGED');
   const cdkSheet = ss.getSheetByName('CDK_DATA');
 
   if (!cleanedSheet || !cdkSheet) {
@@ -41,5 +41,5 @@ function mergeCDKDataIntoCleaned() {
   cleanedSheet.getRange(2, 1, cleanedSheet.getLastRow() - 1, cleanedSheet.getLastColumn()).clearContent();
   cleanedSheet.getRange(2, 1, mergedData.length, mergedData[0].length).setValues(mergedData);
 
-  Logger.log(`Merged ${mergedData.length} rows from CDK_DATA into CLEANED.`);
+  Logger.log(`Merged ${mergedData.length} rows from CDK_DATA into CDK_MERGED.`);
 }

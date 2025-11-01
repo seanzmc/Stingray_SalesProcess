@@ -7,7 +7,7 @@
  * This module provides functionality to:
  * - Extract and normalize sales data from the MONTHLY sheet
  * - Separate New and Used car sales into individual records
- * - Create a CLEANED sheet with standardized format
+ * - Create a CDK_MERGED sheet with standardized format
  * - Automatically merge with CDK_DATA for comprehensive reporting
  * - Highlight unmatched records for manual review
  * 
@@ -25,7 +25,7 @@
 
 /**
  * Normalizes and reformats daily sales data from MONTHLY sheet
- * Creates CLEANED sheet with separated New/Used records
+ * Creates CDK_MERGED sheet with separated New/Used records
  * Automatically merges with CDK_DATA if available
  * 
  * This function:
@@ -33,12 +33,12 @@
  * 2. Detects date rows (merged cells with Date objects)
  * 3. Extracts New car sales (columns B-G) and Used car sales (columns I-N)
  * 4. Validates FI flags using isValidFIFlag() (accepts A-Z or "BD")
- * 5. Creates/replaces CLEANED sheet with normalized data
+ * 5. Creates/replaces CDK_MERGED sheet with normalized data
  * 6. Applies header formatting (bold, centered)
  * 7. Automatically calls mergeCDKData() for integration
  * 8. Shows completion alert to user
  * 
- * Output Format (CLEANED sheet):
+ * Output Format (CDK_MERGED sheet):
  * - Column A: Date
  * - Column B: Type (NEW or USED)
  * - Column C: Customer
@@ -122,17 +122,17 @@ function reformatDailySales() {
         return;
       }
       
-      // Create or clear CLEANED sheet
-      let cleanedSheet = ss.getSheetByName('CLEANED');
+      // Create or clear CDK_MERGED sheet
+      let cleanedSheet = ss.getSheetByName('CDK_MERGED');
       if (!cleanedSheet) {
-        cleanedSheet = ss.insertSheet('CLEANED');
-        logInfo('reformatDailySales', 'Created new CLEANED sheet');
+        cleanedSheet = ss.insertSheet('CDK_MERGED');
+        logInfo('reformatDailySales', 'Created new CDK_MERGED sheet');
       } else {
         cleanedSheet.clear();
-        logInfo('reformatDailySales', 'Cleared existing CLEANED sheet');
+        logInfo('reformatDailySales', 'Cleared existing CDK_MERGED sheet');
       }
       
-      // Define headers for CLEANED sheet
+      // Define headers for CDK_MERGED sheet
       // First 8 columns are from sales log, remaining will be CDK data
       const headers = [
         'Date',
@@ -180,14 +180,14 @@ function reformatDailySales() {
           .setValues(output);
       }
       
-      logInfo('reformatDailySales', 'CLEANED sheet populated', {
+      logInfo('reformatDailySales', 'CDK_MERGED sheet populated', {
         headers: headers.length,
         dataRows: output.length
       });
       
       toastInfo('Merging with CDK data...', 'Working');
       
-      // Merge CDK_DATA with CLEANED sheet
+      // Merge CDK_DATA with CDK_MERGED sheet
       const mergeStats = mergeCDKData();
       
       // Show completion message with statistics
@@ -196,7 +196,7 @@ function reformatDailySales() {
         `Records Processed: ${output.length}\n` +
         `CDK Matches Found: ${mergeStats.matchCount}\n` +
         `Unmatched Records: ${mergeStats.noMatchCount}\n\n` +
-        `Results are available in the "CLEANED" sheet.\n` +
+        `Results are available in the "CDK_MERGED" sheet.\n` +
         `${mergeStats.noMatchCount > 0 ? 'Unmatched rows are highlighted in yellow.' : ''}`;
       
       showCustomAlert('Normalization Complete', summaryMsg);
@@ -218,22 +218,22 @@ function reformatDailySales() {
 }
 
 /**
- * Merges CDK_DATA sheet with CLEANED sheet by matching Stock No. values
+ * Merges CDK_DATA sheet with CDK_MERGED sheet by matching Stock No. values
  * Uses dynamic header detection and case-insensitive matching
  * 
  * This function:
- * 1. Validates both CLEANED and CDK_DATA sheets exist
+ * 1. Validates both CDK_MERGED and CDK_DATA sheets exist
  * 2. Dynamically detects header positions for 'StockNo' and 'Stock No.'
  * 3. Builds a Map of CDK data with case-insensitive keys
- * 4. Matches records and appends CDK columns to CLEANED sheet
+ * 4. Matches records and appends CDK columns to CDK_MERGED sheet
  * 5. Highlights unmatched rows in both sheets with #FFFFE0 (light yellow)
  * 6. Returns statistics about the merge operation
  * 
  * IMPORTANT NOTES:
- * - StockNo will ALWAYS be column F in CLEANED sheet
+ * - StockNo will ALWAYS be column F in CDK_MERGED sheet
  * - CDK_DATA Stock No. is dynamically detected but expected in column D
  * - Case-insensitive matching handles variations in stock number format
- * - Only first 8 columns from CLEANED are preserved (A-H)
+ * - Only first 8 columns from CDK_MERGED are preserved (A-H)
  * - Unmatched rows are highlighted for manual review
  * 
  * @returns {Object} Statistics {matchCount, noMatchCount, totalRows}
@@ -245,12 +245,12 @@ function mergeCDKData() {
     
     // === VALIDATION ===
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const cleanedSheet = ss.getSheetByName('CLEANED');
+    const cleanedSheet = ss.getSheetByName('CDK_MERGED');
     const cdkSheet = ss.getSheetByName('CDK_DATA');
     
     if (!cleanedSheet || !cdkSheet) {
       const missingSheets = [];
-      if (!cleanedSheet) missingSheets.push('CLEANED');
+      if (!cleanedSheet) missingSheets.push('CDK_MERGED');
       if (!cdkSheet) missingSheets.push('CDK_DATA');
       
       const errorMsg = `Required sheets not found: ${missingSheets.join(', ')}`;
@@ -275,7 +275,7 @@ function mergeCDKData() {
     if (cleanedKeyIndex === -1 || cdkKeyIndex === -1) {
       const errorMsg = 
         'Key columns not found: ' +
-        (cleanedKeyIndex === -1 ? 'StockNo in CLEANED ' : '') +
+        (cleanedKeyIndex === -1 ? 'StockNo in CDK_MERGED ' : '') +
         (cdkKeyIndex === -1 ? 'Stock No. in CDK_DATA' : '');
       logError('mergeCDKData', errorMsg);
       throw new Error(errorMsg);
@@ -292,7 +292,7 @@ function mergeCDKData() {
     
     // Early return for empty sheets
     if (cleanedData.length === 0) {
-      logWarning('mergeCDKData', 'CLEANED sheet is empty. No merge needed.');
+      logWarning('mergeCDKData', 'CDK_MERGED sheet is empty. No merge needed.');
       return { matchCount: 0, noMatchCount: 0, totalRows: 0 };
     }
     
@@ -318,7 +318,7 @@ function mergeCDKData() {
     // === MERGE LOGIC with TRACKING ===
     let matchCount = 0;
     let noMatchCount = 0;
-    const unmatchedCleanedRows = []; // Track unmatched CLEANED row indices (1-based, accounting for header)
+    const unmatchedCleanedRows = []; // Track unmatched CDK_MERGED row indices (1-based, accounting for header)
     const matchedCDKKeys = new Set(); // Track which CDK Stock No. values were matched
     
     const mergedData = cleanedData.map((cleanedRow, index) => {
@@ -328,7 +328,7 @@ function mergeCDKData() {
       if (cdkRow) {
         matchCount++;
         matchedCDKKeys.add(key); // Track this CDK key as matched
-        // Only take first 8 columns from CLEANED (A-H), then append CDK data (I-AC)
+        // Only take first 8 columns from CDK_MERGED (A-H), then append CDK data (I-AC)
         // This prevents CDK data from being appended after empty columns
         return [...cleanedRow.slice(0, 8), ...cdkRow];
       } else {
@@ -359,13 +359,13 @@ function mergeCDKData() {
       cleanedSheet.getRange(2, 1, paddedData.length, maxCols).setValues(paddedData);
       SpreadsheetApp.flush(); // Ensure write completion
       
-      logInfo('mergeCDKData', 'Merged data written to CLEANED sheet', {
+      logInfo('mergeCDKData', 'Merged data written to CDK_MERGED sheet', {
         rows: paddedData.length,
         columns: maxCols
       });
       
       // === CLEAR EXISTING BACKGROUND COLORS ===
-      // Clear backgrounds from CLEANED sheet (data rows only, preserve header)
+      // Clear backgrounds from CDK_MERGED sheet (data rows only, preserve header)
       const cleanedLastRow = cleanedSheet.getLastRow();
       const cleanedLastCol = cleanedSheet.getLastColumn();
       if (cleanedLastRow > 1 && cleanedLastCol > 0) {
@@ -382,14 +382,14 @@ function mergeCDKData() {
       logInfo('mergeCDKData', 'Cleared existing background colors from both sheets');
       
       // === CONDITIONAL FORMATTING for unmatched rows ===
-      // Format unmatched rows in CLEANED sheet with light yellow background
+      // Format unmatched rows in CDK_MERGED sheet with light yellow background
       if (unmatchedCleanedRows.length > 0) {
         const cleanedRanges = unmatchedCleanedRows.map(rowIndex =>
           cleanedSheet.getRange(rowIndex, 1, 1, maxCols)
         );
         const cleanedRangeList = cleanedSheet.getRangeList(cleanedRanges.map(r => r.getA1Notation()));
         cleanedRangeList.setBackground('#FFFFE0');
-        logInfo('mergeCDKData', `Highlighted ${unmatchedCleanedRows.length} unmatched rows in CLEANED sheet`);
+        logInfo('mergeCDKData', `Highlighted ${unmatchedCleanedRows.length} unmatched rows in CDK_MERGED sheet`);
       }
       
       // Format unmatched rows in CDK_DATA sheet

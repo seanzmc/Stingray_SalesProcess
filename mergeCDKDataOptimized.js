@@ -1,5 +1,5 @@
 /**
- * Merges CDK_DATA sheet with CLEANED sheet by matching Stock No. values
+ * Merges CDK_DATA sheet with CDK_MERGED sheet by matching Stock No. values
  * Uses dynamic header detection for flexibility and robustness
  *
  * @throws {Error} If required sheets or columns are not found
@@ -8,12 +8,12 @@
 function mergeCDKDataOptimized() {
   // === VALIDATION (from Function 2) ===
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const cleanedSheet = ss.getSheetByName('CLEANED');
+  const cleanedSheet = ss.getSheetByName('CDK_MERGED');
   const cdkSheet = ss.getSheetByName('CDK_DATA');
 
   if (!cleanedSheet || !cdkSheet) {
     throw new Error('Required sheets not found: ' +
-      (!cleanedSheet ? 'CLEANED ' : '') + (!cdkSheet ? 'CDK_DATA' : ''));
+      (!cleanedSheet ? 'CDK_MERGED ' : '') + (!cdkSheet ? 'CDK_DATA' : ''));
   }
 
   // === DYNAMIC HEADER DETECTION (from Function 1) ===
@@ -25,7 +25,7 @@ function mergeCDKDataOptimized() {
 
   if (cleanedKeyIndex === -1 || cdkKeyIndex === -1) {
     throw new Error('Key columns not found: ' +
-      (cleanedKeyIndex === -1 ? 'StockNo in CLEANED ' : '') +
+      (cleanedKeyIndex === -1 ? 'StockNo in CDK_MERGED ' : '') +
       (cdkKeyIndex === -1 ? 'Stock No. in CDK_DATA' : ''));
   }
 
@@ -35,7 +35,7 @@ function mergeCDKDataOptimized() {
 
   // Early return for empty sheets (from Function 2)
   if (cleanedData.length === 0) {
-    Logger.log('Warning: CLEANED sheet is empty. No merge needed.');
+    Logger.log('Warning: CDK_MERGED sheet is empty. No merge needed.');
     return { matchCount: 0, noMatchCount: 0, totalRows: 0 };
   }
 
@@ -61,7 +61,7 @@ function mergeCDKDataOptimized() {
 
     if (cdkRow) {
       matchCount++;
-      // FIX: Only take first 8 columns from CLEANED (A-H), then append CDK data (I-AC)
+      // FIX: Only take first 8 columns from CDK_MERGED (A-H), then append CDK data (I-AC)
       // This prevents CDK data from being appended after empty columns 9-29
       return [...cleanedRow.slice(0, 8), ...cdkRow];
     } else {
