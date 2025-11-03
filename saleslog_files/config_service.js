@@ -526,16 +526,31 @@ function updateLeaderboard() {
     const leaderboardRange = todaySheet.getRange(leaderboardRangeA1);
     const leaderboardData = leaderboardRange.getValues();
     
-    // Create new leaderboard data
+    // Build a map of existing leaderboard data keyed by salesperson name
+    const existingDataMap = {};
+    for (let i = 0; i < leaderboardData.length; i++) {
+      const name = String(leaderboardData[i][0] || '').trim();
+      if (name) {
+        existingDataMap[name] = {
+          mtd: leaderboardData[i][1] ?? '',
+          avg: leaderboardData[i][2] ?? ''
+        };
+      }
+    }
+    
+    // Create new leaderboard data using name-based matching
     const newLeaderboardData = [];
     
     for (let i = 0; i < salespersonCount; i++) {
       if (i < salespeople.length) {
-        // Add salesperson with preserved MTD and 3-month average
+        const name = salespeople[i];
+        const existingData = existingDataMap[name];
+        
+        // Add salesperson with preserved MTD and 3-month average (matched by name)
         newLeaderboardData.push([
-          salespeople[i],                    // Column P: NAME
-          leaderboardData[i][1] ?? '',       // Column Q: MTD SALES (preserve existing, including 0)
-          leaderboardData[i][2] ?? ''        // Column R: 3mo. AVERAGE (preserve existing, including 0)
+          name,                           // Column P: NAME
+          existingData?.mtd ?? '',        // Column Q: MTD SALES (matched by name)
+          existingData?.avg ?? ''         // Column R: 3mo. AVERAGE (matched by name)
         ]);
       } else {
         // Fill remaining rows with empty data (should not happen with correct count)

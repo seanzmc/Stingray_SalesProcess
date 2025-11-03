@@ -21,12 +21,13 @@
       "Finance Institution",
       "Salesperson",
       "FI Manager",
-      "Term"
+      "Term",
+      "Comments"
     ]
   },
 
   "MONTHLY": {
-    "HEADERS": [
+    "HEADERS A:N": [
       "#",
       "CUSTOMER",
       "FI",
@@ -41,6 +42,28 @@
       "STOCK #",
       "TRADE",
       "SALESPERSON"
+    ]
+  },
+
+  "DASHBOARD": {
+    "HEADERS": [
+      "Date",
+      "Date Reported",
+      "Deal #",
+      "Stock #",
+      "Customer Name",
+      "Sales Rep",
+      "Sales Mgr",
+      "Punched",
+      "New/Used",
+      "Make",
+      "Model",
+      "Age",
+      "Trade in",
+      "F/C/L",
+      "Front Gross",
+      "Back Gross",
+      "Total Gross"
     ]
   }
 }
