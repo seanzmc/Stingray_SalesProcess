@@ -1,6 +1,6 @@
 {
   "CDK_DATA": {
-    "HEADERS": [
+    "HEADERS A:V": [
       "Deal No.",
       "Customer",
       "VIN",
@@ -46,7 +46,13 @@
   },
 
   "DASHBOARD": {
-    "HEADERS": [
+    "Sales Numbers Mapping location": [
+      "NEW D1",
+      "USED D2",
+      "CPO D3",
+      "TOTAL F2"
+    ],
+    "HEADERS A6:Q6": [
       "Date",
       "Date Reported",
       "Deal #",
