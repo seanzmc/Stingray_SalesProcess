@@ -87,7 +87,8 @@ function runSetupWizard() {
 
 /**
  * Prompts user for customization settings through a sequence of modal dialogs.
- * Allows configuration of header colors and fonts for the setup wizard.
+ * Allows configuration of header colors for the setup wizard.
+ * Font selection removed as it's no longer in the sidebar UI.
  *
  * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss - The active spreadsheet
  * @returns {Object|null} Customization settings object or null if user skips
@@ -96,10 +97,10 @@ function promptForCustomization(ss) {
   const ui = SpreadsheetApp.getUi();
 
   try {
-    // Step 1: Ask if user wants to customize
+    // Step 1: Ask if user wants to customize colors
     const customizeResponse = ui.alert(
       'Customize Sheet Formatting',
-      'Would you like to customize header colors and fonts?\n\n(You can skip and use default formatting)',
+      'Would you like to customize header colors?\n\n(You can skip and use default formatting)',
       ui.ButtonSet.YES_NO
     );
 
@@ -148,40 +149,12 @@ function promptForCustomization(ss) {
     const usedCarBgColor = '#424242';
     const usedCarTextColor = '#FFFFFF';
 
-    // Step 4: Font selection
-    let headerFont = 'Calibri'; // Default
-
-    const fontResponse = ui.prompt(
-      'Font Selection',
-      'Choose font style:\n1 = Calibri (default)\n2 = Arial\n3 = Times New Roman\n4 = Courier New\n\nEnter 1-4 or leave blank for default',
-      ui.ButtonSet.OK_CANCEL
-    );
-
-    if (fontResponse.getSelectedButton() === ui.Button.OK) {
-      const fontChoice = fontResponse.getResponseText().trim();
-
-      switch (fontChoice) {
-        case '1':
-          headerFont = 'Calibri';
-          break;
-        case '2':
-          headerFont = 'Arial';
-          break;
-        case '3':
-          headerFont = 'Times New Roman';
-          break;
-        case '4':
-          headerFont = 'Courier New';
-          break;
-        default:
-          // Invalid or blank - use default (Calibri)
-          headerFont = 'Calibri';
-      }
-    }
-
-    // Step 5: Leaderboard color (always default - no prompt)
+    // Step 4: Leaderboard color (always default - no prompt)
     const leaderboardBgColor = '#434343';
     const leaderboardTextColor = '#FFFFFF';
+
+    // Use default font (Calibri) - font selection removed from sidebar UI
+    const headerFont = 'Calibri';
 
     // Return customization settings object
     const settings = {

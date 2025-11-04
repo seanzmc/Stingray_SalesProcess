@@ -25,19 +25,11 @@
   </head>
 
   <body>
-    <!-- Tab Navigation -->
+    <!-- Tab Navigation - Single Tab for Appearance -->
     <div class="tab-container">
       <button class="tab active"
-              onclick="switchTab('salespeople')">
-        👥 Sales Team
-      </button>
-      <button class="tab"
               onclick="switchTab('appearance')">
-        🎨 Appearance
-      </button>
-      <button class="tab"
-              onclick="switchTab('dates')">
-        📅 Date Settings
+        🎨 Theme Colors
       </button>
     </div>
 
@@ -48,106 +40,7 @@
       <div>Loading configuration...</div>
     </div>
 
-    <!-- Tab 1: Salesperson Management -->
-    <div id="tab-salespeople"
-         class="tab-content active">
-      <div class="section-header">Sales Team Members</div>
-
-      <!-- Add New Salesperson Form -->
-      <div id="add-form"
-           class="form-group">
-        <label for="new-fullname">Full Name *</label>
-        <input type="text"
-               id="new-fullname"
-               placeholder="e.g., John Smith"
-               maxlength="100">
-        <div id="fullname-validation"
-             class="validation-message hidden"></div>
-
-        <label for="new-aliases"
-               style="margin-top: 12px;">Aliases (comma-separated)</label>
-        <input type="text"
-               id="new-aliases"
-               placeholder="e.g., John, JS, Johnny"
-               maxlength="200">
-        <div class="help-text">Common nicknames or codes this person is known by</div>
-        <div id="aliases-validation"
-             class="validation-message hidden"></div>
-
-        <label for="new-displaycode"
-               style="margin-top: 12px;">Display Code *</label>
-        <input type="text"
-               id="new-displaycode"
-               placeholder="e.g., JS"
-               maxlength="4">
-        <div class="help-text">2-4 character code for leaderboard (auto-generated from initials)</div>
-        <div id="displaycode-validation"
-             class="validation-message hidden"></div>
-
-        <div class="button-group">
-          <button class="btn-primary"
-                  onclick="addSalesperson()">Add Salesperson</button>
-          <button class="btn-secondary"
-                  onclick="clearAddForm()">Clear</button>
-        </div>
-      </div>
-
-      <!-- Update Leaderboard -->
-      <div class="form-group"
-           style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #e0e0e0;">
-        <div class="help-text"
-             style="margin-bottom: 8px;">Update the TODAY sheet leaderboard with current sales team members</div>
-        <button class="btn-secondary"
-                onclick="updateLeaderboard()"
-                style="width: 100%;">Update Leaderboard</button>
-      </div>
-
-      <!-- Salesperson List -->
-      <div class="section-header"
-           style="margin-top: 24px;">Current Team</div>
-      <div id="salesperson-list"
-           class="salesperson-list">
-        <? if (!prepareFeatureFlags(getConfiguration()).hasSalespeople) { ?>
-          <div class="help-text">No salespeople configured yet. Add your first team member using the form above.</div>
-        <? } else { ?>
-          <!-- Populated dynamically via JavaScript -->
-        <? } ?>
-      </div>
-
-      <!-- Edit Form (Hidden by default) -->
-      <div id="edit-form"
-           class="form-group hidden">
-        <div class="section-header">Edit Salesperson</div>
-        <input type="hidden"
-               id="edit-original-name">
-
-        <label for="edit-fullname">Full Name *</label>
-        <input type="text"
-               id="edit-fullname"
-               maxlength="100">
-
-        <label for="edit-aliases"
-               style="margin-top: 12px;">Aliases</label>
-        <input type="text"
-               id="edit-aliases"
-               maxlength="200">
-
-        <label for="edit-displaycode"
-               style="margin-top: 12px;">Display Code *</label>
-        <input type="text"
-               id="edit-displaycode"
-               maxlength="4">
-
-        <div class="button-group">
-          <button class="btn-primary"
-                  onclick="saveEdit()">Save Changes</button>
-          <button class="btn-secondary"
-                  onclick="cancelEdit()">Cancel</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Tab 2: Visual Customization -->
+    <!-- Theme Color Customization (single tab) -->
     <div id="tab-appearance"
          class="tab-content">
       <div class="section-header">Highlighting Colors</div>
@@ -244,41 +137,6 @@
                 onclick="saveVisualSettings()">Save Appearance</button>
         <button class="btn-secondary"
                 onclick="resetVisualDefaults()">Reset to Defaults</button>
-      </div>
-    </div>
-
-    <!-- Tab 3: Date Range Settings -->
-    <div id="tab-dates"
-         class="tab-content">
-      <div class="section-header">Business Day Configuration</div>
-
-      <div class="form-group">
-        <label class="checkbox-label">
-          <input type="checkbox"
-                 id="skip-sundays">
-          Skip Sundays
-        </label>
-        <div class="help-text">When checked, Monday logs sales from Saturday. Uncheck to log Sunday sales.</div>
-      </div>
-
-      <div class="section-header"
-           style="margin-top: 24px;">Archive Settings</div>
-
-      <div class="form-group">
-        <label for="archive-format">Archive Sheet Name Format</label>
-        <select id="archive-format">
-          <option value="M/YY">M/YY (e.g., 5/25)</option>
-          <option value="MM/YY">MM/YY (e.g., 05/25)</option>
-          <option value="MMM/YY">MMM/YY (e.g., May/25)</option>
-        </select>
-        <div class="help-text">Format for monthly archive sheet names</div>
-      </div>
-
-      <div class="button-group">
-        <button class="btn-primary"
-                onclick="saveDateSettings()">Save Date Settings</button>
-        <button class="btn-secondary"
-                onclick="resetDateDefaults()">Reset to Defaults</button>
       </div>
     </div>
 
