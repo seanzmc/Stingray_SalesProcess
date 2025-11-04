@@ -489,89 +489,19 @@ function deleteSalesperson(fullName) {
 function updateLeaderboard() {
   try {
     Logger.log('Starting leaderboard update...');
-    
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    
-    // Get SALESPEOPLE sheet
-    const salesSheet = ss.getSheetByName('SALESPEOPLE');
-    if (!salesSheet) {
-      throw new Error('SALESPEOPLE sheet not found');
-    }
-    
-    // Get TODAY sheet
-    const todaySheet = ss.getSheetByName('TODAY');
-    if (!todaySheet) {
-      throw new Error('TODAY sheet not found');
-    }
-    
-    // Read all salespeople full names from column A (starting at row 2)
-    const lastRow = salesSheet.getLastRow();
-    let salespeople = [];
-    
-    if (lastRow > 1) {
-      const salespeopleData = salesSheet.getRange(2, 1, lastRow - 1, 1).getValues();
-      salespeople = salespeopleData
-        .map(row => String(row[0]).trim())
-        .filter(name => name); // Remove empty names
-    }
-    
-    Logger.log('Found ' + salespeople.length + ' salespeople in SALESPEOPLE sheet');
-    
-    // Calculate dynamic range based on actual salesperson count
-    const salespersonCount = Math.min(Math.max(1, salespeople.length), 200);
-    const endRow = salespersonCount + 1; // +1 because start row is 2
-    const leaderboardRangeA1 = `P2:R${endRow}`;
-    
-    // Get the dynamic leaderboard range
-    const leaderboardRange = todaySheet.getRange(leaderboardRangeA1);
-    const leaderboardData = leaderboardRange.getValues();
-    
-    // Build a map of existing leaderboard data keyed by salesperson name
-    const existingDataMap = {};
-    for (let i = 0; i < leaderboardData.length; i++) {
-      const name = String(leaderboardData[i][0] || '').trim();
-      if (name) {
-        existingDataMap[name] = {
-          mtd: leaderboardData[i][1] ?? '',
-          avg: leaderboardData[i][2] ?? ''
-        };
-      }
-    }
-    
-    // Create new leaderboard data using name-based matching
-    const newLeaderboardData = [];
-    
-    for (let i = 0; i < salespersonCount; i++) {
-      if (i < salespeople.length) {
-        const name = salespeople[i];
-        const existingData = existingDataMap[name];
-        
-        // Add salesperson with preserved MTD and 3-month average (matched by name)
-        newLeaderboardData.push([
-          name,                           // Column P: NAME
-          existingData?.mtd ?? '',        // Column Q: MTD SALES (matched by name)
-          existingData?.avg ?? ''         // Column R: 3mo. AVERAGE (matched by name)
-        ]);
-      } else {
-        // Fill remaining rows with empty data (should not happen with correct count)
-        newLeaderboardData.push(['', '', '']);
-      }
-    }
-    
-    // Write updated leaderboard data back to sheet
-    leaderboardRange.setValues(newLeaderboardData);
-    
-    // Apply left-alignment to names column (P)
-    todaySheet.getRange(`P2:P${endRow}`).setHorizontalAlignment("left");
-    
-    Logger.log('Leaderboard updated successfully with ' + salespeople.length + ' salespeople');
-    
+    const result = syncLeaderboardWithSalespeople({
+      preserveMtd: true,
+      recalculateAverages: true
+    });
+
+    Logger.log('Leaderboard updated successfully with ' + result.count + ' salespeople');
+
     return {
-      success: true,
-      count: salespeople.length,
-      message: 'Leaderboard updated successfully'
+      success: result.success,
+      count: result.count,
+      message: result.message
     };
-    
+
   } catch (e) {
     logError('updateLeaderboard', e);
     throw new Error('Failed to update leaderboard: ' + e.message);

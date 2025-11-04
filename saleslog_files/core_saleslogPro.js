@@ -380,6 +380,243 @@ function getDynamicLeaderboardRanges() {
   };
 }
 
+/**
+ * Removes cached salesperson alias/display maps to ensure new SALESPEOPLE data is picked up.
+ */
+function invalidateSalespersonMapCache() {
+  try {
+    CACHE.remove(CACHE_KEY_NAME_MAP);
+  } catch (e) {
+    logWarning('invalidateSalespersonMapCache', 'Failed to clear salesperson map cache', { error: e.toString() });
+  }
+}
+
+/**
+ * Builds a map of salesperson names to their 3-month rolling average using archived leaderboard sheets.
+ * @param {string[]} names - Salesperson full names to evaluate
+ * @returns {Object} Map of fullName -> average (number)
+ */
+function computeThreeMonthAverageMap(names) {
+  const uniqueNames = Array.from(
+    new Set((names || []).map((name) => String(name || '').trim()).filter((name) => name))
+  );
+
+  if (uniqueNames.length === 0) {
+    return {};
+  }
+
+  const archiveCache = {};
+  const averages = {};
+  const currentDate = new Date();
+
+  const loadArchiveMap = (sheetName) => {
+    if (archiveCache[sheetName]) {
+      return archiveCache[sheetName];
+    }
+
+    const sheet = SS.getSheetByName(sheetName);
+    if (!sheet) {
+      archiveCache[sheetName] = {};
+      return archiveCache[sheetName];
+    }
+
+    try {
+      const lastRow = sheet.getLastRow();
+      const rowCount = Math.min(200, Math.max(0, lastRow - 1));
+      if (rowCount <= 0) {
+        archiveCache[sheetName] = {};
+        return archiveCache[sheetName];
+      }
+
+      const values = sheet.getRange(2, 16, rowCount, 3).getValues();
+      const map = {};
+      values.forEach((row) => {
+        const name = String(row[0] || '').trim();
+        if (!name) {
+          return;
+        }
+        let mtdValue = row[1];
+        if (typeof mtdValue !== 'number') {
+          const parsed = Number(mtdValue);
+          mtdValue = isNaN(parsed) ? null : parsed;
+        }
+        if (typeof mtdValue === 'number' && !isNaN(mtdValue)) {
+          map[name] = mtdValue;
+        }
+      });
+
+      archiveCache[sheetName] = map;
+      return archiveCache[sheetName];
+    } catch (e) {
+      logWarning('computeThreeMonthAverageMap', 'Error reading archive sheet for averages', {
+        sheetName,
+        error: e.toString()
+      });
+      archiveCache[sheetName] = {};
+      return archiveCache[sheetName];
+    }
+  };
+
+  uniqueNames.forEach((name) => {
+    let total = 0;
+    let months = 0;
+    const cursorDate = new Date(currentDate);
+
+    for (let i = 0; i < 3; i++) {
+      let archiveYear = cursorDate.getFullYear();
+      let archiveMonthIndex = cursorDate.getMonth() - 1;
+      if (archiveMonthIndex < 0) {
+        archiveMonthIndex = 11;
+        archiveYear--;
+      }
+      const sheetName = `${archiveMonthIndex + 1}/${String(archiveYear % 100).padStart(2, "0")}`;
+      const archiveMap = loadArchiveMap(sheetName);
+      const value = archiveMap[name];
+      if (typeof value === 'number' && !isNaN(value)) {
+        total += value;
+        months++;
+      }
+      cursorDate.setMonth(cursorDate.getMonth() - 1);
+    }
+
+    averages[name] = months > 0 ? roundHalf(total / months) : 0;
+  });
+
+  return averages;
+}
+
+/**
+ * Synchronizes the TODAY sheet leaderboard with the SALESPEOPLE roster.
+ * - Expands or contracts the leaderboard range to match active salespeople
+ * - Preserves existing MTD counts when names match
+ * - Recalculates 3-month averages from archived leaderboards
+ * - Reapplies conditional formatting for the updated range
+ *
+ * @param {Object} [options]
+ * @param {boolean} [options.preserveMtd=true] - Preserve existing MTD values when possible
+ * @param {boolean} [options.recalculateAverages=true] - Recompute 3-month averages
+ * @returns {{success: boolean, count: number, message: string}}
+ */
+function syncLeaderboardWithSalespeople(options = {}) {
+  const { preserveMtd = true, recalculateAverages = true } = options;
+
+  try {
+    const sheets = getSheets();
+    const todaySheet = sheets.today;
+    const salesSheet = sheets.sales;
+
+    const lastRow = salesSheet.getLastRow();
+    let salespeople = [];
+    if (lastRow > 1) {
+      const raw = salesSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      salespeople = raw
+        .map((row) => String(row[0] || '').trim())
+        .filter((name) => name)
+        .slice(0, 200);
+    }
+
+    const rowCount = Math.min(Math.max(1, salespeople.length), 200);
+    const endRow = rowCount + 1;
+
+    const availableRows = Math.max(0, todaySheet.getMaxRows() - 1);
+    const rowsToRead = preserveMtd
+      ? Math.min(Math.max(rowCount, Math.min(availableRows, 200)), availableRows)
+      : 0;
+    const existingDataMap = {};
+
+    if (preserveMtd && rowsToRead > 0) {
+      const existingValues = todaySheet.getRange(2, 16, rowsToRead, 3).getValues();
+      existingValues.forEach((row) => {
+        const name = String(row[0] || '').trim();
+        if (!name) {
+          return;
+        }
+        const mtdValue = typeof row[1] === 'number' ? row[1] : Number(row[1]) || 0;
+        const avgValue = typeof row[2] === 'number' ? row[2] : Number(row[2]) || 0;
+        existingDataMap[name] = { mtd: mtdValue, avg: avgValue };
+      });
+    }
+
+    const rowsToClear = Math.min(availableRows, 200);
+    if (rowsToClear > 0) {
+      todaySheet.getRange(2, 16, rowsToClear, 3).clearContent();
+    }
+
+    if (todaySheet.getMaxRows() < endRow) {
+      todaySheet.insertRowsAfter(todaySheet.getMaxRows(), endRow - todaySheet.getMaxRows());
+    }
+
+    const averages = recalculateAverages ? computeThreeMonthAverageMap(salespeople) : {};
+
+    const populatedRows = salespeople.map((name) => {
+      const preserved = preserveMtd ? existingDataMap[name] : null;
+      const mtd = preserved ? preserved.mtd : 0;
+      const avg = recalculateAverages ? averages[name] ?? 0 : preserved?.avg ?? 0;
+      return [name, mtd, avg];
+    });
+
+    const blankRowsNeeded = rowCount - populatedRows.length;
+    for (let i = 0; i < blankRowsNeeded; i++) {
+      populatedRows.push(['', 0, 0]);
+    }
+
+    const rowsWithNames = populatedRows.filter((row) => row[0]);
+    rowsWithNames.sort((a, b) => {
+      const mtdDiff = (Number(b[1]) || 0) - (Number(a[1]) || 0);
+      if (mtdDiff !== 0) return mtdDiff;
+      const avgDiff = (Number(b[2]) || 0) - (Number(a[2]) || 0);
+      if (avgDiff !== 0) return avgDiff;
+      return a[0].localeCompare(b[0]);
+    });
+
+    const finalRows = [...rowsWithNames];
+    while (finalRows.length < rowCount) {
+      finalRows.push(['', 0, 0]);
+    }
+
+    if (finalRows.length === 0) {
+      finalRows.push(['', 0, 0]);
+    }
+
+    const targetRange = todaySheet.getRange(`P2:R${endRow}`);
+    targetRange.setValues(finalRows);
+    todaySheet.getRange(`P2:P${endRow}`).setHorizontalAlignment('left');
+    todaySheet.getRange(`Q2:Q${endRow}`).setNumberFormat('0.#');
+    todaySheet.getRange(`R2:R${endRow}`).setNumberFormat('0.#');
+
+    reapplyCF();
+    invalidateSalespersonMapCache();
+    SpreadsheetApp.flush();
+
+    return {
+      success: true,
+      count: salespeople.length,
+      message: salespeople.length > 0
+        ? `Leaderboard refreshed for ${salespeople.length} salespeople.`
+        : 'No salespeople found in SALESPEOPLE; leaderboard cleared.'
+    };
+  } catch (e) {
+    logError('syncLeaderboardWithSalespeople', e);
+    throw new Error('Failed to synchronize leaderboard: ' + e.message);
+  }
+}
+
+/**
+ * Manual menu action to refresh the TODAY leaderboard from SALESPEOPLE data.
+ * @returns {{success: boolean, count: number, message: string}}
+ */
+function manualRefreshLeaderboard() {
+  try {
+    const result = syncLeaderboardWithSalespeople();
+    const toastTitle = result.success ? 'Leaderboard Updated' : 'Leaderboard';
+    toastInfo(result.message, toastTitle);
+    return result;
+  } catch (e) {
+    alertError(e.message || 'Unable to refresh leaderboard.', 'Leaderboard Refresh Failed');
+    throw e;
+  }
+}
+
 // Basic utilities
 /**
  * Rounds a number to the nearest 0.5 (half unit)
@@ -1747,6 +1984,7 @@ function onOpen() {
         .addItem("Start New Month (Rollover)", "rolloverMonth")
         .addSeparator()
         .addItem("Merge Monthly data with CDK", "reformatDailySales")
+        .addItem("Refresh Leaderboard", "manualRefreshLeaderboard")
         .addItem("Refresh Dashboard", "refreshDashboard")
         .addSeparator()
         .addItem("⚙️ Settings", "openConfigurationSidebar")
