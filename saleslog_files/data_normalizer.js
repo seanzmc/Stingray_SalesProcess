@@ -163,9 +163,11 @@ function reformatDailySales() {
         'Service Contract',
         'Finance Institution',
         'Salesperson',
+        'Sales Manager',
         'FI Manager',
         'Term',
-        'Comments'
+        'Comments',
+        'Age'
       ];
 
       // Set header format
