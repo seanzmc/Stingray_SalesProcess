@@ -1747,6 +1747,7 @@ function onOpen() {
         .addItem("Start New Month (Rollover)", "rolloverMonth")
         .addSeparator()
         .addItem("Merge Monthly data with CDK", "reformatDailySales")
+        .addItem("Refresh Dashboard", "refreshDashboard")
         .addSeparator()
         .addItem("⚙️ Settings", "openConfigurationSidebar")
         .addToUi();

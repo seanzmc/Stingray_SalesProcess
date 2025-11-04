@@ -2910,4 +2910,7 @@ Refer to Section 10 (Support and Resources) for assistance.
 
 **End of Deployment Guide** ✓
 
-There is a sheet in the document already built, named "DASHBOARD".  Build a function that will populate the sheet with data. It needs to pull its information from "CDK_MERGED" on demand using a menu option with the label "Refresh Dashboard". Only work with records in CDK_MERGED that are not highlighted yellow. Keeping that rule active throughout the function, Count the number of times NEW occurs in column B of CDK_MERGED and enter that value in D1 of DASHBOARD. Count the number of times USED occurs in column B of CDK_MERGED and enter that value in D2 of DASHBOARD. Add the two values together and enter that value in F2 of DASHBOARD. Closely following the mapping rules in @/header-rules.md, map the data from all non highlighted rows in CDK_MERGED to the columns in DASHBOARD.
+There is a sheet in the document already built, named "DASHBOARD".  Build a function that will populate the sheet with data.
+It needs to pull its information from "CDK_MERGED" on demand using a menu option with the label "Refresh Dashboard".
+Only work with records in CDK_MERGED that are not highlighted yellow.
+Keeping that rule active throughout the function, closely following the mapping rules in @/header-rules.md, map the data from all non highlighted rows in CDK_MERGED to the columns in DASHBOARD.
