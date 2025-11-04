@@ -21,7 +21,7 @@ DASHBOARD!F6 Header: Sales Rep
 Data Rule: Map CDK_MERGED column H
 
 DASHBOARD!G6 Header: Sales Mgr
-Data Rule: SKIP
+Data Rule: Map CDK_MERGED column AB
 
 DASHBOARD!H6 Header: Punched
 Data Rule: IF CDK_MERGED column B equals 'NEW' THEN 'Y', ELSE 'USED'
@@ -36,7 +36,7 @@ DASHBOARD!K6: Model
 Data Rule: Map CDK_MERGED column E
 
 DASHBOARD!L6: Age
-Data Rule: SKIP
+Data Rule: Map CDK_MERGED column AF
 
 DASHBOARD!M6: Trade in
 Data Rule: Map CDK_MERGED column G

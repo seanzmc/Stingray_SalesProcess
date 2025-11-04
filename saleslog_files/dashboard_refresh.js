@@ -19,12 +19,12 @@
  * - F (Stock #) -> D
  * - J (Customer Name) -> E
  * - H (Sales Rep) -> F
- * - Skip -> G
+ * - AB (Sales Mgr) -> G
  * - Conditional (Punched) -> H
  * - B (New/Used) -> I
  * - Conditional (Make) -> J
  * - E (Model) -> K
- * - Skip -> L
+ * - AF (Age) -> L
  * - G (Trade in) -> M
  * - Conditional (F/C/L) -> N
  * - T (Front Gross) -> O
@@ -151,8 +151,8 @@ function mapRowToDashboard(sourceRow) {
   // Column F: Sales Rep (CDK_MERGED column H, index 7)
   outputRow[5] = sourceRow[7] || '';
   
-  // Column G: Sales Mgr (SKIP - leave empty)
-  outputRow[6] = '';
+  // Column G: Sales Mgr (CDK_MERGED column AB, index 27)
+  outputRow[6] = sourceRow[27] || '';
   
   // Column H: Punched (conditional logic based on column B)
   const newUsedValue = sourceRow[1] || '';
@@ -167,8 +167,8 @@ function mapRowToDashboard(sourceRow) {
   // Column K: Model (CDK_MERGED column E, index 4)
   outputRow[10] = sourceRow[4] || '';
   
-  // Column L: Age (SKIP - leave empty)
-  outputRow[11] = '';
+  // Column L: Age (CDK_MERGED column AF, index 31)
+  outputRow[11] = sourceRow[31] || '';
   
   // Column M: Trade in (CDK_MERGED column G, index 6)
   outputRow[12] = sourceRow[6] || '';
