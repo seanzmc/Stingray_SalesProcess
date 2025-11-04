@@ -179,13 +179,13 @@ function mapRowToDashboard(sourceRow) {
   outputRow[13] = getFCLValue(paymentType, existingFCL);
   
   // Column O: Front Gross (CDK_MERGED column T, index 19)
-  outputRow[14] = sourceRow[19] || '';
+  outputRow[14] = sourceRow[19] ?? '';
   
   // Column P: Back Gross (CDK_MERGED column U, index 20)
-  outputRow[15] = sourceRow[20] || '';
+  outputRow[15] = sourceRow[20] ?? '';
   
   // Column Q: Total Gross (CDK_MERGED column V, index 21)
-  outputRow[16] = sourceRow[21] || '';
+  outputRow[16] = sourceRow[21] ?? '';
   
   return outputRow;
 }
