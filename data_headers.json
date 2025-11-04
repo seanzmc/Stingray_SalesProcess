@@ -1,7 +1,7 @@
 {
   "CDK_DATA": {
-    "HEADERS A:V": [
-      "Deal No.",
+    "HEADERS": [
+      "Cell": "A1", "Deal No.",
       "Customer",
       "VIN",
       "Stock No.",
@@ -73,3 +73,4 @@
     ]
   }
 }
+
