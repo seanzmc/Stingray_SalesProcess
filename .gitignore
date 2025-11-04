@@ -5,3 +5,5 @@ programIdeas/*
 *.csv
 *.xlsx
 .roo/*
+.rooignore
+
