@@ -1984,10 +1984,12 @@ function onOpen() {
         .addItem("Start New Month (Rollover)", "rolloverMonth")
         .addSeparator()
         .addItem("Merge Monthly data with CDK", "reformatDailySales")
-        .addItem("Refresh Leaderboard", "manualRefreshLeaderboard")
+        .addSeparator()
         .addItem("Refresh Dashboard", "refreshDashboard")
         .addSeparator()
-        .addItem("⚙️ Settings", "openConfigurationSidebar")
+        .addItem("Color Settings", "openConfigurationSidebar")
+        .addSeparator()
+        .addItem("Refresh Leaderboard", "manualRefreshLeaderboard")
         .addToUi();
   } catch (e) {
     // Log error with full context for debugging
