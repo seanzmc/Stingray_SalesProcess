@@ -147,26 +147,17 @@ function reformatDailySales() {
         dataRows: output.length
       });
 
-      toastInfo('Merging with CDK data...', 'Working');
-
-      const mergeStats = mergeCDKData({ mergedSheetName: outputSheetName });
-
       const summaryMsg =
-        `Sales log data has been normalized and merged.\n\n` +
-        `Records Processed: ${output.length}\n` +
-        `CDK Matches Found: ${mergeStats.matchCount}\n` +
-        `Unmatched Records: ${mergeStats.noMatchCount}\n\n` +
-        `Results are available in the "${outputSheetName}" sheet.\n` +
-        `${mergeStats.noMatchCount > 0 ? 'Unmatched rows are highlighted in yellow.' : ''}`;
+        `Sales log data has been normalized.\n\n` +
+        `Records Processed: ${output.length}\n\n` +
+        `Results are available in the "${outputSheetName}" sheet.`;
 
       showCustomAlert('Normalization Complete', summaryMsg);
 
       logInfo('reformatDailySales', 'Normalization process completed successfully', {
         sourceSheet: 'MONTHLY',
         outputSheet: outputSheetName,
-        totalRecords: output.length,
-        matchCount: mergeStats.matchCount,
-        noMatchCount: mergeStats.noMatchCount
+        totalRecords: output.length
       });
 
     } catch (error) {
@@ -464,25 +455,17 @@ function reformatSalesLogSheetInFocus() {
       resultSheet.getRange(2, 1, normalization.records.length, normalization.records[0].length)
         .setValues(normalization.records);
 
-      toastInfo('Merging with CDK data...', 'Working');
-      const mergeStats = mergeCDKData({ mergedSheetName: resultSheetName });
-
       const summaryMsg =
-        `Sales log data from "${targetSheet.getName()}" has been normalized and merged.\n\n` +
-        `Records Processed: ${normalization.records.length}\n` +
-        `CDK Matches Found: ${mergeStats.matchCount}\n` +
-        `Unmatched Records: ${mergeStats.noMatchCount}\n\n` +
-        `Results are available in the "${resultSheetName}" sheet.\n` +
-        `${mergeStats.noMatchCount > 0 ? 'Unmatched rows are highlighted in yellow.' : ''}`;
+        `Sales log data from "${targetSheet.getName()}" has been normalized.\n\n` +
+        `Records Processed: ${normalization.records.length}\n\n` +
+        `Results are available in the "${resultSheetName}" sheet.`;
 
       showCustomAlert('Normalization Complete', summaryMsg);
 
       logInfo('reformatSalesLogSheetInFocus', 'Normalization process completed successfully', {
         sourceSheet: targetSheet.getName(),
         outputSheet: resultSheetName,
-        totalRecords: normalization.records.length,
-        matchCount: mergeStats.matchCount,
-        noMatchCount: mergeStats.noMatchCount
+        totalRecords: normalization.records.length
       });
 
     } catch (error) {
