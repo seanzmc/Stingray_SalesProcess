@@ -8,31 +8,7 @@ const NORMALIZED_SALES_HEADERS = [
   'Model',
   'StockNo',
   'Trade',
-  'Sales Person',
-  'Deal Number',
-  'Customer',
-  'VIN',
-  'Stock No.',
-  'Status',
-  'PLC',
-  'Contract Date',
-  'Sale Type',
-  'Year',
-  'Model',
-  'StockType',
-  'Front GP$',
-  'Back GP$',
-  'GP$',
-  'Cash Price',
-  'Trades',
-  'Service Contract',
-  'Finance Institution',
-  'Salesperson',
-  'Sales Manager',
-  'FI Manager',
-  'Term',
-  'Comments',
-  'Age'
+  'Sales Person'
 ];
 
 /**
