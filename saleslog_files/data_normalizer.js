@@ -113,12 +113,6 @@ function reformatDailySales() {
         usedRecords: normalization.stats.usedRecords
       });
 
-      if (!normalization.format.isValid) {
-        logWarning('reformatDailySales', 'MONTHLY sheet failed format validation', normalization.format);
-        alertError(normalization.format.message, 'Invalid Sheet Layout');
-        return;
-      }
-
       const output = normalization.records;
 
       if (output.length === 0) {
@@ -418,8 +412,6 @@ function reformatSalesLogSheetInFocus() {
       }
 
       let targetSheet = ss.getActiveSheet();
-      const attemptedSheetNames = [];
-
       const eligibility = isEligibleSalesSourceSheet(targetSheet);
       if (!eligibility.eligible) {
         if (eligibility.reason) {
@@ -433,47 +425,16 @@ function reformatSalesLogSheetInFocus() {
         return;
       }
 
-      let normalization;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const sheetName = targetSheet.getName();
-        attemptedSheetNames.push(sheetName);
+      toastInfo('Normalizing "' + targetSheet.getName() + '"...', 'Working');
+      const normalization = normalizeSalesSheetData(targetSheet);
 
-        toastInfo('Normalizing "' + sheetName + '"...', 'Working');
-        normalization = normalizeSalesSheetData(targetSheet);
-
-        logInfo('reformatSalesLogSheetInFocus', 'Sheet scan complete', {
-          sheetName,
-          totalRows: normalization.stats.totalRows,
-          dataRows: normalization.stats.dataRows,
-          newRecords: normalization.stats.newRecords,
-          usedRecords: normalization.stats.usedRecords
-        });
-
-        if (normalization.format.isValid) {
-          break;
-        }
-
-        logWarning('reformatSalesLogSheetInFocus', 'Sheet failed format validation', {
-          sheetName,
-          reason: normalization.format.message,
-          firstProblemRow: normalization.format.firstDataRowIndexWithoutDate
-        });
-        showCustomAlert(
-          'Invalid Sheet Layout',
-          normalization.format.message + '\n\nSheet: "' + sheetName + '"'
-        );
-
-        targetSheet = promptForSalesSheetSelection(attemptedSheetNames);
-        if (!targetSheet) {
-          showCustomAlert('Normalization Cancelled', 'No sheet selected to normalize.');
-          return;
-        }
-      }
-
-      if (!normalization || !normalization.format.isValid) {
-        showCustomAlert('Normalization Cancelled', 'Unable to find a sheet with the expected layout.');
-        return;
-      }
+      logInfo('reformatSalesLogSheetInFocus', 'Sheet scan complete', {
+        sheetName: targetSheet.getName(),
+        totalRows: normalization.stats.totalRows,
+        dataRows: normalization.stats.dataRows,
+        newRecords: normalization.stats.newRecords,
+        usedRecords: normalization.stats.usedRecords
+      });
 
       if (normalization.records.length === 0) {
         showCustomAlert(
@@ -547,13 +508,7 @@ function normalizeSalesSheetData(sheet) {
     return {
       records: [],
       stats,
-      format: {
-        isValid: false,
-        message: 'Sheet reference not provided.',
-        hasDateRow: false,
-        encounteredDataBeforeDate: false,
-        firstDataRowIndexWithoutDate: null
-      }
+      format: { isValid: false, message: 'Sheet reference not provided.' }
     };
   }
 
@@ -561,76 +516,43 @@ function normalizeSalesSheetData(sheet) {
   stats.totalRows = data.length;
 
   const records = [];
-  let currentDate = null;
-  let hasDateRow = false;
-  let encounteredDataBeforeDate = false;
-  let firstDataRowIndexWithoutDate = null;
+  let currentDate = '';
 
   data.forEach((row, index) => {
     const dateCell = row[0];
     if (dateCell instanceof Date) {
       currentDate = dateCell;
-      hasDateRow = true;
       return;
     }
 
-    const newBlock = row.slice(1, 7);
-    const usedBlock = row.slice(8, 14);
-    const newHasContent = newBlock.join('').trim() !== '';
-    const usedHasContent = usedBlock.join('').trim() !== '';
-
-    if (!newHasContent && !usedHasContent) {
+    const isEmpty = row.join('').trim() === '';
+    if (isEmpty) {
       stats.blankRows++;
       return;
     }
 
     stats.dataRows++;
 
-    if (!hasDateRow) {
-      encounteredDataBeforeDate = true;
-      if (firstDataRowIndexWithoutDate === null) {
-        firstDataRowIndexWithoutDate = index + 1;
-      }
-      return;
+    const newData = row.slice(1, 7);
+    const hasNewFI = newData[1] && isValidFIFlag(String(newData[1]));
+    if (newData.join('').trim() !== '' && hasNewFI) {
+      records.push([currentDate, 'NEW', ...newData]);
+      stats.newRecords++;
     }
 
-    if (newHasContent) {
-      const hasNewFI = newBlock[1] && isValidFIFlag(String(newBlock[1]));
-      if (hasNewFI) {
-        records.push([currentDate, 'NEW', ...newBlock]);
-        stats.newRecords++;
-      }
-    }
-
-    if (usedHasContent) {
-      const hasUsedFI = usedBlock[1] && isValidFIFlag(String(usedBlock[1]));
-      if (hasUsedFI) {
-        records.push([currentDate, 'USED', ...usedBlock]);
-        stats.usedRecords++;
-      }
+    const usedData = row.slice(8, 14);
+    const hasUsedFI = usedData[1] && isValidFIFlag(String(usedData[1]));
+    if (usedData.join('').trim() !== '' && hasUsedFI) {
+      records.push([currentDate, 'USED', ...usedData]);
+      stats.usedRecords++;
     }
   });
 
-  const format = {
-    isValid: true,
-    message: '',
-    hasDateRow,
-    encounteredDataBeforeDate,
-    firstDataRowIndexWithoutDate
+  return {
+    records,
+    stats,
+    format: { isValid: true, message: '' }
   };
-
-  if (!hasDateRow) {
-    format.isValid = false;
-    format.message = 'No date rows were found in column A. Ensure each day starts with a date cell before the sales entries.';
-  } else if (encounteredDataBeforeDate) {
-    format.isValid = false;
-    const rowInfo = firstDataRowIndexWithoutDate
-      ? ' (first issue on row ' + firstDataRowIndexWithoutDate + ')'
-      : '';
-    format.message = 'Sales rows appear before the first date row. Move the date cell above the sales entries.' + rowInfo;
-  }
-
-  return { records, stats, format };
 }
 
 function isEligibleSalesSourceSheet(sheet) {
