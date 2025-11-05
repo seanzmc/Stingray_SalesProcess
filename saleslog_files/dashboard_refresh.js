@@ -14,7 +14,7 @@
  * 
  * Column Mapping (CDK_MERGED -> DASHBOARD):
  * - A (Date) -> A
- * - B (Skip) -> B
+ * - AG (RDR Date) -> B
  * - I (Deal #) -> C
  * - F (Stock #) -> D
  * - J (Customer Name) -> E
@@ -136,8 +136,8 @@ function mapRowToDashboard(sourceRow) {
   // Column A: Date (CDK_MERGED column A, index 0)
   outputRow[0] = sourceRow[0] || '';
   
-  // Column B: Date Reported (SKIP - leave empty)
-  outputRow[1] = '';
+  // Column B: RDR Date (CDK_MERGED column AG, index 32)
+  outputRow[1] = sourceRow[32] || '';
   
   // Column C: Deal # (CDK_MERGED column I, index 8)
   outputRow[2] = sourceRow[8] || '';
