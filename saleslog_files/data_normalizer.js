@@ -1,5 +1,40 @@
 'use strict';
 
+const NORMALIZED_SALES_HEADERS = [
+  'Date',
+  'Type',
+  'Customer',
+  'FI',
+  'Model',
+  'StockNo',
+  'Trade',
+  'Sales Person',
+  'Deal Number',
+  'Customer',
+  'VIN',
+  'Stock No.',
+  'Status',
+  'PLC',
+  'Contract Date',
+  'Sale Type',
+  'Year',
+  'Model',
+  'StockType',
+  'Front GP$',
+  'Back GP$',
+  'GP$',
+  'Cash Price',
+  'Trades',
+  'Service Contract',
+  'Finance Institution',
+  'Salesperson',
+  'Sales Manager',
+  'FI Manager',
+  'Term',
+  'Comments',
+  'Age'
+];
+
 /**
  * Data Normalizer Module for Sales Log Pro
  * Normalizes and reformats daily sales data from MONTHLY sheet for CDK integration
@@ -55,10 +90,10 @@
 function reformatDailySales() {
   withScriptLock(() => {
     try {
+      const outputSheetName = 'CDK_MERGED';
       logInfo('reformatDailySales', 'Starting data normalization process');
       toastInfo('Normalizing sales log data...', 'Working');
 
-      // Validate required sheets exist
       const ss = SpreadsheetApp.getActiveSpreadsheet();
       const monthlySheet = ss.getSheetByName('MONTHLY');
 
@@ -69,49 +104,22 @@ function reformatDailySales() {
         return;
       }
 
-      // Read all data from MONTHLY sheet (columns A:N)
-      const data = monthlySheet.getRange('A:N').getValues();
-      const output = [];
-      let currentDate = '';
+      const normalization = normalizeSalesSheetData(monthlySheet);
 
       logInfo('reformatDailySales', 'Processing MONTHLY sheet data', {
-        totalRows: data.length
+        totalRows: normalization.stats.totalRows,
+        dataRows: normalization.stats.dataRows,
+        newRecords: normalization.stats.newRecords,
+        usedRecords: normalization.stats.usedRecords
       });
 
-      // Process each row
-      for (let i = 0; i < data.length; i++) {
-        const row = data[i];
-
-        // Detect a date row (merged date previously in column A)
-        if (row[0] instanceof Date) {
-          currentDate = row[0];
-          continue;
-        }
-
-        // Skip blank rows
-        const isEmpty = row.join('').trim() === '';
-        if (isEmpty) continue;
-
-        // NEW sale block (columns B-G → indexes 1-6)
-        const newData = row.slice(1, 7);
-        // Filter out rows that do not have a valid FI initial
-        const hasNewFI = newData[1] && isValidFIFlag(String(newData[1]));
-        if (newData.join('').trim() !== '' && hasNewFI) {
-          output.push([currentDate, 'NEW', ...newData]);
-        }
-
-        // USED sale block (columns I-N → indexes 8-13)
-        const usedData = row.slice(8, 14);
-        // Filter out rows that do not have a valid FI initial
-        const hasUsedFI = usedData[1] && isValidFIFlag(String(usedData[1]));
-        if (usedData.join('').trim() !== '' && hasUsedFI) {
-          output.push([currentDate, 'USED', ...usedData]);
-        }
+      if (!normalization.format.isValid) {
+        logWarning('reformatDailySales', 'MONTHLY sheet failed format validation', normalization.format);
+        alertError(normalization.format.message, 'Invalid Sheet Layout');
+        return;
       }
 
-      logInfo('reformatDailySales', 'Data extraction complete', {
-        recordsExtracted: output.length
-      });
+      const output = normalization.records;
 
       if (output.length === 0) {
         showCustomAlert(
@@ -122,89 +130,46 @@ function reformatDailySales() {
         return;
       }
 
-      // Create or clear CDK_MERGED sheet
-      let cleanedSheet = ss.getSheetByName('CDK_MERGED');
+      let cleanedSheet = ss.getSheetByName(outputSheetName);
       if (!cleanedSheet) {
-        cleanedSheet = ss.insertSheet('CDK_MERGED');
-        logInfo('reformatDailySales', 'Created new CDK_MERGED sheet');
+        cleanedSheet = ss.insertSheet(outputSheetName);
+        logInfo('reformatDailySales', 'Created output sheet', { sheetName: outputSheetName });
       } else {
         cleanedSheet.clear();
-        logInfo('reformatDailySales', 'Cleared existing CDK_MERGED sheet');
+        logInfo('reformatDailySales', 'Cleared existing output sheet', { sheetName: outputSheetName });
       }
 
-      // Define headers for CDK_MERGED sheet
-      // First 8 columns are from sales log, remaining will be CDK data
-      const headers = [
-        'Date',
-        'Type',
-        'Customer',
-        'FI',
-        'Model',
-        'StockNo',
-        'Trade',
-        'Sales Person',
-        // CDK_DATA headers (will be merged)
-        'Deal Number',
-        'Customer',
-        'VIN',
-        'Stock No.',
-        'Status',
-        'PLC',
-        'Contract Date',
-        'Sale Type',
-        'Year',
-        'Model',
-        'StockType',
-        'Front GP$',
-        'Back GP$',
-        'GP$',
-        'Cash Price',
-        'Trades',
-        'Service Contract',
-        'Finance Institution',
-        'Salesperson',
-        'Sales Manager',
-        'FI Manager',
-        'Term',
-        'Comments',
-        'Age'
-      ];
-
-      // Set header format
-      cleanedSheet.getRange(1, 1, 1, headers.length)
-        .setValues([headers])
+      cleanedSheet.getRange(1, 1, 1, NORMALIZED_SALES_HEADERS.length)
+        .setValues([NORMALIZED_SALES_HEADERS])
         .setFontWeight('bold')
         .setHorizontalAlignment('center')
         .setVerticalAlignment('center');
 
-      // Write normalized data
-      if (output.length > 0) {
-        cleanedSheet.getRange(2, 1, output.length, output[0].length)
-          .setValues(output);
-      }
+      cleanedSheet.getRange(2, 1, output.length, output[0].length).setValues(output);
 
-      logInfo('reformatDailySales', 'CDK_MERGED sheet populated', {
-        headers: headers.length,
+      logInfo('reformatDailySales', 'Output sheet populated', {
+        sheetName: outputSheetName,
+        headers: NORMALIZED_SALES_HEADERS.length,
         dataRows: output.length
       });
 
       toastInfo('Merging with CDK data...', 'Working');
 
-      // Merge CDK_DATA with CDK_MERGED sheet
-      const mergeStats = mergeCDKData();
+      const mergeStats = mergeCDKData({ mergedSheetName: outputSheetName });
 
-      // Show completion message with statistics
       const summaryMsg =
         `Sales log data has been normalized and merged.\n\n` +
         `Records Processed: ${output.length}\n` +
         `CDK Matches Found: ${mergeStats.matchCount}\n` +
         `Unmatched Records: ${mergeStats.noMatchCount}\n\n` +
-        `Results are available in the "CDK_MERGED" sheet.\n` +
+        `Results are available in the "${outputSheetName}" sheet.\n` +
         `${mergeStats.noMatchCount > 0 ? 'Unmatched rows are highlighted in yellow.' : ''}`;
 
       showCustomAlert('Normalization Complete', summaryMsg);
 
       logInfo('reformatDailySales', 'Normalization process completed successfully', {
+        sourceSheet: 'MONTHLY',
+        outputSheet: outputSheetName,
         totalRecords: output.length,
         matchCount: mergeStats.matchCount,
         noMatchCount: mergeStats.noMatchCount
@@ -242,18 +207,19 @@ function reformatDailySales() {
  * @returns {Object} Statistics {matchCount, noMatchCount, totalRows}
  * @throws {Error} If required sheets or columns are not found
  */
-function mergeCDKData() {
+function mergeCDKData(options = {}) {
   try {
-    logInfo('mergeCDKData', 'Starting CDK data merge operation');
+    const mergedSheetName = options.mergedSheetName || 'CDK_MERGED';
+    logInfo('mergeCDKData', 'Starting CDK data merge operation', { mergedSheetName });
 
     // === VALIDATION ===
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const cleanedSheet = ss.getSheetByName('CDK_MERGED');
+    const cleanedSheet = ss.getSheetByName(mergedSheetName);
     const cdkSheet = ss.getSheetByName('CDK_DATA');
 
     if (!cleanedSheet || !cdkSheet) {
       const missingSheets = [];
-      if (!cleanedSheet) missingSheets.push('CDK_MERGED');
+      if (!cleanedSheet) missingSheets.push(mergedSheetName);
       if (!cdkSheet) missingSheets.push('CDK_DATA');
 
       const errorMsg = `Required sheets not found: ${missingSheets.join(', ')}`;
@@ -262,7 +228,7 @@ function mergeCDKData() {
       // Return empty stats if CDK_DATA doesn't exist (non-critical)
       if (!cdkSheet) {
         logInfo('mergeCDKData', 'CDK_DATA sheet not found, skipping merge');
-        return { matchCount: 0, noMatchCount: 0, totalRows: 0 };
+        return { matchCount: 0, noMatchCount: 0, totalRows: 0, mergedSheetName };
       }
 
       throw new Error(errorMsg);
@@ -285,6 +251,7 @@ function mergeCDKData() {
     }
 
     logInfo('mergeCDKData', 'Header detection complete', {
+      mergedSheetName,
       cleanedKeyIndex: cleanedKeyIndex,
       cdkKeyIndex: cdkKeyIndex
     });
@@ -295,16 +262,17 @@ function mergeCDKData() {
 
     // Early return for empty sheets
     if (cleanedData.length === 0) {
-      logWarning('mergeCDKData', 'CDK_MERGED sheet is empty. No merge needed.');
-      return { matchCount: 0, noMatchCount: 0, totalRows: 0 };
+      logWarning('mergeCDKData', `${mergedSheetName} sheet is empty. No merge needed.`);
+      return { matchCount: 0, noMatchCount: 0, totalRows: 0, mergedSheetName };
     }
 
     if (cdkData.length === 0) {
       logWarning('mergeCDKData', 'CDK_DATA sheet is empty. Skipping merge.');
-      return { matchCount: 0, noMatchCount: cleanedData.length, totalRows: cleanedData.length };
+      return { matchCount: 0, noMatchCount: cleanedData.length, totalRows: cleanedData.length, mergedSheetName };
     }
 
     logInfo('mergeCDKData', 'Data loaded', {
+      mergedSheetName,
       cleanedRows: cleanedData.length,
       cdkRows: cdkData.length
     });
@@ -316,7 +284,7 @@ function mergeCDKData() {
       if (key) cdkMap.set(key, row);
     }
 
-    logInfo('mergeCDKData', 'CDK Map built', { mapSize: cdkMap.size });
+    logInfo('mergeCDKData', 'CDK Map built', { mapSize: cdkMap.size, mergedSheetName });
 
     // === MERGE LOGIC with TRACKING ===
     let matchCount = 0;
@@ -362,7 +330,8 @@ function mergeCDKData() {
       cleanedSheet.getRange(2, 1, paddedData.length, maxCols).setValues(paddedData);
       SpreadsheetApp.flush(); // Ensure write completion
 
-      logInfo('mergeCDKData', 'Merged data written to CDK_MERGED sheet', {
+      logInfo('mergeCDKData', `Merged data written to ${mergedSheetName}`, {
+        mergedSheetName,
         rows: paddedData.length,
         columns: maxCols
       });
@@ -382,7 +351,7 @@ function mergeCDKData() {
         cdkSheet.getRange(2, 1, cdkLastRow - 1, cdkLastCol).setBackground(null);
       }
 
-      logInfo('mergeCDKData', 'Cleared existing background colors from both sheets');
+      logInfo('mergeCDKData', 'Cleared existing background colors from both sheets', { mergedSheetName });
 
       // === CONDITIONAL FORMATTING for unmatched rows ===
       // Format unmatched rows in CDK_MERGED sheet with light yellow background
@@ -392,7 +361,9 @@ function mergeCDKData() {
         );
         const cleanedRangeList = cleanedSheet.getRangeList(cleanedRanges.map(r => r.getA1Notation()));
         cleanedRangeList.setBackground('#FFFFE0');
-        logInfo('mergeCDKData', `Highlighted ${unmatchedCleanedRows.length} unmatched rows in CDK_MERGED sheet`);
+        logInfo('mergeCDKData', `Highlighted ${unmatchedCleanedRows.length} unmatched rows`, {
+          mergedSheetName
+        });
       }
 
       // Format unmatched rows in CDK_DATA sheet
@@ -419,7 +390,8 @@ function mergeCDKData() {
     const stats = {
       matchCount: matchCount,
       noMatchCount: noMatchCount,
-      totalRows: mergedData.length
+      totalRows: mergedData.length,
+      mergedSheetName
     };
 
     const matchRate = mergedData.length > 0
@@ -433,5 +405,313 @@ function mergeCDKData() {
   } catch (error) {
     logError('mergeCDKData', error);
     throw error;
+  }
+}
+
+function reformatSalesLogSheetInFocus() {
+  withScriptLock(() => {
+    try {
+      const ss = SpreadsheetApp.getActiveSpreadsheet();
+      if (!ss) {
+        alertError('Unable to access the active spreadsheet.', 'Spreadsheet Missing');
+        return;
+      }
+
+      let targetSheet = ss.getActiveSheet();
+      const attemptedSheetNames = [];
+
+      const eligibility = isEligibleSalesSourceSheet(targetSheet);
+      if (!eligibility.eligible) {
+        if (eligibility.reason) {
+          showCustomAlert('Select a Source Sheet', eligibility.reason);
+        }
+        targetSheet = promptForSalesSheetSelection(targetSheet ? [targetSheet.getName()] : []);
+      }
+
+      if (!targetSheet) {
+        showCustomAlert('Normalization Cancelled', 'No sheet selected to normalize.');
+        return;
+      }
+
+      let normalization;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const sheetName = targetSheet.getName();
+        attemptedSheetNames.push(sheetName);
+
+        toastInfo('Normalizing "' + sheetName + '"...', 'Working');
+        normalization = normalizeSalesSheetData(targetSheet);
+
+        logInfo('reformatSalesLogSheetInFocus', 'Sheet scan complete', {
+          sheetName,
+          totalRows: normalization.stats.totalRows,
+          dataRows: normalization.stats.dataRows,
+          newRecords: normalization.stats.newRecords,
+          usedRecords: normalization.stats.usedRecords
+        });
+
+        if (normalization.format.isValid) {
+          break;
+        }
+
+        logWarning('reformatSalesLogSheetInFocus', 'Sheet failed format validation', {
+          sheetName,
+          reason: normalization.format.message,
+          firstProblemRow: normalization.format.firstDataRowIndexWithoutDate
+        });
+        showCustomAlert(
+          'Invalid Sheet Layout',
+          normalization.format.message + '\n\nSheet: "' + sheetName + '"'
+        );
+
+        targetSheet = promptForSalesSheetSelection(attemptedSheetNames);
+        if (!targetSheet) {
+          showCustomAlert('Normalization Cancelled', 'No sheet selected to normalize.');
+          return;
+        }
+      }
+
+      if (!normalization || !normalization.format.isValid) {
+        showCustomAlert('Normalization Cancelled', 'Unable to find a sheet with the expected layout.');
+        return;
+      }
+
+      if (normalization.records.length === 0) {
+        showCustomAlert(
+          'No Data Found',
+          'No valid sales records found in "' + targetSheet.getName() + '". ' +
+          'Ensure the sheet has data with valid FI flags (single letters A-Z or "BD").'
+        );
+        return;
+      }
+
+      const resultSheetName = targetSheet.getName() + '_FLAT';
+      let resultSheet = ss.getSheetByName(resultSheetName);
+      if (!resultSheet) {
+        resultSheet = ss.insertSheet(resultSheetName);
+        logInfo('reformatSalesLogSheetInFocus', 'Created new flattened sheet', { sheetName: resultSheetName });
+      } else {
+        resultSheet.clear();
+        logInfo('reformatSalesLogSheetInFocus', 'Cleared existing flattened sheet', { sheetName: resultSheetName });
+      }
+
+      resultSheet.getRange(1, 1, 1, NORMALIZED_SALES_HEADERS.length)
+        .setValues([NORMALIZED_SALES_HEADERS])
+        .setFontWeight('bold')
+        .setHorizontalAlignment('center')
+        .setVerticalAlignment('center');
+
+      resultSheet.getRange(2, 1, normalization.records.length, normalization.records[0].length)
+        .setValues(normalization.records);
+
+      toastInfo('Merging with CDK data...', 'Working');
+      const mergeStats = mergeCDKData({ mergedSheetName: resultSheetName });
+
+      const summaryMsg =
+        `Sales log data from "${targetSheet.getName()}" has been normalized and merged.\n\n` +
+        `Records Processed: ${normalization.records.length}\n` +
+        `CDK Matches Found: ${mergeStats.matchCount}\n` +
+        `Unmatched Records: ${mergeStats.noMatchCount}\n\n` +
+        `Results are available in the "${resultSheetName}" sheet.\n` +
+        `${mergeStats.noMatchCount > 0 ? 'Unmatched rows are highlighted in yellow.' : ''}`;
+
+      showCustomAlert('Normalization Complete', summaryMsg);
+
+      logInfo('reformatSalesLogSheetInFocus', 'Normalization process completed successfully', {
+        sourceSheet: targetSheet.getName(),
+        outputSheet: resultSheetName,
+        totalRecords: normalization.records.length,
+        matchCount: mergeStats.matchCount,
+        noMatchCount: mergeStats.noMatchCount
+      });
+
+    } catch (error) {
+      logError('reformatSalesLogSheetInFocus', error);
+      alertError(
+        'An error occurred during data normalization: ' + error.message,
+        'Normalization Error'
+      );
+    }
+  });
+}
+
+function normalizeSalesSheetData(sheet) {
+  const stats = {
+    totalRows: 0,
+    dataRows: 0,
+    newRecords: 0,
+    usedRecords: 0,
+    blankRows: 0
+  };
+
+  if (!sheet) {
+    return {
+      records: [],
+      stats,
+      format: {
+        isValid: false,
+        message: 'Sheet reference not provided.',
+        hasDateRow: false,
+        encounteredDataBeforeDate: false,
+        firstDataRowIndexWithoutDate: null
+      }
+    };
+  }
+
+  const data = sheet.getRange('A:N').getValues();
+  stats.totalRows = data.length;
+
+  const records = [];
+  let currentDate = null;
+  let hasDateRow = false;
+  let encounteredDataBeforeDate = false;
+  let firstDataRowIndexWithoutDate = null;
+
+  data.forEach((row, index) => {
+    const dateCell = row[0];
+    if (dateCell instanceof Date) {
+      currentDate = dateCell;
+      hasDateRow = true;
+      return;
+    }
+
+    const newBlock = row.slice(1, 7);
+    const usedBlock = row.slice(8, 14);
+    const newHasContent = newBlock.join('').trim() !== '';
+    const usedHasContent = usedBlock.join('').trim() !== '';
+
+    if (!newHasContent && !usedHasContent) {
+      stats.blankRows++;
+      return;
+    }
+
+    stats.dataRows++;
+
+    if (!hasDateRow) {
+      encounteredDataBeforeDate = true;
+      if (firstDataRowIndexWithoutDate === null) {
+        firstDataRowIndexWithoutDate = index + 1;
+      }
+      return;
+    }
+
+    if (newHasContent) {
+      const hasNewFI = newBlock[1] && isValidFIFlag(String(newBlock[1]));
+      if (hasNewFI) {
+        records.push([currentDate, 'NEW', ...newBlock]);
+        stats.newRecords++;
+      }
+    }
+
+    if (usedHasContent) {
+      const hasUsedFI = usedBlock[1] && isValidFIFlag(String(usedBlock[1]));
+      if (hasUsedFI) {
+        records.push([currentDate, 'USED', ...usedBlock]);
+        stats.usedRecords++;
+      }
+    }
+  });
+
+  const format = {
+    isValid: true,
+    message: '',
+    hasDateRow,
+    encounteredDataBeforeDate,
+    firstDataRowIndexWithoutDate
+  };
+
+  if (!hasDateRow) {
+    format.isValid = false;
+    format.message = 'No date rows were found in column A. Ensure each day starts with a date cell before the sales entries.';
+  } else if (encounteredDataBeforeDate) {
+    format.isValid = false;
+    const rowInfo = firstDataRowIndexWithoutDate
+      ? ' (first issue on row ' + firstDataRowIndexWithoutDate + ')'
+      : '';
+    format.message = 'Sales rows appear before the first date row. Move the date cell above the sales entries.' + rowInfo;
+  }
+
+  return { records, stats, format };
+}
+
+function isEligibleSalesSourceSheet(sheet) {
+  if (!sheet) {
+    return {
+      eligible: false,
+      reason: 'No active sheet is available. Please select a sheet to normalize.'
+    };
+  }
+
+  const sheetName = sheet.getName();
+  if (sheetName === 'CDK_DATA') {
+    return {
+      eligible: false,
+      reason: '"CDK_DATA" contains CDK export data and cannot be normalized.'
+    };
+  }
+
+  if (sheetName === 'CDK_MERGED') {
+    return {
+      eligible: false,
+      reason: '"CDK_MERGED" already contains merged results. Select the source sales sheet instead.'
+    };
+  }
+
+  if (sheetName.endsWith('_FLAT')) {
+    return {
+      eligible: false,
+      reason: 'The sheet "' + sheetName + '" already contains flattened results. Select the original sales sheet.'
+    };
+  }
+
+  return { eligible: true, reason: '' };
+}
+
+function promptForSalesSheetSelection(excludedNames = []) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) {
+      alertError('No active spreadsheet found. Unable to select a sheet.', 'Selection Error');
+      return null;
+    }
+
+    const excludedSet = new Set(Array.isArray(excludedNames) ? excludedNames : [excludedNames]);
+    const sheets = ss.getSheets().filter(sheet => {
+      const name = sheet.getName();
+      if (excludedSet.has(name)) return false;
+      return isEligibleSalesSourceSheet(sheet).eligible;
+    });
+
+    if (sheets.length === 0) {
+      showCustomAlert('No Eligible Sheets Found', 'No sheets with the required layout are available to normalize.');
+      return null;
+    }
+
+    const ui = SpreadsheetApp.getUi();
+    const message = sheets
+      .map((sheet, index) => (index + 1) + '. ' + sheet.getName())
+      .join('\n');
+
+    const result = ui.prompt(
+      'Select Sales Sheet',
+      'Enter the number for the sheet you want to normalize:\n\n' + message,
+      ui.ButtonSet.OK_CANCEL
+    );
+
+    if (result.getSelectedButton() !== ui.Button.OK) {
+      return null;
+    }
+
+    const responseText = (result.getResponseText() || '').trim();
+    const choice = parseInt(responseText, 10);
+    if (!choice || choice < 1 || choice > sheets.length) {
+      showCustomAlert('Invalid Selection', 'Please enter a number between 1 and ' + sheets.length + '.');
+      return null;
+    }
+
+    return sheets[choice - 1];
+  } catch (error) {
+    logError('promptForSalesSheetSelection', error);
+    alertError('Unable to display sheet selection UI: ' + error.message, 'Selection Error');
+    return null;
   }
 }
