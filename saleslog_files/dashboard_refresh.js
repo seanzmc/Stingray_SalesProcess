@@ -97,10 +97,10 @@ function getMakeValue(newUsedValue) {
  * Applies conditional logic for F/C/L column (N)
  * Rule: 
  * - IF column N equals 'L' THEN 'L'
- * - ELSE IF column AC does not equal 'CASH' THEN 'F'
+ * - ELSE IF column Z does not equal 'CASH' THEN 'F'
  * - ELSE 'C'
  * 
- * @param {string} paymentType - Value from CDK_MERGED column AC
+ * @param {string} paymentType - Value from CDK_MERGED column Z
  * @param {string} existingFCL - Value from CDK_MERGED column N
  * @returns {string} 'L', 'F', or 'C'
  */
@@ -173,8 +173,8 @@ function mapRowToDashboard(sourceRow) {
   // Column M: Trade in (CDK_MERGED column G, index 6)
   outputRow[12] = sourceRow[6] || '';
   
-  // Column N: F/C/L (conditional logic based on columns AC and N)
-  const paymentType = sourceRow[28] || ''; // Column AC (index 28)
+  // Column N: F/C/L (conditional logic based on columns Z and N)
+  const paymentType = sourceRow[25] || ''; // Column Z (index 25)
   const existingFCL = sourceRow[13] || ''; // Column N (index 13)
   outputRow[13] = getFCLValue(paymentType, existingFCL);
   
