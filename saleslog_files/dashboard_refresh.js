@@ -14,22 +14,22 @@
  * 
  * Column Mapping (CDK_MERGED -> DASHBOARD):
  * - A (Date) -> A
- * - AG (RDR Date) -> B
- * - I (Deal #) -> C
- * - F (Stock #) -> D
- * - J (Customer Name) -> E
- * - H (Sales Rep) -> F
- * - AB (Sales Mgr) -> G
+ * - AA (RDR Date) -> B
+ * - K (Deal #) -> C
+ * - L (Stock #) -> D
+ * - C (Customer Name) -> E
+ * - H (Sales Person) -> F
+ * - O (Sales Manager) -> G
  * - Conditional (Punched) -> H
- * - B (New/Used) -> I
+ * - B (Type/New/Used) -> I
  * - Conditional (Make) -> J
  * - E (Model) -> K
- * - AF (Age) -> L
+ * - Z (Age) -> L
  * - G (Trade in) -> M
- * - Conditional (F/C/L) -> N
- * - T (Front Gross) -> O
- * - U (Back Gross) -> P
- * - V (Total Gross) -> Q
+ * - Conditional (F/C/L based on T/PLC and U/Term) -> N
+ * - V (Front GP$) -> O
+ * - W (Back GP$) -> P
+ * - X (Total GP$) -> Q
  */
 
 // Import error logging utility
@@ -71,14 +71,14 @@ function isYellowBackground(colorHex) {
 
 /**
  * Applies conditional logic for Punched column (H)
- * Rule: IF CDK_MERGED column B equals 'NEW' THEN 'Y', ELSE 'USED'
- * 
+ * Rule: IF CDK_MERGED column B equals 'NEW' THEN 'Y', ELSE '' (empty string)
+ *
  * @param {string} newUsedValue - Value from CDK_MERGED column B
- * @returns {string} 'Y' for new vehicles, 'USED' for others
+ * @returns {string} 'Y' for new vehicles, empty string for others
  */
 function getPunchedValue(newUsedValue) {
   const normalized = String(newUsedValue || '').trim().toUpperCase();
-  return normalized === 'NEW' ? 'Y' : 'USED';
+  return normalized === 'NEW' ? 'Y' : '';
 }
 
 /**
@@ -95,26 +95,26 @@ function getMakeValue(newUsedValue) {
 
 /**
  * Applies conditional logic for F/C/L column (N)
- * Rule: 
- * - IF column N equals 'L' THEN 'L'
- * - ELSE IF column Z does not equal 'CASH' THEN 'F'
+ * Rule:
+ * - IF Term (column U) does not equal 'CASH' AND PLC (column T) does not equal 'L' THEN 'F'
+ * - IF PLC (column T) equals 'L' THEN 'L'
  * - ELSE 'C'
- * 
- * @param {string} paymentType - Value from CDK_MERGED column Z
- * @param {string} existingFCL - Value from CDK_MERGED column N
+ *
+ * @param {string} termValue - Value from CDK_MERGED column U (Term)
+ * @param {string} plcValue - Value from CDK_MERGED column T (PLC)
  * @returns {string} 'L', 'F', or 'C'
  */
-function getFCLValue(paymentType, existingFCL) {
-  const normalizedFCL = String(existingFCL || '').trim().toUpperCase();
-  const normalizedPayment = String(paymentType || '').trim().toUpperCase();
+function getFCLValue(termValue, plcValue) {
+  const normalizedTerm = String(termValue || '').trim().toUpperCase();
+  const normalizedPLC = String(plcValue || '').trim().toUpperCase();
   
-  // First check: if existing value is 'L', keep it
-  if (normalizedFCL === 'L') {
+  // First check: if PLC is 'L', mark as lease
+  if (normalizedPLC === 'L') {
     return 'L';
   }
   
-  // Second check: if not cash payment, mark as finance
-  if (normalizedPayment !== 'CASH') {
+  // Second check: if Term is not CASH and PLC is not L, mark as finance
+  if (normalizedTerm !== 'CASH' && normalizedPLC !== 'L') {
     return 'F';
   }
   
@@ -136,56 +136,56 @@ function mapRowToDashboard(sourceRow) {
   // Column A: Date (CDK_MERGED column A, index 0)
   outputRow[0] = sourceRow[0] || '';
   
-  // Column B: RDR Date (CDK_MERGED column AG, index 32)
-  outputRow[1] = sourceRow[32] || '';
+  // Column B: RDR Date (CDK_MERGED column AA, index 26)
+  outputRow[1] = sourceRow[26] || '';
   
-  // Column C: Deal # (CDK_MERGED column I, index 8)
-  outputRow[2] = sourceRow[8] || '';
+  // Column C: Deal # (CDK_MERGED column K [Deal No.], index 10)
+  outputRow[2] = sourceRow[10] || '';
   
-  // Column D: Stock # (CDK_MERGED column F, index 5)
-  outputRow[3] = sourceRow[5] || '';
+  // Column D: Stock # (CDK_MERGED column L [Stock No.], index 11)
+  outputRow[3] = sourceRow[11] || '';
   
-  // Column E: Customer Name (CDK_MERGED column J, index 9)
-  outputRow[4] = sourceRow[9] || '';
+  // Column E: Customer Name (CDK_MERGED column C [Customer], index 2)
+  outputRow[4] = sourceRow[2] || '';
   
-  // Column F: Sales Rep (CDK_MERGED column H, index 7)
+  // Column F: Sales Rep (CDK_MERGED column H [Sales Person], index 7)
   outputRow[5] = sourceRow[7] || '';
   
-  // Column G: Sales Mgr (CDK_MERGED column AB, index 27)
-  outputRow[6] = sourceRow[27] || '';
+  // Column G: Sales Mgr (CDK_MERGED column O [Sales Manager], index 14)
+  outputRow[6] = sourceRow[14] || '';
   
-  // Column H: Punched (conditional logic based on column B)
+  // Column H: Punched (conditional logic based on column B [Type])
   const newUsedValue = sourceRow[1] || '';
   outputRow[7] = getPunchedValue(newUsedValue);
   
-  // Column I: New/Used (CDK_MERGED column B, index 1)
+  // Column I: New/Used (CDK_MERGED column B [Type], index 1)
   outputRow[8] = sourceRow[1] || '';
   
-  // Column J: Make (conditional logic based on column B)
+  // Column J: Make (conditional logic based on column B [Type])
   outputRow[9] = getMakeValue(newUsedValue);
   
-  // Column K: Model (CDK_MERGED column E, index 4)
+  // Column K: Model (CDK_MERGED column E [Model], index 4)
   outputRow[10] = sourceRow[4] || '';
   
-  // Column L: Age (CDK_MERGED column AF, index 31)
-  outputRow[11] = sourceRow[31] || '';
+  // Column L: Age (CDK_MERGED column Z [Age], index 25)
+  outputRow[11] = sourceRow[25] || '';
   
-  // Column M: Trade in (CDK_MERGED column G, index 6)
+  // Column M: Trade in (CDK_MERGED column G [Trade], index 6)
   outputRow[12] = sourceRow[6] || '';
   
-  // Column N: F/C/L (conditional logic based on columns Z and N)
-  const paymentType = sourceRow[25] || ''; // Column Z (index 25)
-  const existingFCL = sourceRow[13] || ''; // Column N (index 13)
-  outputRow[13] = getFCLValue(paymentType, existingFCL);
+  // Column N: F/C/L (conditional logic based on column U [Term] and column T [PLC])
+  const termValue = sourceRow[20] || ''; // Column U [Term] (index 20)
+  const plcValue = sourceRow[19] || ''; // Column T [PLC] (index 19)
+  outputRow[13] = getFCLValue(termValue, plcValue);
   
-  // Column O: Front Gross (CDK_MERGED column T, index 19)
-  outputRow[14] = sourceRow[19] ?? '';
+  // Column O: Front Gross (CDK_MERGED column V [Front GP$], index 21)
+  outputRow[14] = sourceRow[21] ?? '';
   
-  // Column P: Back Gross (CDK_MERGED column U, index 20)
-  outputRow[15] = sourceRow[20] ?? '';
+  // Column P: Back Gross (CDK_MERGED column W [Back GP$], index 22)
+  outputRow[15] = sourceRow[22] ?? '';
   
-  // Column Q: Total Gross (CDK_MERGED column V, index 21)
-  outputRow[16] = sourceRow[21] ?? '';
+  // Column Q: Total Gross (CDK_MERGED column X [GP$], index 23)
+  outputRow[16] = sourceRow[23] ?? '';
   
   return outputRow;
 }

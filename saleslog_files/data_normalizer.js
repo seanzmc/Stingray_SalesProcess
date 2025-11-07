@@ -47,8 +47,7 @@
  * - Column F: StockNo (ALWAYS in column F)
  * - Column G: Trade
  * - Column H: Sales Person
- * - Columns I-AC: CDK data (appended by mergeCDKData)
- *
+ * - Columns I-AA: CDK data (appended by mergeCDKData) - 19 columns from CDK_DATA sheet
  * @returns {void}
  * @throws {Error} If MONTHLY sheet is missing or cannot be accessed
  */
@@ -143,31 +142,26 @@ function reformatDailySales() {
         'StockNo',
         'Trade',
         'Sales Person',
-        // CDK_DATA headers (will be merged)
-        'Deal Number',
-        'Customer',
-        'VIN',
-        'Stock No.',
-        'Status',
-        'PLC',
+        // CDK_DATA headers (will be merged) - matches header-rules.md structure
+        'Key',
         'Contract Date',
-        'Sale Type',
-        'Year',
-        'Model',
-        'StockType',
-        'Front GP$',
-        'Back GP$',
-        'GP$',
-        'Cash Price',
-        'Trades',
-        'Service Contract',
-        'Finance Institution',
+        'Deal No.',
+        'Stock No.',
+        'Customer',
         'Salesperson',
         'Sales Manager',
         'FI Manager',
+        'StockType',
+        'VIN',
+        'Sale Type',
+        'PLC',
         'Term',
+        'Front GP$',
+        'Back GP$',
+        'GP$',
         'Comments',
-        'Age'
+        'Age',
+        'RDR'
       ];
 
       // Set header format
