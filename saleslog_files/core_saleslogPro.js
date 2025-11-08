@@ -1985,6 +1985,8 @@ function onOpen() {
         .addSeparator()
         .addItem("Merge Monthly data with CDK", "reformatDailySales")
         .addSeparator()
+        .addItem("Add Todays sales to Dashboard", "processVSalesLogComplete")
+        .addSeparator()
         .addItem("Refresh Dashboard", "refreshDashboard")
         .addSeparator()
         .addItem("Color Settings", "openConfigurationSidebar")

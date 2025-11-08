@@ -24,23 +24,23 @@ Q: Total Gross
 
 ### CDK_DATA HEADER MAP:
 
-A: Key (table key)
-B: Contract Date
-C: Deal No.
-D: Stock No.
-E: Customer
-F: Salesperson
-G: Sales Manager
-H: FI Manager
-I: StockType
-J: VIN
-K: Sale Type
-L: PLC
-M: Term
-N: Front GP$
-O: Back GP$
-P: GP$
-Q: Comments
+A: Contract Date
+B: Deal No.
+C: Stock No.
+D: Customer
+E: Salesperson
+F: Sales Manager
+G: FI Manager
+H: StockType
+I: VIN
+J: Sale Type
+K: PLC
+L: Term
+M: Front GP$
+N: Back GP$
+O: GP$
+P: Comments
+Q: RDR Date
 
 ### VSALES Headers
 
@@ -90,23 +90,24 @@ E: Model
 F: StockNo
 G: Trade
 H: Sales Person
-I: Key
-J: Contract Date
-K: Deal No.
-L: Stock No.
-M: Customer
-N: Salesperson
-O: Sales Manager
-P: FI Manager
-Q: StockType
-R: VIN
-S: Sale Type
-T: PLC
-U: Term
-V: Front GP$
-W: Back GP$
-X: GP$
-Y: Comments
+I: Contract Date
+J: Deal No.
+K: Stock No.
+L: Customer
+M: Salesperson
+N: Sales Manager
+O: FI Manager
+P: StockType
+Q: VIN
+R: Sale Type
+S: PLC
+T: Term
+U: Front GP$
+V: Back GP$
+W: GP$
+X: Comments
+Y: Age
+Z: RDR Date
 
 ### DASHBOARD Header Mapping Rules
 
@@ -114,7 +115,7 @@ DASHBOARD!A6 Header: Date
 Data Rule: Map CDK_MERGED column A
 
 DASHBOARD!B6 Header: RDR Date
-Data Rule: Map CDK_MERGED column AA
+Data Rule: Map CDK_MERGED column B
 
 DASHBOARD!C6 Header: Deal #
 Data Rule: Map CDK_MERGED column K
@@ -132,7 +133,7 @@ DASHBOARD!G6 Header: Sales Mgr
 Data Rule: Map CDK_MERGED column O
 
 DASHBOARD!H6 Header: Punched
-Data Rule: IF CDK_MERGED column B equals 'NEW' THEN 'Y', ELSE ''
+Data Rule: IF RDR Date is blank THEN "", ELSE "Y"
 
 DASHBOARD!I6: New/Used
 Data Rule: Map CDK_MERGED column B
@@ -163,23 +164,23 @@ Data Rule: Map CDK_MERGED column X
 
 ### Inventory Headers
 
-A	"Stock No."
-B	"Stock Type"
-C	Year
-D	Make
-E	Model
-F	Color
-G	Engine
-H	Retail
-I	Invoice
-J	Lot
-K	Co.
-L	Age
-M	Status
-N	VIN
-O	Mileage
-P	Inventory Acct
-Q	InventoryID (Table Key)
+A: Stock No.
+B: Stock Type
+C: Year
+D: Make
+E: Model
+F: Color
+G: Engine
+H: Retail
+I: Invoice
+J: Lot
+K: Co.
+L: Age
+M: Status
+N: VIN
+O: Mileage
+P: Inventory Acct
+Q: InventoryID (Table Key)
 
 ### WORKFLOW Formulas
 

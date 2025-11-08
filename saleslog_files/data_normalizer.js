@@ -47,7 +47,7 @@
  * - Column F: StockNo (ALWAYS in column F)
  * - Column G: Trade
  * - Column H: Sales Person
- * - Columns I-AA: CDK data (appended by mergeCDKData) - 19 columns from CDK_DATA sheet
+ * - Columns I-Z: CDK data (appended by mergeCDKData) - 18 columns from CDK_DATA sheet (A-Q)
  * @returns {void}
  * @throws {Error} If MONTHLY sheet is missing or cannot be accessed
  */
@@ -142,8 +142,7 @@ function reformatDailySales() {
         'StockNo',
         'Trade',
         'Sales Person',
-        // CDK_DATA headers (will be merged) - matches header-rules.md structure
-        'Key',
+        // CDK_DATA headers (will be merged) - matches header-rules.md structure (KEY column removed)
         'Contract Date',
         'Deal No.',
         'Stock No.',
@@ -160,8 +159,8 @@ function reformatDailySales() {
         'Back GP$',
         'GP$',
         'Comments',
-        'Age',
-        'RDR'
+        'RDR',
+        'Age'  // Column Z (index 25) - populated from VSALES column G (Days in Stock)
       ];
 
       // Set header format
@@ -216,19 +215,23 @@ function reformatDailySales() {
 
 /**
  * Merges CDK_DATA sheet with CDK_MERGED sheet by matching Stock No. values
+ * Also merges Age data from VSALES sheet using Deal No. matching
  * Uses dynamic header detection and case-insensitive matching
  *
  * This function:
- * 1. Validates both CDK_MERGED and CDK_DATA sheets exist
+ * 1. Validates CDK_MERGED and CDK_DATA sheets exist
  * 2. Dynamically detects header positions for 'StockNo' and 'Stock No.'
  * 3. Builds a Map of CDK data with case-insensitive keys
- * 4. Matches records and appends CDK columns to CDK_MERGED sheet
- * 5. Highlights unmatched rows in both sheets with #FFFFE0 (light yellow)
- * 6. Returns statistics about the merge operation
+ * 4. Builds a Map of VSALES data keyed by Deal No. for Age lookup
+ * 5. Matches records and appends CDK columns + Age from VSALES to CDK_MERGED sheet
+ * 6. Highlights unmatched rows in both sheets with #FFFFE0 (light yellow)
+ * 7. Returns statistics about the merge operation
  *
  * IMPORTANT NOTES:
  * - StockNo will ALWAYS be column F in CDK_MERGED sheet
  * - CDK_DATA Stock No. is dynamically detected but expected in column D
+ * - Age data is sourced from VSALES column G (Days in Stock) and mapped to CDK_MERGED column Z
+ * - Age matching uses Deal No. from CDK_DATA column B matched to VSALES column A
  * - Case-insensitive matching handles variations in stock number format
  * - Only first 8 columns from CDK_MERGED are preserved (A-H)
  * - Unmatched rows are highlighted for manual review
@@ -244,6 +247,7 @@ function mergeCDKData() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const cleanedSheet = ss.getSheetByName('CDK_MERGED');
     const cdkSheet = ss.getSheetByName('CDK_DATA');
+    const vsalesSheet = ss.getSheetByName('VSALES');
 
     if (!cleanedSheet || !cdkSheet) {
       const missingSheets = [];
@@ -312,6 +316,23 @@ function mergeCDKData() {
 
     logInfo('mergeCDKData', 'CDK Map built', { mapSize: cdkMap.size });
 
+    // === BUILD VSALES MAP for Age lookup ===
+    // VSALES column A: Deal No., column G: Days in Stock (Age)
+    const vsalesMap = new Map();
+    if (vsalesSheet) {
+      const vsalesData = vsalesSheet.getDataRange().getValues().slice(1); // Skip header
+      for (let row of vsalesData) {
+        const dealNo = String(row[0]).trim(); // Column A: Deal No.
+        const age = row[6]; // Column G: Days in Stock (index 6, 0-based)
+        if (dealNo) {
+          vsalesMap.set(dealNo, age);
+        }
+      }
+      logInfo('mergeCDKData', 'VSALES Map built for Age lookup', { mapSize: vsalesMap.size });
+    } else {
+      logWarning('mergeCDKData', 'VSALES sheet not found. Age data will not be populated.');
+    }
+
     // === MERGE LOGIC with TRACKING ===
     let matchCount = 0;
     let noMatchCount = 0;
@@ -325,9 +346,14 @@ function mergeCDKData() {
       if (cdkRow) {
         matchCount++;
         matchedCDKKeys.add(key); // Track this CDK key as matched
-        // Only take first 8 columns from CDK_MERGED (A-H), then append CDK data (I-AC)
-        // This prevents CDK data from being appended after empty columns
-        return [...cleanedRow.slice(0, 8), ...cdkRow];
+        
+        // Get Age from VSALES using Deal No. from CDK_DATA column B (index 1)
+        const dealNo = String(cdkRow[1]).trim(); // CDK_DATA column B: Deal No.
+        const age = vsalesMap.has(dealNo) ? vsalesMap.get(dealNo) : '';
+        
+        // Only take first 8 columns from CDK_MERGED (A-H), then append CDK data (I-X),
+        // then RDR (Y, empty for now), then Age from VSALES (Z)
+        return [...cleanedRow.slice(0, 8), ...cdkRow, '', age];
       } else {
         noMatchCount++;
         unmatchedCleanedRows.push(index + 2); // +2 because: +1 for 0-based to 1-based, +1 for header row
