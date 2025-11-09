@@ -115,13 +115,13 @@ DASHBOARD!A6 Header: Date
 Data Rule: Map CDK_MERGED column A
 
 DASHBOARD!B6 Header: RDR Date
-Data Rule: Map CDK_MERGED column B
+Data Rule: Map CDK_MERGED column Y
 
 DASHBOARD!C6 Header: Deal #
-Data Rule: Map CDK_MERGED column K
+Data Rule: Map CDK_MERGED column J
 
 DASHBOARD!D6 Header: Stock #
-Data Rule: Map CDK_MERGED column L
+Data Rule: Map CDK_MERGED column F
 
 DASHBOARD!E6 Header: Customer Name
 Data Rule: Map CDK_MERGED column C
@@ -130,7 +130,7 @@ DASHBOARD!F6 Header: Sales Rep
 Data Rule: Map CDK_MERGED column H
 
 DASHBOARD!G6 Header: Sales Mgr
-Data Rule: Map CDK_MERGED column O
+Data Rule: Map CDK_MERGED column N
 
 DASHBOARD!H6 Header: Punched
 Data Rule: IF RDR Date is blank THEN "", ELSE "Y"
@@ -139,7 +139,7 @@ DASHBOARD!I6: New/Used
 Data Rule: Map CDK_MERGED column B
 
 DASHBOARD!J6: Make
-Data Rule: IF CDK_MERGED column B equals 'NEW' THEN 'CHEV', ELSE SKIP
+Data Rule: Map CDK_MERGED column AA
 
 DASHBOARD!K6: Model
 Data Rule: Map CDK_MERGED column E
