@@ -186,7 +186,7 @@ function getVsalesMake(dealNoValue, vsalesMakeMap) {
 /**
  * Maps a single row from CDK_MERGED to DASHBOARD format
  * Applies all column mapping rules and conditional logic
- * 
+ *
  * @param {Array} sourceRow - Row from CDK_MERGED sheet (0-indexed array)
  * @param {Map<string, string>} vsalesMakeMap - Lookup map for Deal No. -> Make
  * @returns {Array} Mapped row for DASHBOARD sheet (17 columns A-Q)
@@ -194,20 +194,19 @@ function getVsalesMake(dealNoValue, vsalesMakeMap) {
 function mapRowToDashboard(sourceRow, vsalesMakeMap) {
   // Initialize output row with 17 columns (A-Q)
   const outputRow = new Array(17).fill('');
-  
+
   // Column A: Date (CDK_MERGED column A, index 0)
   outputRow[0] = sourceRow[0] || '';
-  
+
   // Column B: RDR Date (CDK_MERGED column Y, index 24)
   const rdrDateValue = sourceRow[24] || '';
   outputRow[1] = rdrDateValue;
-  
-  // Column C: Deal # (CDK_MERGED column K [Deal No.], index 10)
-  const dealNumberValue = sourceRow[10] || '';
-  outputRow[2] = dealNumberValue;
-  
-  // Column D: Stock # (CDK_MERGED column L [Stock No.], index 11)
-  outputRow[3] = sourceRow[11] || '';
+
+  // Column C: Deal # (CDK_MERGED column J [Deal No.], index 9)
+  outputRow[2] = sourceRow[9] || '';
+
+  // Column D: Stock # (CDK_MERGED column K [Stock No.], index 10)
+  outputRow[3] = sourceRow[10] || '';
 
   // Column E: Customer Name (CDK_MERGED column C [Customer], index 2)
   outputRow[4] = sourceRow[2] || '';
@@ -215,8 +214,8 @@ function mapRowToDashboard(sourceRow, vsalesMakeMap) {
   // Column F: Sales Rep (CDK_MERGED column H [Sales Person], index 7)
   outputRow[5] = sourceRow[7] || '';
 
-  // Column G: Sales Mgr (CDK_MERGED column O [Sales Manager], index 14)
-  outputRow[6] = sourceRow[14] || '';
+  // Column G: Sales Mgr (CDK_MERGED column N [Sales Manager], index 13)
+  outputRow[6] = sourceRow[13] || '';
 
   // Column H: Punched (conditional logic based on RDR Date)
   const newUsedValue = sourceRow[1] || '';
@@ -224,7 +223,7 @@ function mapRowToDashboard(sourceRow, vsalesMakeMap) {
 
   // Column I: New/Used (CDK_MERGED column B [Type], index 1)
   outputRow[8] = sourceRow[1] || '';
-  
+
   // Column J: Make (VSALES lookup via Deal No., fallback to NEW logic)
   const vsalesMake = getVsalesMake(dealNumberValue, vsalesMakeMap);
   outputRow[9] = vsalesMake || getMakeValue(newUsedValue);
@@ -239,8 +238,8 @@ function mapRowToDashboard(sourceRow, vsalesMakeMap) {
   outputRow[12] = sourceRow[6] || '';
 
   // Column N: F/C/L (conditional logic based on column U [Term] and column T [PLC])
-  const termValue = sourceRow[20] || ''; // Column U [Term] (index 20)
-  const plcValue = sourceRow[19] || ''; // Column T [PLC] (index 19)
+  const termValue = sourceRow[19] || ''; // Column T [Term] (index 19)
+  const plcValue = sourceRow[18] || ''; // Column S [PLC] (index 18)
   outputRow[13] = getFCLValue(termValue, plcValue);
 
   // Column O: Front Gross (CDK_MERGED column V [Front GP$], index 21)

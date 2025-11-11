@@ -346,14 +346,15 @@ function mergeCDKData() {
       if (cdkRow) {
         matchCount++;
         matchedCDKKeys.add(key); // Track this CDK key as matched
-        
+
         // Get Age from VSALES using Deal No. from CDK_DATA column B (index 1)
         const dealNo = String(cdkRow[1]).trim(); // CDK_DATA column B: Deal No.
         const age = vsalesMap.has(dealNo) ? vsalesMap.get(dealNo) : '';
-        
+
         // Only take first 8 columns from CDK_MERGED (A-H), then append first 16 CDK_DATA columns (A-P → I-X),
-        // then RDR (Y, empty for now), then Age from VSALES (Z)
-        return [...cleanedRow.slice(0, 8), ...cdkRow.slice(0, 16), '', age];
+        // then RDR (Y) from CDK_DATA column Q, then Age from VSALES (Z)
+        const rdrDate = cdkRow.length > 16 ? cdkRow[16] : '';
+        return [...cleanedRow.slice(0, 8), ...cdkRow.slice(0, 16), rdrDate, age];
       } else {
         noMatchCount++;
         unmatchedCleanedRows.push(index + 2); // +2 because: +1 for 0-based to 1-based, +1 for header row

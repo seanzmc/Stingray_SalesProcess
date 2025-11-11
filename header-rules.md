@@ -106,8 +106,8 @@ U: Front GP$
 V: Back GP$
 W: GP$
 X: Comments
-Y: Age
-Z: RDR Date
+Y: RDR Date
+Z: Age
 
 ### DASHBOARD Header Mapping Rules
 
