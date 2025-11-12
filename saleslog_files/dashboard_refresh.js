@@ -12,24 +12,24 @@
  * - Idempotent operation (safe to run multiple times)
  * - Comprehensive error handling and logging
  *
- * Column Mapping (CDK_MERGED -> DASHBOARD):
- * - A (Date) -> A
- * - Y (RDR Date) -> B
- * - K (Deal #) -> C
- * - L (Stock #) -> D
- * - C (Customer Name) -> E
- * - H (Sales Person) -> F
- * - O (Sales Manager) -> G
- * - Conditional (Punched) -> H
- * - B (Type/New/Used) -> I
- * - Conditional (Make) -> J
- * - E (Model) -> K
- * - Z (Age) -> L
- * - G (Trade in) -> M
- * - Conditional (F/C/L based on T/PLC and U/Term) -> N
- * - V (Front GP$) -> O
- * - W (Back GP$) -> P
- * - X (Total GP$) -> Q
+ * Column Mapping Rules:
+ * - CDK_MERGED column A (Date)                -> DASHBOARD column A
+ * - CDK_MERGED column Y (RDR Date)            -> DASHBOARD column B
+ * - CDK_MERGED column J (Deal #)              -> DASHBOARD column C
+ * - CDK_MERGED column F (Stock #)             -> DASHBOARD column D
+ * - CDK_MERGED column C (Customer Name)       -> DASHBOARD column E
+ * - CDK_MERGED column H (Sales Rep)           -> DASHBOARD column F
+ * - CDK_MERGED column N (Sales Mgr)           -> DASHBOARD column G
+ * - Conditional on RDR Date (Punched)         -> DASHBOARD column H
+ * - CDK_MERGED column B (New/Used)            -> DASHBOARD column I
+ * - VSALES column E (Make) w/ fallback        -> DASHBOARD column J
+ * - CDK_MERGED column E (Model)               -> DASHBOARD column K
+ * - VSALES column G (Age)                     -> DASHBOARD column L
+ * - CDK_MERGED column G (Trade in)            -> DASHBOARD column M
+ * - Conditional on CDK_MERGED S/T (F/C/L)     -> DASHBOARD column N
+ * - CDK_MERGED column U (Front Gross)         -> DASHBOARD column O
+ * - CDK_MERGED column V (Back Gross)          -> DASHBOARD column P
+ * - CDK_MERGED column W (Total Gross)         -> DASHBOARD column Q
  */
 
 // Import error logging utility
@@ -136,51 +136,53 @@ function normalizeDealKey(value) {
 }
 
 /**
- * Builds a lookup map of Deal No. -> Make from the VSALES sheet
+ * Builds a lookup map of Deal No. -> { make, age } from the VSALES sheet
  *
  * @param {GoogleAppsScript.Spreadsheet.Sheet} vsalesSheet - VSALES sheet reference
- * @returns {Map<string, string>} Map of normalized deal numbers to make values
+ * @returns {Map<string, {make: string, age: string}>} Map of normalized deal numbers to VSALES values
  */
-function buildVsalesMakeMap(vsalesSheet) {
-  const makeMap = new Map();
+function buildVsalesLookupMap(vsalesSheet) {
+  const lookupMap = new Map();
   if (!vsalesSheet) {
-    return makeMap;
+    return lookupMap;
   }
 
   const lastRow = vsalesSheet.getLastRow();
   if (lastRow < 2) {
-    return makeMap;
+    return lookupMap;
   }
 
   const numRows = lastRow - 1;
-  const data = vsalesSheet.getRange(2, 1, numRows, 5).getValues(); // Columns A:E (Deal No., ..., Make)
+  const data = vsalesSheet.getRange(2, 1, numRows, 7).getValues(); // Columns A:G (Deal No., ..., Age)
 
   data.forEach(row => {
     const dealKey = normalizeDealKey(row[0]);
     if (!dealKey) return;
-    const makeValue = row[4] || '';
-    makeMap.set(dealKey, makeValue);
+    lookupMap.set(dealKey, {
+      make: row[4] || '',
+      age: row[6] || ''
+    });
   });
 
-  return makeMap;
+  return lookupMap;
 }
 
 /**
- * Retrieves the Make from the VSALES map using Deal No.
+ * Retrieves the VSALES values (make, age) for a deal number
  *
  * @param {*} dealNoValue - Deal number from CDK_MERGED row
- * @param {Map<string, string>} vsalesMakeMap - Lookup map
- * @returns {string} Make value if found, otherwise empty string
+ * @param {Map<string, {make: string, age: string}>} vsalesLookupMap - Lookup map
+ * @returns {{make: string, age: string}} Object with VSALES values; defaults to empty strings
  */
-function getVsalesMake(dealNoValue, vsalesMakeMap) {
-  if (!vsalesMakeMap || !(vsalesMakeMap instanceof Map)) {
-    return '';
+function getVsalesDealData(dealNoValue, vsalesLookupMap) {
+  if (!vsalesLookupMap || !(vsalesLookupMap instanceof Map)) {
+    return { make: '', age: '' };
   }
   const key = normalizeDealKey(dealNoValue);
   if (!key) {
-    return '';
+    return { make: '', age: '' };
   }
-  return vsalesMakeMap.get(key) || '';
+  return vsalesLookupMap.get(key) || { make: '', age: '' };
 }
 
 /**
@@ -188,10 +190,10 @@ function getVsalesMake(dealNoValue, vsalesMakeMap) {
  * Applies all column mapping rules and conditional logic
  *
  * @param {Array} sourceRow - Row from CDK_MERGED sheet (0-indexed array)
- * @param {Map<string, string>} vsalesMakeMap - Lookup map for Deal No. -> Make
+ * @param {Map<string, {make: string, age: string}>} vsalesLookupMap - Lookup map for Deal No. -> VSALES data
  * @returns {Array} Mapped row for DASHBOARD sheet (17 columns A-Q)
  */
-function mapRowToDashboard(sourceRow, vsalesMakeMap) {
+function mapRowToDashboard(sourceRow, vsalesLookupMap) {
   // Initialize output row with 17 columns (A-Q)
   const outputRow = new Array(17).fill('');
 
@@ -203,10 +205,11 @@ function mapRowToDashboard(sourceRow, vsalesMakeMap) {
   outputRow[1] = rdrDateValue;
 
   // Column C: Deal # (CDK_MERGED column J [Deal No.], index 9)
-  outputRow[2] = sourceRow[9] || '';
+  const dealNumberValue = sourceRow[9] || '';
+  outputRow[2] = dealNumberValue;
 
-  // Column D: Stock # (CDK_MERGED column K [Stock No.], index 10)
-  outputRow[3] = sourceRow[10] || '';
+  // Column D: Stock # (CDK_MERGED column F [Stock No.], index 5)
+  outputRow[3] = sourceRow[5] || '';
 
   // Column E: Customer Name (CDK_MERGED column C [Customer], index 2)
   outputRow[4] = sourceRow[2] || '';
@@ -222,34 +225,34 @@ function mapRowToDashboard(sourceRow, vsalesMakeMap) {
   outputRow[7] = getPunchedValue(rdrDateValue);
 
   // Column I: New/Used (CDK_MERGED column B [Type], index 1)
-  outputRow[8] = sourceRow[1] || '';
+  outputRow[8] = newUsedValue;
 
   // Column J: Make (VSALES lookup via Deal No., fallback to NEW logic)
-  const vsalesMake = getVsalesMake(dealNumberValue, vsalesMakeMap);
+  const { make: vsalesMake, age: vsalesAge } = getVsalesDealData(dealNumberValue, vsalesLookupMap);
   outputRow[9] = vsalesMake || getMakeValue(newUsedValue);
 
   // Column K: Model (CDK_MERGED column E [Model], index 4)
   outputRow[10] = sourceRow[4] || '';
 
-  // Column L: Age (CDK_MERGED column Z [Age], index 25)
-  outputRow[11] = sourceRow[25] || '';
+  // Column L: Age (VSALES column G [Age], index 6)
+  outputRow[11] = vsalesAge || '';
 
   // Column M: Trade in (CDK_MERGED column G [Trade], index 6)
   outputRow[12] = sourceRow[6] || '';
 
-  // Column N: F/C/L (conditional logic based on column U [Term] and column T [PLC])
+  // Column N: F/C/L (conditional logic based on column T [Term] and column S [PLC])
   const termValue = sourceRow[19] || ''; // Column T [Term] (index 19)
   const plcValue = sourceRow[18] || ''; // Column S [PLC] (index 18)
   outputRow[13] = getFCLValue(termValue, plcValue);
 
-  // Column O: Front Gross (CDK_MERGED column V [Front GP$], index 21)
-  outputRow[14] = sourceRow[21] ?? '';
+  // Column O: Front Gross (CDK_MERGED column U [Front GP$], index 20)
+  outputRow[14] = sourceRow[20] ?? '';
 
-  // Column P: Back Gross (CDK_MERGED column W [Back GP$], index 22)
-  outputRow[15] = sourceRow[22] ?? '';
+  // Column P: Back Gross (CDK_MERGED column V [Back GP$], index 21)
+  outputRow[15] = sourceRow[21] ?? '';
 
-  // Column Q: Total Gross (CDK_MERGED column X [GP$], index 23)
-  outputRow[16] = sourceRow[23] ?? '';
+  // Column Q: Total Gross (CDK_MERGED column W [GP$], index 22)
+  outputRow[16] = sourceRow[22] ?? '';
 
   return outputRow;
 }
@@ -317,8 +320,8 @@ function refreshDashboard() {
     const allBackgrounds = dataRange.getBackgrounds();
 
     // Build lookup map for Make values from VSALES (Deal No. -> Make)
-    const vsalesMakeMap = buildVsalesMakeMap(vsalesSheet);
-    Logger.log(`[Dashboard Refresh] Loaded ${vsalesMakeMap.size} VSALES make entries`);
+    const vsalesLookupMap = buildVsalesLookupMap(vsalesSheet);
+    Logger.log(`[Dashboard Refresh] Loaded ${vsalesLookupMap.size} VSALES entries`);
 
     // Filter and map rows
     const mappedRows = [];
@@ -334,7 +337,7 @@ function refreshDashboard() {
       }
 
       // Map row to DASHBOARD format
-      const mappedRow = mapRowToDashboard(allData[i], vsalesMakeMap);
+      const mappedRow = mapRowToDashboard(allData[i], vsalesLookupMap);
       mappedRows.push(mappedRow);
     }
 
