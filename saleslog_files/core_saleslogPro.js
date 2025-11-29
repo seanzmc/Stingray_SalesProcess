@@ -1514,6 +1514,9 @@ function processDaily() {
 /**
  * Reapplies conditional formatting rules to the TODAY sheet.
  */
+/**
+ * Reapplies conditional formatting rules to the TODAY sheet.
+ */
 function reapplyCF() {
   try {
     // Get configured colors and thresholds
@@ -1533,42 +1536,50 @@ function reapplyCF() {
     const { daysElapsed, totalDays } = memoizedGetSellingDays(now.getFullYear(), now.getMonth());
     const paceBase = totalDays > 0 ? `($Q2/${daysElapsed}*${totalDays})` : null;
 
-    const managedDataRulesSignatures = [ /* ... keep as is ... */ ];
     const managedLeaderboardBlueRuleSignature = {
       formula: "=1=1",
-      rangeA1: RANGES.leaderboard,
       background: LEADERBOARD_ZERO_BG_COLOR_UPPER,
     };
     const PACE_COLORS_UPPER = ["#70AD47", "#FFEE32", "#C00000"].map((c) => c.toUpperCase());
 
+    // Filter out existing rules that should be replaced
     existingRules.forEach((rule) => {
-      const bc = rule.getBooleanCondition();
-      let isManagedByThisScript = false;
-      if (bc && bc.getCriteriaType() === SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA) {
-        const currentFormulaFull = bc.getCriteriaValues()[0].toString();
-        const currentFormulaNormalized = currentFormulaFull.replace(/\s+/g, "");
-        const ranges = rule.getRanges();
-        if (ranges.length === 1) {
-          const currentRangeA1 = ranges[0].getA1Notation();
+      let shouldRemove = false;
+      const ranges = rule.getRanges();
+
+      // Check if any range in this rule intersects with Leaderboard columns (P, Q, R -> 16, 17, 18)
+      const intersectsLeaderboard = ranges.some(range => {
+        const startCol = range.getColumn();
+        const endCol = range.getLastColumn();
+        // Check intersection with columns 16, 17, 18 (P, Q, R)
+        return Math.max(startCol, 16) <= Math.min(endCol, 18);
+      });
+
+      if (intersectsLeaderboard) {
+        const bc = rule.getBooleanCondition();
+        if (bc && bc.getCriteriaType() === SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA) {
+          const currentFormulaFull = bc.getCriteriaValues()[0].toString();
+          const currentFormulaNormalized = currentFormulaFull.replace(/\s+/g, "");
           const ruleBg = bc.getBackground() ? bc.getBackground().toUpperCase() : null;
-          for (const sig of managedDataRulesSignatures) {
-            if (sig.formula.replace(/\s+/g, "") === currentFormulaNormalized && sig.rangeA1 === currentRangeA1) {
-              isManagedByThisScript = true;
-              break;
-            }
+
+          // Check for "Blue" zero-sales rule
+          if (currentFormulaNormalized === managedLeaderboardBlueRuleSignature.formula &&
+              ruleBg === managedLeaderboardBlueRuleSignature.background) {
+            shouldRemove = true;
           }
-          if (!isManagedByThisScript && currentRangeA1 === RANGES.leaderboard) {
-            if (currentFormulaNormalized === managedLeaderboardBlueRuleSignature.formula && ruleBg === managedLeaderboardBlueRuleSignature.background) { isManagedByThisScript = true; }
-            if (!isManagedByThisScript && PACE_COLORS_UPPER.includes(ruleBg)) {
-              if (currentFormulaNormalized.includes("$Q")) {
-                isManagedByThisScript = true;
-                Logger.log(`Identified old/current pace rule for removal on ${currentRangeA1} (color: ${ruleBg}, formula: ${currentFormulaFull})`);
-              }
-            }
+
+          // Check for Pace rules (Green, Yellow, Red)
+          // Identify by color AND formula content (referencing column Q)
+          if (PACE_COLORS_UPPER.includes(ruleBg) && currentFormulaNormalized.includes("$Q")) {
+            shouldRemove = true;
+            Logger.log(`Removing old pace rule: ${currentFormulaFull} on range ${ranges.map(r => r.getA1Notation()).join(',')}`);
           }
         }
       }
-      if (!isManagedByThisScript) { rulesToKeep.push(rule.copy().build()); }
+
+      if (!shouldRemove) {
+        rulesToKeep.push(rule.copy().build());
+      }
     });
 
     let newRules = [...rulesToKeep];
