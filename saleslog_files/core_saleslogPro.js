@@ -86,50 +86,6 @@ const DEFAULT_COLORS = {
 };
 
 // Module-scope color configuration cache
-let colorConfig = null;
-
-/**
- * Loads visual configuration (colors and thresholds) from Properties Service
- * Uses caching for performance optimization
- *
- * @returns {Object} Visual configuration object with colors and pace thresholds
- */
-function getVisualConfig() {
-  // Return cached config if available
-  if (colorConfig) {
-    return colorConfig;
-  }
-
-  // Check script cache first
-  const cached = CACHE.get(CACHE_KEY_COLORS);
-  if (cached) {
-    try {
-      colorConfig = JSON.parse(cached);
-      return colorConfig;
-    } catch (e) {
-      logError('getVisualConfig', e, { operation: 'parse_cache' });
-    }
-  }
-
-  // Load from configuration service
-  try {
-    const config = getConfiguration();
-    if (config && config.visual) {
-      colorConfig = config.visual;
-      // Cache for 5 minutes
-      CACHE.put(CACHE_KEY_COLORS, JSON.stringify(colorConfig), 300);
-      return colorConfig;
-    }
-  } catch (e) {
-    logError('getVisualConfig', e, { operation: 'load_from_properties' });
-  }
-
-  // Fallback to defaults
-  Logger.log('Using default color configuration');
-  colorConfig = DEFAULT_COLORS;
-  return colorConfig;
-}
-
 /**
  * Gets a specific color value with fallback to defaults
  *
@@ -137,8 +93,7 @@ function getVisualConfig() {
  * @returns {string} Hex color code
  */
 function getColor(colorKey) {
-  const config = getVisualConfig();
-  return config[colorKey] || DEFAULT_COLORS[colorKey];
+  return DEFAULT_COLORS[colorKey];
 }
 
 /**
@@ -147,28 +102,7 @@ function getColor(colorKey) {
  * @returns {Object} Pace thresholds {green, yellow, red}
  */
 function getPaceThresholds() {
-  const config = getVisualConfig();
-  return config.paceThresholds || DEFAULT_COLORS.paceThresholds;
-}
-
-/**
- * Invalidates the visual configuration cache
- * Should be called after configuration updates
- * @returns {void}
- */
-function invalidateVisualConfigCache() {
-  colorConfig = null;
-  try {
-    CACHE.remove(CACHE_KEY_COLORS);
-  } catch (error) {
-    logError('invalidateVisualConfigCache', error, {
-      severity: 'MEDIUM',
-      operation: 'cache_invalidation',
-      cacheKey: CACHE_KEY_COLORS,
-      impact: 'Stale visual config may be served until cache expires naturally (5 minutes)'
-    });
-    // Continue execution - cache invalidation failure is non-fatal
-  }
+  return DEFAULT_COLORS.paceThresholds;
 }
 
 /**
@@ -275,6 +209,39 @@ function memoizedGetSellingDays(year, month) {
   }
   sellingDaysCache[key] = { daysElapsed: elapsed, totalDays: total };
   return sellingDaysCache[key];
+}
+
+/**
+ * Checks if Sundays should be counted as selling days
+ * @returns {boolean} True if Sundays should be skipped
+ */
+function shouldSkipSundays() {
+  return true; // Default to skipping Sundays
+}
+
+/**
+ * Checks if Monday should log Saturday's date
+ * @returns {boolean} True if Monday should default to Saturday
+ */
+function shouldMondayLogSaturday() {
+  return true; // Default to true
+}
+
+/**
+ * Validates FI (Finance & Insurance) flag field
+ * Accepts single uppercase letters (A-Z) or the special value "BD"
+ * @param {string} fiFlag - FI flag to validate
+ * @returns {boolean} True if valid, false otherwise
+ */
+function isValidFIFlag(fiFlag) {
+  if (!fiFlag || typeof fiFlag !== 'string') {
+    return false;
+  }
+
+  const trimmed = fiFlag.trim().toUpperCase();
+
+  // Accept single letters A-Z or special value "BD"
+  return /^[A-Z]$/.test(trimmed) || trimmed === 'BD';
 }
 
 /**
@@ -1931,47 +1898,16 @@ function rolloverMonth() {
 // CONFIGURATION UI FUNCTIONS
 // ============================================================================
 
-/**
- * Opens the configuration sidebar
- * Initializes migration if needed on first open
- */
-function openConfigurationSidebar() {
-  try {
-    // Check if migration is needed (first time opening settings)
-    const props = PropertiesService.getDocumentProperties();
-    if (!props.getProperty('SALES_LOG_CONFIG')) {
-      // Auto-migrate from hardcoded constants
-      migrateToConfigUI();
-    }
 
-    // Create template from file (enables server-side scriptlet execution)
-    const template = HtmlService.createTemplateFromFile('config_sidebar');
-    const html = template.evaluate()
-      .setTitle('Sales Log Settings')
-      .setWidth(350);
-
-    SpreadsheetApp.getUi().showSidebar(html);
-  } catch (e) {
-    logError('openConfigurationSidebar', e);
-    alertError('Failed to open settings: ' + e.message, 'Configuration Error');
-  }
-}
 
 // ============================================================================
 // MENU & INITIALIZATION
 // ============================================================================
 
 // onOpen
+// onOpen
 function onOpen() {
   try {
-    // Run migration check silently (safe to call multiple times)
-    try {
-      migrateToConfigUI();
-    } catch (migrationError) {
-      logWarning('onOpen', 'Migration check failed (non-critical)', { error: migrationError.toString() });
-      // Continue with menu creation even if migration fails
-    }
-
     // Check if all required sheets exist
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const hasAllSheets = ss.getSheetByName("TODAY") &&
@@ -1979,28 +1915,14 @@ function onOpen() {
                          ss.getSheetByName("SALESPEOPLE") &&
                          ss.getSheetByName("DEPOSITS");
 
-    // Create menu - conditionally show setup wizard only if sheets are missing
+    // Create menu
     const menu = SpreadsheetApp.getUi().createMenu("Sales Tools");
-
-    // Only show setup wizard if any required sheets are missing
-    if (!hasAllSheets) {
-      menu.addItem("🚀 Run Setup Wizard", "runSetupWizard")
-          .addSeparator();
-    }
 
     menu.addItem("Log Yesterday's Sales", "processDaily")
         .addSeparator()
         .addItem("Recalculate MTD & Check Formats", "recalcMtdFromMonthly")
         .addSeparator()
         .addItem("Start New Month (Rollover)", "rolloverMonth")
-        .addSeparator()
-        .addItem("Merge Monthly data with CDK", "reformatDailySales")
-        .addSeparator()
-        .addItem("Add Todays sales to Dashboard", "processVSalesLogComplete")
-        .addSeparator()
-        .addItem("Refresh Dashboard", "refreshDashboard")
-        .addSeparator()
-        .addItem("Color Settings", "openConfigurationSidebar")
         .addSeparator()
         .addItem("Refresh Leaderboard", "manualRefreshLeaderboard")
         .addToUi();
