@@ -506,7 +506,8 @@ function syncLeaderboardWithSalespeople(options = {}) {
 
     const rowsToClear = Math.min(availableRows, 200);
     if (rowsToClear > 0) {
-      todaySheet.getRange(2, 16, rowsToClear, 3).clearContent();
+      // MODIFIED: Use clear() to remove content AND formatting (borders, colors)
+      todaySheet.getRange(2, 16, rowsToClear, 3).clear();
     }
 
     if (todaySheet.getMaxRows() < endRow) {
@@ -547,9 +548,22 @@ function syncLeaderboardWithSalespeople(options = {}) {
 
     const targetRange = todaySheet.getRange(`P2:R${endRow}`);
     targetRange.setValues(finalRows);
-    todaySheet.getRange(`P2:P${endRow}`).setHorizontalAlignment('left');
-    todaySheet.getRange(`Q2:Q${endRow}`).setNumberFormat('0.#');
-    todaySheet.getRange(`R2:R${endRow}`).setNumberFormat('0.#');
+
+    // MODIFIED: Apply specific formatting to the active leaderboard range
+    targetRange
+      .setBorder(true, true, true, true, true, true, "#000000", SpreadsheetApp.BorderStyle.SOLID)
+      .setFontFamily("Calibri")
+      .setFontSize(14)
+      .setFontWeight("bold");
+
+    // Name column (P)
+    todaySheet.getRange(`P2:P${endRow}`)
+      .setHorizontalAlignment('left');
+
+    // Number columns (Q-R)
+    todaySheet.getRange(`Q2:R${endRow}`)
+      .setHorizontalAlignment('center')
+      .setNumberFormat('0.#');
 
     reapplyCF();
     invalidateSalespersonMapCache();
