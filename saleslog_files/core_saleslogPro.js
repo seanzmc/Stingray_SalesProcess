@@ -1313,9 +1313,11 @@ function processDaily() {
       const dailyRange = sheets.today.getRange(RANGES.dailyData); // A2:N51
       const allDailyData = dailyRange.getValues();
       const allDailyFontColors = dailyRange.getFontColors(); // *** NEW: Get font colors ***
+      const allDailyBackgrounds = dailyRange.getBackgrounds(); // *** NEW: Get background colors ***
 
       let rowsToLogToMonthly = [];
       let fontColorsToLogToMonthly = []; // *** NEW: Array for corresponding font colors ***
+      let backgroundsToLogToMonthly = []; // *** NEW: Array for corresponding background colors ***
 
       allDailyData.forEach((row, index) => {
         const hasNewActivity = row.slice(1, 7).some((cell) => cell && String(cell).trim() !== "");
@@ -1323,6 +1325,7 @@ function processDaily() {
         if (hasNewActivity || hasUsedActivity) {
           rowsToLogToMonthly.push([...row]); // Push a copy of the row
           fontColorsToLogToMonthly.push([...allDailyFontColors[index]]); // Push a copy of the font color row
+          backgroundsToLogToMonthly.push([...allDailyBackgrounds[index]]); // Push a copy of the background color row
         }
       });
 
@@ -1383,8 +1386,19 @@ function processDaily() {
       // *** NEW: Apply font colors to the new rows on monthly sheet ***
       if (fontColorsToLogToMonthly.length > 0) {
         monthlyDataRange.setFontColors(fontColorsToLogToMonthly);
-        SpreadsheetApp.flush(); // Ensure font colors are applied before next formatting
       }
+
+      // *** NEW: Apply background colors to Columns E and L on monthly sheet ***
+      if (backgroundsToLogToMonthly.length > 0) {
+        // Extract backgrounds for Column E (Index 4) and Column L (Index 11)
+        const backgroundsE = backgroundsToLogToMonthly.map(r => [r[4]]);
+        const backgroundsL = backgroundsToLogToMonthly.map(r => [r[11]]);
+
+        // Apply to Monthly Sheet (Col E = 5, Col L = 12)
+        sheets.monthly.getRange(dataInsertRow, 5, numRowsToInsert, 1).setBackgrounds(backgroundsE);
+        sheets.monthly.getRange(dataInsertRow, 12, numRowsToInsert, 1).setBackgrounds(backgroundsL);
+      }
+      SpreadsheetApp.flush(); // Ensure formatting is applied
 
       const { aliasMap, displayCodeMap } = getSalespersonMaps();
 
