@@ -18,6 +18,8 @@ const CELL_POINTER = 'B2';
 // Where to optionally display "Next Up" on APPOINTMENTS
 const NEXT_UP_DISPLAY_CELL = 'J2'; // tweak or ignore
 
+const SHEET_AUDIT = 'RR_AUDIT';
+
 /***** TRIGGERS *****/
 // If using Google Form → install an "On form submit" trigger for this.
 function onFormSubmit(e) {
@@ -66,7 +68,11 @@ function menuAssignSelectedRow() {
 function menuSkipAndReassignSelectedRow() {
   const row = getActiveRow_();
   if (!row) return;
+
+  // Skip first
   skipPointer_();
+
+  // Then reassign (force)
   assignRowAuto_(row, { forceReassign: true });
 }
 
@@ -74,12 +80,24 @@ function menuMarkSelectedRowManual() {
   const row = getActiveRow_();
   if (!row) return;
   const appts = getApptsSheet_();
+
   appts.getRange(row, COL_MODE).setValue('Manual');
+
+  const user = safeUserEmail_();
+  logRoundRobinAction_('Mark Manual', { row: row, user: user });
 }
 
 function menuResetPointer() {
   // Optional: restrict by email/domain if you want.
+  const oldPointer = getPointer_();
   setPointer_(0);
+
+  logRoundRobinAction_('Reset Pointer', {
+      pointerBefore: oldPointer,
+      pointerAfter: 0,
+      reason: 'Admin Reset'
+  });
+
   menuRefreshNextUp();
 }
 
@@ -90,19 +108,19 @@ function menuRefreshNextUp() {
 }
 
 /***** CORE LOGIC *****/
+
+/**
+ * Main entry point for auto-assigning a row.
+ * Uses centralized advanceRoundRobinPointer_ for logic & auditing.
+ */
 function assignRowAuto_(row, opts = {}) {
   const lock = LockService.getDocumentLock();
   lock.waitLock(15000);
 
   try {
     const appts = getApptsSheet_();
-    const roster = getEligibleRoster_(); // array of names
 
-    if (roster.length === 0) {
-      appts.getRange(row, COL_MODE).setValue('No Eligible Reps');
-      return;
-    }
-
+    // Read row data
     const rowRange = appts.getRange(row, 1, 1, COL_ASSIGNED_BY);
     const vals = rowRange.getValues()[0];
 
@@ -113,14 +131,28 @@ function assignRowAuto_(row, opts = {}) {
     // Must have the minimal appointment info
     if (!apptDt || !name || !phone) return;
 
+    // Check existing assignment
     const alreadyAssigned = vals[COL_ASSIGNED - 1];
     if (alreadyAssigned && !opts.forceReassign) return;
 
-    // Determine next assignee from pointer
-    let pointer = getPointer_();
-    pointer = normalizePointer_(pointer, roster.length);
+    // Get roster & advance pointer
+    const roster = getEligibleRoster_(); // array of names
+    if (roster.length === 0) {
+      appts.getRange(row, COL_MODE).setValue('No Eligible Reps');
+      return;
+    }
 
-    const assignee = roster[pointer];
+    // --- CENTRALIZED LOGIC CALL ---
+    const result = advanceRoundRobinPointer_(roster, {
+        actionType: 'Assignment',
+        details: {
+            row: row,
+            customer: name,
+            notes: opts.forceReassign ? 'Reassignment (Force)' : 'New Assignment'
+        }
+    });
+
+    const assignee = result.assignee;
 
     // Write assignment fields
     const now = new Date();
@@ -131,12 +163,8 @@ function assignRowAuto_(row, opts = {}) {
     appts.getRange(row, COL_MODE).setValue('Auto');
     appts.getRange(row, COL_ASSIGNED_BY).setValue(user);
 
-    // Advance pointer for next time
-    pointer = (pointer + 1) % roster.length;
-    setPointer_(pointer);
-
     // Update Next Up display (optional)
-    const next = roster[pointer] || '';
+    const next = result.nextUp || '';
     appts.getRange(NEXT_UP_DISPLAY_CELL).setValue(next || '(no eligible reps)');
 
   } finally {
@@ -159,12 +187,77 @@ function skipPointer_() {
     const roster = getEligibleRoster_();
     if (roster.length === 0) return;
 
-    let pointer = normalizePointer_(getPointer_(), roster.length);
-    pointer = (pointer + 1) % roster.length;
-    setPointer_(pointer);
+    // Advance without assigning
+    advanceRoundRobinPointer_(roster, {
+        actionType: 'Skip',
+        details: { reason: 'User requested skip' }
+    });
+
+    menuRefreshNextUp();
+
   } finally {
     lock.releaseLock();
   }
+}
+
+/**
+ * Centralized function to get pointer, determine assignee, advance pointer, and log audit.
+ * returns { assignee, pointerBefore, pointerAfter, nextUp }
+ */
+function advanceRoundRobinPointer_(roster, auditInfo) {
+    if (!roster || roster.length === 0) throw new Error('Roster empty');
+
+    const pointerBefore = normalizePointer_(getPointer_(), roster.length);
+    const assignee = roster[pointerBefore];
+
+    // Calc new pointer
+    const pointerAfter = (pointerBefore + 1) % roster.length;
+
+    // Update state
+    setPointer_(pointerAfter);
+
+    // Log it
+    const nextUp = roster[pointerAfter];
+
+    logRoundRobinAction_(auditInfo.actionType || 'Advance', {
+        pointerBefore: pointerBefore,
+        pointerAfter: pointerAfter,
+        assignee: assignee,
+        nextUp: nextUp,
+        rosterCount: roster.length,
+        ...auditInfo.details
+    });
+
+    return {
+        assignee,
+        pointerBefore,
+        pointerAfter,
+        nextUp
+    };
+}
+
+/***** AUDITING *****/
+function logRoundRobinAction_(action, detailsObj) {
+    try {
+        const ss = SpreadsheetApp.getActive();
+        let auditSheet = ss.getSheetByName(SHEET_AUDIT);
+        if (!auditSheet) {
+            auditSheet = ss.insertSheet(SHEET_AUDIT);
+            auditSheet.appendRow(['Timestamp', 'User', 'Action', 'Reference', 'Details']);
+            auditSheet.setFrozenRows(1);
+        }
+
+        const now = new Date();
+        const user = safeUserEmail_();
+        const detailsStr = detailsObj ? JSON.stringify(detailsObj) : '';
+        const reference = detailsObj.row ? `Row ${detailsObj.row}` : '';
+
+        auditSheet.appendRow([now, user, action, reference, detailsStr]);
+
+    } catch(e) {
+        console.error('Audit Log Failed', e);
+        // Don't block main flow if audit fails
+    }
 }
 
 /***** DATA ACCESS *****/

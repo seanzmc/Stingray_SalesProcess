@@ -37,17 +37,27 @@ function createAppointmentFromSidebar(payload) {
     const apptDt = new Date(apptIso);
     if (isNaN(apptDt.getTime())) throw new Error('Invalid appointment date/time.');
 
+    // Check for eligible roster
     const roster = getEligibleRoster_();
     if (roster.length === 0) throw new Error('No eligible salespeople in RR_ROSTER.');
 
-    // Pointer -> assignee
-    let pointer = getPointer_();
-    pointer = normalizePointer_(pointer, roster.length);
-    const assignee = roster[pointer];
+    // --- CENTRALIZED LOGIC CALL ---
+    // This handles finding the assignee, advancing variable, and LOGGING TO AUDIT
+    const result = advanceRoundRobinPointer_(roster, {
+        actionType: 'Sidebar Appointment',
+        details: {
+            appt: apptIso,
+            customer: customerName,
+            creator: assignedByName
+        }
+    });
+
+    const assignee = result.assignee;
+    const nextUp = result.nextUp;
 
     // Write row
     const now = new Date();
-    const assignedBy = assignedByName; // assignedByName select dropdown name of user who created the appointment
+    const assignedBy = assignedByName;
 
     const newRow = appts.getLastRow() + 1;
     appts.getRange(newRow, 1, 1, 8).setValues([[
@@ -61,12 +71,7 @@ function createAppointmentFromSidebar(payload) {
       notes         // H Notes
     ]]);
 
-    // Advance pointer
-    pointer = (pointer + 1) % roster.length;
-    setPointer_(pointer);
-
-    // Optional: return confirmation (and next up) to show in sidebar UI
-    const nextUp = roster[pointer] || '';
+    // Success response
     return {
       ok: true,
       assignedTo: assignee,
@@ -77,6 +82,8 @@ function createAppointmentFromSidebar(payload) {
     lock.releaseLock();
   }
 }
+
+
 
 /*** Helpers (reuse your existing ones if already present) ***/
 function getEligibleRoster_() {

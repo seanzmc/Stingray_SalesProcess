@@ -1990,17 +1990,25 @@ function onOpen() {
  * Keeps everything in one place for the desk.
  */
 function addRoundRobinMenuItems_(menu) {
-  menu.addSeparator()
-    .addSubMenu(
-      SpreadsheetApp.getUi().createMenu("Round Robin")
-        .addItem("New Appointment…", "showNewAppointmentSidebar")
+  const rrMenu = SpreadsheetApp.getUi().createMenu("Round Robin");
+
+  // Primary Actions
+  rrMenu.addItem("New Appointment…", "showNewAppointmentSidebar")
         .addSeparator()
-        .addItem("Assign selected row (Auto)", "menuAssignSelectedRow")
-        .addItem("Skip to next & reassign selected row", "menuSkipAndReassignSelectedRow")
-        .addSeparator()
-        .addItem("Mark selected row as Manual", "menuMarkSelectedRowManual")
-        .addSeparator()
-        .addItem("Reset pointer to top (admin)", "menuResetPointer")
         .addItem("Refresh Next Up display", "menuRefreshNextUp")
-    );
+        .addSeparator();
+
+  // Admin Submenu
+  const adminMenu = SpreadsheetApp.getUi().createMenu("Admin Tools");
+  adminMenu.addItem("Assign selected row (Auto)", "menuAssignSelectedRow")
+           .addItem("Skip to next & reassign selected row", "menuSkipAndReassignSelectedRow")
+           .addSeparator()
+           .addItem("Mark selected row as Manual", "menuMarkSelectedRowManual")
+           .addSeparator()
+           .addItem("Reset pointer to top", "menuResetPointer");
+
+  rrMenu.addSubMenu(adminMenu);
+
+  menu.addSeparator()
+      .addSubMenu(rrMenu);
 }

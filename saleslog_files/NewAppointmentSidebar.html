@@ -143,13 +143,9 @@
                     .withSuccessHandler((res) => {
                         disable(false);
                         if (res && res.ok) {
-                            setStatus(`Assigned to: ${res.assignedTo}. Next up: ${res.nextUp || '(none)'}`, true);
-                            // Clear fields for rapid entry
-                            document.getElementById('customerName').value = '';
-                            document.getElementById('phone').value = '';
-                            document.getElementById('notes').value = '';
-                            // Keep apptIso as-is or clear it; your choice:
-                            // document.getElementById('apptIso').value = '';
+                            const msg = `Assigned to: ${res.assignedTo}\nNext up: ${res.nextUp || '(none)'}`;
+                            alert(msg);
+                            google.script.host.close();
                         } else {
                             setStatus('Unexpected response from server.', false);
                         }
