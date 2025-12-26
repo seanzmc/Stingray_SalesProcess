@@ -1994,8 +1994,6 @@ function addRoundRobinMenuItems_(menu) {
 
   // Primary Actions
   rrMenu.addItem("New Appointment…", "showNewAppointmentSidebar")
-        .addSeparator()
-        .addItem("Refresh Next Up display", "menuRefreshNextUp")
         .addSeparator();
 
   // Admin Submenu

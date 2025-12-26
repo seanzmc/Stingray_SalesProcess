@@ -98,10 +98,10 @@ function menuResetPointer() {
       reason: 'Admin Reset'
   });
 
-  menuRefreshNextUp();
+  refreshNextUp_();
 }
 
-function menuRefreshNextUp() {
+function refreshNextUp_() {
   const appts = getApptsSheet_();
   const next = peekNextAssignee_();
   appts.getRange(NEXT_UP_DISPLAY_CELL).setValue(next || '(no eligible reps)');
@@ -193,7 +193,7 @@ function skipPointer_() {
         details: { reason: 'User requested skip' }
     });
 
-    menuRefreshNextUp();
+    refreshNextUp_();
 
   } finally {
     lock.releaseLock();
@@ -248,8 +248,28 @@ function logRoundRobinAction_(action, detailsObj) {
         }
 
         const now = new Date();
-        const user = safeUserEmail_();
-        const detailsStr = detailsObj ? JSON.stringify(detailsObj) : '';
+
+        // Use provided user override (e.g. from sidebar) or fallback to system user
+        let user = safeUserEmail_();
+        if (detailsObj && detailsObj.user) {
+            user = detailsObj.user;
+            delete detailsObj.user; // Don't duplicate in details string
+        } else if (detailsObj && detailsObj.creator) {
+             user = detailsObj.creator; // Handle sidebar 'creator' field
+             delete detailsObj.creator;
+        }
+
+        // Format details as Key: Value string instead of JSON
+        let detailsStr = '';
+        if (detailsObj) {
+            // Filter out row as it's in Reference
+            const { row, ...rest } = detailsObj;
+
+            detailsStr = Object.entries(rest)
+                .map(([k, v]) => `${k}: ${v}`)
+                .join(' | ');
+        }
+
         const reference = detailsObj.row ? `Row ${detailsObj.row}` : '';
 
         auditSheet.appendRow([now, user, action, reference, detailsStr]);
