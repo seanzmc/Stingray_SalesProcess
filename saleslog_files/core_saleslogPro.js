@@ -1934,6 +1934,7 @@ function rolloverMonth() {
 
 // onOpen
 // onOpen
+// onOpen
 function onOpen() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1946,23 +1947,36 @@ function onOpen() {
       ss.getSheetByName("DEPOSITS");
 
     const ui = SpreadsheetApp.getUi();
-    const menu = ui.createMenu("Sales Tools");
+    const menu = ui.createMenu("BDC Appts");
 
-    // Round Robin - Primary Action (Top)
+    // 1. Top Item: New Appointment
     menu.addItem("New Appointment…", "showNewAppointmentSidebar")
         .addSeparator();
 
-    // Your existing items
-    menu.addItem("Log Yesterday's Sales", "processDaily")
-      .addSeparator()
-      .addItem("Recalculate MTD & Check Formats", "recalcMtdFromMonthly")
-      .addSeparator()
-      .addItem("Start New Month (Rollover)", "rolloverMonth")
-      .addSeparator()
-      .addItem("Refresh Leaderboard", "manualRefreshLeaderboard");
+    // 2. Round Robin Submenu (Admin Tools)
+    const rrMenu = ui.createMenu("Round Robin");
+    rrMenu.addItem("Reassign to next available sales", "menuSkipAndReassignSelectedRow")
+          .addSeparator()
+          .addItem("Assign selected row (if sidebar not used)", "menuAssignSelectedRow")
+          .addSeparator()
+          .addItem("Mark selected row as Manual", "menuMarkSelectedRowManual")
+          .addSeparator()
+          .addItem("Reset Round Robin pointer to top", "menuResetPointer");
 
-    // Add Round Robin items (new)
-    addRoundRobinMenuItems_(menu);
+    menu.addSubMenu(rrMenu)
+        .addSeparator();
+
+    // 3. SalesLog Tools (admin) Submenu
+    const analyticsMenu = ui.createMenu("SalesLog Tools (admin)");
+    analyticsMenu.addItem("Log Yesterday's Sales", "processDaily")
+                 .addSeparator()
+                 .addItem("Recalculate MTD & Check Formats", "recalcMtdFromMonthly")
+                 .addSeparator()
+                 .addItem("Start New Month (Rollover)", "rolloverMonth")
+                 .addSeparator()
+                 .addItem("Refresh Leaderboard", "manualRefreshLeaderboard");
+
+    menu.addSubMenu(analyticsMenu);
 
     menu.addToUi();
 
@@ -1992,19 +2006,8 @@ function onOpen() {
 /**
  * Appends Round Robin items to an existing menu.
  * Keeps everything in one place for the desk.
+ * @deprecated - Merged directly into onOpen for custom layout
  */
 function addRoundRobinMenuItems_(menu) {
-  const rrMenu = SpreadsheetApp.getUi().createMenu("Round Robin");
-
-  // Admin / Manual Actions directly under "Round Robin"
-  rrMenu.addItem("Reassign to next available sales", "menuSkipAndReassignSelectedRow")
-        .addSeparator()
-        .addItem("Assign selected row (if sidebar not used)", "menuAssignSelectedRow")
-        .addSeparator()
-        .addItem("Mark selected row as Manual", "menuMarkSelectedRowManual")
-        .addSeparator()
-        .addItem("Reset Round Robin pointer to top", "menuResetPointer");
-
-  menu.addSeparator()
-      .addSubMenu(rrMenu);
+  // Deprecated/Unused now
 }
