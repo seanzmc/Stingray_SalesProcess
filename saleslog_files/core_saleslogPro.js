@@ -1936,42 +1936,69 @@ function rolloverMonth() {
 // onOpen
 function onOpen() {
   try {
-    // Check if all required sheets exist
     const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const hasAllSheets = ss.getSheetByName("TODAY") &&
-                         ss.getSheetByName("MONTHLY") &&
-                         ss.getSheetByName("SALESPEOPLE") &&
-                         ss.getSheetByName("DEPOSITS");
 
-    // Create menu
-    const menu = SpreadsheetApp.getUi().createMenu("Sales Tools");
+    // Check required sheets (keep your existing logic if you use it elsewhere)
+    const hasAllSheets =
+      ss.getSheetByName("TODAY") &&
+      ss.getSheetByName("MONTHLY") &&
+      ss.getSheetByName("SALESPEOPLE") &&
+      ss.getSheetByName("DEPOSITS");
 
+    const ui = SpreadsheetApp.getUi();
+    const menu = ui.createMenu("Sales Tools");
+
+    // Your existing items
     menu.addItem("Log Yesterday's Sales", "processDaily")
-        .addSeparator()
-        .addItem("Recalculate MTD & Check Formats", "recalcMtdFromMonthly")
-        .addSeparator()
-        .addItem("Start New Month (Rollover)", "rolloverMonth")
-        .addSeparator()
-        .addItem("Refresh Leaderboard", "manualRefreshLeaderboard")
-        .addToUi();
+      .addSeparator()
+      .addItem("Recalculate MTD & Check Formats", "recalcMtdFromMonthly")
+      .addSeparator()
+      .addItem("Start New Month (Rollover)", "rolloverMonth")
+      .addSeparator()
+      .addItem("Refresh Leaderboard", "manualRefreshLeaderboard");
+
+    // Add Round Robin items (new)
+    addRoundRobinMenuItems_(menu);
+
+    menu.addToUi();
+
   } catch (e) {
     // Log error with full context for debugging
-    logError('onOpen', e, { operation: 'create_menu' });
+    try {
+      logError('onOpen', e, { operation: 'create_menu' });
+    } catch (_) {}
 
-    // Notify user of menu creation failure
+    // Notify user
     try {
       SpreadsheetApp.getActiveSpreadsheet().toast(
-        'Failed to create Sales Tools menu. Please refresh the page. If the problem persists, check the script logs or contact support.',
+        'Failed to create Sales Tools menu. Please refresh the page. If the problem persists, check the script logs.',
         'Menu Creation Error',
-        10  // 10 seconds - important message
+        10
       );
     } catch (toastError) {
-      // If even toast fails, log it but don't throw
-      logWarning('onOpen', 'Could not display error toast', { error: toastError.toString() });
+      try {
+        logWarning('onOpen', 'Could not display error toast', { error: toastError.toString() });
+      } catch (_) {}
     }
-
   } finally {
-    // Log completion for monitoring
     Logger.log('[onOpen] Trigger execution completed');
   }
+}
+
+/**
+ * Appends Round Robin items to an existing menu.
+ * Keeps everything in one place for the desk.
+ */
+function addRoundRobinMenuItems_(menu) {
+  menu.addSeparator()
+    .addSubMenu(
+      SpreadsheetApp.getUi().createMenu("Round Robin")
+        .addItem("Assign selected row (Auto)", "menuAssignSelectedRow")
+        .addItem("Skip to next & reassign selected row", "menuSkipAndReassignSelectedRow")
+        .addSeparator()
+        .addItem("Mark selected row as Manual", "menuMarkSelectedRowManual")
+        .addSeparator()
+        .addItem("Reset pointer to top (admin)", "menuResetPointer")
+        .addItem("Refresh Next Up display", "menuRefreshNextUp")
+    );
 }
