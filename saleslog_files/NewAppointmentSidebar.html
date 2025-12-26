@@ -1,0 +1,166 @@
+<!doctype html>
+<html>
+
+    <head>
+        <base target="_top">
+        <style>
+            body {
+                font-family: Calibri, sans-serif;
+                padding: 12px;
+            }
+
+            label {
+                display: block;
+                margin-top: 10px;
+                font-weight: 600;
+            }
+
+            input,
+            textarea,
+            select {
+                width: 100%;
+                box-sizing: border-box;
+                padding: 8px;
+                margin-top: 6px;
+            }
+
+            button {
+                margin-top: 14px;
+                padding: 10px;
+                width: 100%;
+            }
+
+            .hint {
+                margin-top: 10px;
+                font-size: 12px;
+                opacity: 0.8;
+            }
+
+            .status {
+                margin-top: 12px;
+                padding: 10px;
+                border-radius: 6px;
+            }
+
+            .ok {
+                background: #e8f5e9;
+            }
+
+            .err {
+                background: #ffebee;
+            }
+        </style>
+    </head>
+
+    <body>
+        <h3>New Appointment</h3>
+
+        <label>Appointment date/time</label>
+        <input id="apptIso"
+               type="datetime-local" />
+
+        <label>Customer name</label>
+        <input id="customerName"
+               type="text"
+               placeholder="John Smith" />
+
+        <label>Phone</label>
+        <input id="phone"
+               type="tel"
+               placeholder="813-555-1234" />
+
+        <label>Assigned By</label>
+        <select id="assignedByName"></select>
+
+        <label>Notes (optional)</label>
+        <textarea id="notes"
+                  rows="3"
+                  placeholder="Anything helpful..."></textarea>
+
+        <button id="submitBtn"
+                type="button"
+                onclick="submit()">Create & Assign</button>
+
+        <div class="hint">This will auto-assign to the next eligible salesperson and advance the queue.</div>
+
+        <div id="status"></div>
+
+        <script>
+            function loadAssignedBy() {
+                google.script.run
+                    .withSuccessHandler((names) => {
+                        const sel = document.getElementById('assignedByName');
+                        sel.innerHTML = '';
+
+                        const placeholder = document.createElement('option');
+                        placeholder.value = '';
+                        placeholder.textContent = 'Select…';
+                        sel.appendChild(placeholder);
+
+                        (names || []).forEach(n => {
+                            const opt = document.createElement('option');
+                            opt.value = n;
+                            opt.textContent = n;
+                            sel.appendChild(opt);
+                        });
+                    })
+                    .withFailureHandler((err) => {
+                        setStatus('Failed to load Assigned By list: ' + (err?.message || err), false);
+                    })
+                    .getAssignmentUsers();
+            }
+
+            // Run when sidebar loads
+            window.onload = loadAssignedBy;
+
+            function setStatus(msg, ok) {
+                const el = document.getElementById('status');
+                el.className = 'status ' + (ok ? 'ok' : 'err');
+                el.textContent = msg;
+            }
+
+            function disable(disabled) {
+                document.getElementById('submitBtn').disabled = disabled;
+                document.getElementById('submitBtn').textContent = disabled ? 'Working…' : 'Create & Assign';
+            }
+
+            function submit() {
+                const payload = {
+                    apptIso: document.getElementById('apptIso').value,
+                    customerName: document.getElementById('customerName').value,
+                    phone: document.getElementById('phone').value,
+                    notes: document.getElementById('notes').value,
+                    assignedByName: document.getElementById('assignedByName').value
+                };
+
+                if (!payload.apptIso || !payload.customerName || !payload.phone || !payload.assignedByName) {
+                    setStatus('Please fill appointment date/time, customer name, phone, and assigned by.', false);
+                    return;
+                }
+
+                disable(true);
+                google.script.run
+                    .withSuccessHandler((res) => {
+                        disable(false);
+                        if (res && res.ok) {
+                            setStatus(`Assigned to: ${res.assignedTo}. Next up: ${res.nextUp || '(none)'}`, true);
+                            // Clear fields for rapid entry
+                            document.getElementById('customerName').value = '';
+                            document.getElementById('phone').value = '';
+                            document.getElementById('notes').value = '';
+                            // Keep apptIso as-is or clear it; your choice:
+                            // document.getElementById('apptIso').value = '';
+                        } else {
+                            setStatus('Unexpected response from server.', false);
+                        }
+                    })
+                    .withFailureHandler((err) => {
+                        disable(false);
+                        setStatus(err && err.message ? err.message : String(err), false);
+                    })
+                    .createAppointmentFromSidebar(payload);
+            }
+        </script>
+    </body>
+
+</html>

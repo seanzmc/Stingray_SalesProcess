@@ -1993,6 +1993,8 @@ function addRoundRobinMenuItems_(menu) {
   menu.addSeparator()
     .addSubMenu(
       SpreadsheetApp.getUi().createMenu("Round Robin")
+        .addItem("New Appointment…", "showNewAppointmentSidebar")
+        .addSeparator()
         .addItem("Assign selected row (Auto)", "menuAssignSelectedRow")
         .addItem("Skip to next & reassign selected row", "menuSkipAndReassignSelectedRow")
         .addSeparator()
