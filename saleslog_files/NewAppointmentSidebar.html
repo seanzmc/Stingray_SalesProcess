@@ -55,33 +55,44 @@
     <body>
         <h3>New Appointment</h3>
 
-        <label>Appointment date/time</label>
-        <input id="apptIso"
-               type="datetime-local" />
+        <div id="form-container">
+            <label>Appointment date/time</label>
+            <input id="apptIso"
+                   type="datetime-local" />
 
-        <label>Customer name</label>
-        <input id="customerName"
-               type="text"
-               placeholder="John Smith" />
+            <label>Customer name</label>
+            <input id="customerName"
+                   type="text"
+                   placeholder="John Smith" />
 
-        <label>Phone</label>
-        <input id="phone"
-               type="tel"
-               placeholder="813-555-1234" />
+            <label>Phone</label>
+            <input id="phone"
+                   type="tel"
+                   placeholder="813-555-1234" />
 
-        <label>Assigned By</label>
-        <select id="assignedByName"></select>
+            <label>Assigned By</label>
+            <select id="assignedByName"></select>
 
-        <label>Notes (optional)</label>
-        <textarea id="notes"
-                  rows="3"
-                  placeholder="Anything helpful..."></textarea>
+            <label>Notes (optional)</label>
+            <textarea id="notes"
+                      rows="3"
+                      placeholder="Anything helpful..."></textarea>
 
-        <button id="submitBtn"
-                type="button"
-                onclick="submit()">Create & Assign</button>
+            <button id="submitBtn"
+                    type="button"
+                    onclick="submit()">Create & Assign</button>
 
-        <div class="hint">This will auto-assign to the next eligible salesperson and advance the queue.</div>
+            <div class="hint">This will auto-assign to the next eligible salesperson and advance the queue.</div>
+        </div>
+
+        <div id="success-container"
+             style="display:none; text-align: center; margin-top: 40px;">
+            <div style="font-size: 48px; color: #4CAF50;">&#10004;</div>
+            <h3 style="margin: 10px 0; color: #333;">Appointment Created</h3>
+            <div id="success-details"
+                 style="margin: 20px 0; font-size: 14px; color: #555; line-height: 1.5;"></div>
+            <button onclick="google.script.host.close()">Close</button>
+        </div>
 
         <div id="status"></div>
 
@@ -143,9 +154,17 @@
                     .withSuccessHandler((res) => {
                         disable(false);
                         if (res && res.ok) {
-                            const msg = `Assigned to: ${res.assignedTo}\nNext up: ${res.nextUp || '(none)'}`;
-                            alert(msg);
-                            google.script.host.close();
+                            // Hide form, show success
+                            document.getElementById('form-container').style.display = 'none';
+                            document.getElementById('status').style.display = 'none'; // hide any old status
+
+                            const details = `<strong>Assigned to:</strong> ${res.assignedTo}<br>` +
+                                `<strong>Next up:</strong> ${res.nextUp || '(none)'}`;
+
+                            const successDiv = document.getElementById('success-container');
+                            document.getElementById('success-details').innerHTML = details;
+                            successDiv.style.display = 'block';
+
                         } else {
                             setStatus('Unexpected response from server.', false);
                         }
