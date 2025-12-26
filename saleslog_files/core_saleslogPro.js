@@ -1948,6 +1948,10 @@ function onOpen() {
     const ui = SpreadsheetApp.getUi();
     const menu = ui.createMenu("Sales Tools");
 
+    // Round Robin - Primary Action (Top)
+    menu.addItem("New Appointment…", "showNewAppointmentSidebar")
+        .addSeparator();
+
     // Your existing items
     menu.addItem("Log Yesterday's Sales", "processDaily")
       .addSeparator()
@@ -1992,20 +1996,14 @@ function onOpen() {
 function addRoundRobinMenuItems_(menu) {
   const rrMenu = SpreadsheetApp.getUi().createMenu("Round Robin");
 
-  // Primary Actions
-  rrMenu.addItem("New Appointment…", "showNewAppointmentSidebar")
-        .addSeparator();
-
-  // Admin Submenu
-  const adminMenu = SpreadsheetApp.getUi().createMenu("Admin Tools");
-  adminMenu.addItem("Assign selected row (Auto)", "menuAssignSelectedRow")
-           .addItem("Skip to next & reassign selected row", "menuSkipAndReassignSelectedRow")
-           .addSeparator()
-           .addItem("Mark selected row as Manual", "menuMarkSelectedRowManual")
-           .addSeparator()
-           .addItem("Reset pointer to top", "menuResetPointer");
-
-  rrMenu.addSubMenu(adminMenu);
+  // Admin / Manual Actions directly under "Round Robin"
+  rrMenu.addItem("Reassign to next available sales", "menuSkipAndReassignSelectedRow")
+        .addSeparator()
+        .addItem("Assign selected row (if sidebar not used)", "menuAssignSelectedRow")
+        .addSeparator()
+        .addItem("Mark selected row as Manual", "menuMarkSelectedRowManual")
+        .addSeparator()
+        .addItem("Reset Round Robin pointer to top", "menuResetPointer");
 
   menu.addSeparator()
       .addSubMenu(rrMenu);
