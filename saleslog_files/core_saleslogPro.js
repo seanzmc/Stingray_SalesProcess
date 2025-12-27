@@ -1957,7 +1957,7 @@ function onOpen() {
     const rrMenu = ui.createMenu("Round Robin");
     rrMenu.addItem("Reassign to next available sales", "menuSkipAndReassignSelectedRow")
           .addSeparator()
-          .addItem("Assign selected row (if sidebar not used)", "menuAssignSelectedRow")
+          .addItem("Rewind Pointer (Undo)", "menuRewindPointer")
           .addSeparator()
           .addItem("Mark selected row as Manual", "menuMarkSelectedRowManual")
           .addSeparator()

@@ -31,7 +31,9 @@ function onFormSubmit(e) {
 }
 
 // If allowing direct entry into APPOINTMENTS → install an "On edit" trigger for this.
-function onEdit(e) {
+// RENAMED from 'onEdit' to prevent double-firing if a simple trigger also exists.
+// User MUST set up an installable Trigger for this function.
+function onEditInstallable(e) {
   const sheet = e.range.getSheet();
   if (sheet.getName() !== SHEET_APPTS) return;
 
@@ -80,21 +82,49 @@ function onEdit(e) {
 }
 
 /***** MENU ACTIONS *****/
-function menuAssignSelectedRow() {
-  const row = getActiveRow_();
-  if (!row) return;
-  assignRowAuto_(row);
-}
-
 function menuSkipAndReassignSelectedRow() {
   const row = getActiveRow_();
   if (!row) return;
 
-  // Skip first
+  // Skip first (advances pointer)
   skipPointer_();
 
-  // Then reassign (force)
-  assignRowAuto_(row, { forceReassign: true });
+  // Then reassign (force) with 'Manual' mode
+  // The user requested that this specific action be logged as 'Manual'
+  assignRowAuto_(row, {
+      forceReassign: true,
+      mode: 'Manual'
+  });
+}
+
+function menuRewindPointer() {
+  const lock = LockService.getDocumentLock();
+  lock.waitLock(5000);
+  try {
+      const roster = getEligibleRoster_();
+      if (roster.length === 0) return; // Can't compute modulus correctly if empty
+
+      const current = getPointer_();
+      // Logic: (current - 1) but wrap around if negative
+      let newPointer = current - 1;
+      if (newPointer < 0) {
+          newPointer = roster.length - 1;
+      }
+
+      setPointer_(newPointer);
+      refreshNextUp_();
+
+      logRoundRobinAction_('Rewind', {
+          pointerBefore: current,
+          pointerAfter: newPointer,
+          reason: 'User requested rewind'
+      });
+
+      SpreadsheetApp.getUi().toast(`Pointer rewound to ${newPointer} (${roster[newPointer]})`);
+
+  } finally {
+      lock.releaseLock();
+  }
 }
 
 function menuMarkSelectedRowManual() {
@@ -187,7 +217,7 @@ function assignRowAuto_(row, opts = {}) {
 
     appts.getRange(row, COL_CREATED_TS).setValue(now);
     appts.getRange(row, COL_ASSIGNED).setValue(assignee);
-    appts.getRange(row, COL_MODE).setValue('Auto');
+    appts.getRange(row, COL_MODE).setValue(opts.mode || 'Auto');
     appts.getRange(row, COL_ASSIGNED_BY).setValue(user);
 
     // Update Next Up display (optional)
