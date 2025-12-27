@@ -10,6 +10,7 @@ function showNewAppointmentSidebar() {
  */
 function createAppointmentFromSidebar(payload) {
   const lock = LockService.getDocumentLock();
+  // Wait longer for lock to avoid contention issues
   lock.waitLock(15000);
 
   try {
@@ -21,25 +22,25 @@ function createAppointmentFromSidebar(payload) {
     const assignedByName = (payload.assignedByName || '').trim();
 
     if (!assignedByName) {
-      throw new Error('Please select Assigned By.');
+      throw new Error('Please select "Assigned By".');
     }
 
     if (!apptIso || !customerName || !phone) {
-      throw new Error('Missing required fields.');
+      throw new Error('Missing required fields (Date, Name, or Phone).');
     }
 
     const ss = SpreadsheetApp.getActive();
+    // Use string literal to avoid scope issues
     const appts = ss.getSheetByName('APPOINTMENTS');
-    if (!appts) throw new Error('APPOINTMENTS sheet not found.');
+    if (!appts) throw new Error('Sheet "APPOINTMENTS" not found.');
 
     // Parse appt date/time from ISO-ish input (from datetime-local)
-    // datetime-local returns "YYYY-MM-DDTHH:MM"
     const apptDt = new Date(apptIso);
     if (isNaN(apptDt.getTime())) throw new Error('Invalid appointment date/time.');
 
-    // Check for eligible roster
+    // Check for eligible roster (function from round_robin.js)
     const roster = getEligibleRoster_();
-    if (roster.length === 0) throw new Error('No eligible salespeople in RR_ROSTER.');
+    if (roster.length === 0) throw new Error('No eligible salespeople found in RR_ROSTER.');
 
     // --- CENTRALIZED LOGIC CALL ---
     // This handles finding the assignee, advancing variable, and LOGGING TO AUDIT
@@ -55,21 +56,27 @@ function createAppointmentFromSidebar(payload) {
     const assignee = result.assignee;
     const nextUp = result.nextUp;
 
-    // Write row
+    // Write row to APPOINTMENTS
     const now = new Date();
-    const assignedBy = assignedByName;
 
+    // We already checked appts exists.
+    // Append to bottom or empty row? Use getLastRow() + 1
     const newRow = appts.getLastRow() + 1;
-    appts.getRange(newRow, 1, 1, 8).setValues([[
-      now,          // A Created Timestamp
-      apptDt,       // B Appt Date/Time
-      customerName, // C Customer Name
-      phone,        // D Phone
-      assignee,     // E Assigned Salesperson
-      'Auto',       // F Assignment Mode
-      assignedBy,   // G Assigned By
-      notes         // H Notes
-    ]]);
+
+    // Columns: A=Created, B=ApptDt, C=Customer, D=Phone, E=Assigned, F=Mode, G=AssignedBy, H=Notes
+    // Ensure we are setting exactly 8 columns
+    const rowValues = [[
+      now,          // A
+      apptDt,       // B
+      customerName, // C
+      phone,        // D
+      assignee,     // E
+      'Auto',       // F
+      assignedByName, // G
+      notes         // H
+    ]];
+
+    appts.getRange(newRow, 1, 1, 8).setValues(rowValues);
 
     // Success response
     return {
@@ -78,64 +85,38 @@ function createAppointmentFromSidebar(payload) {
       nextUp
     };
 
+  } catch (err) {
+    // Return error to client so it can be shown in the sidebar
+    return {
+      ok: false,
+      message: err.message || String(err)
+    };
   } finally {
     lock.releaseLock();
   }
 }
 
-
-
-/*** Helpers (reuse your existing ones if already present) ***/
-function getEligibleRoster_() {
-  const ss = SpreadsheetApp.getActive();
-  const sheet = ss.getSheetByName('RR_ROSTER');
-  if (!sheet) return [];
-
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-
-  // A: name, B: active, C: eligible
-  const data = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
-  return data
-    .filter(r => r[0] && r[1] === true && r[2] === true)
-    .map(r => String(r[0]).trim());
-}
-
-function getPointer_() {
-  const ss = SpreadsheetApp.getActive();
-  const state = ss.getSheetByName('RR_STATE');
-  if (!state) throw new Error('RR_STATE sheet not found.');
-
-  const v = state.getRange('B2').getValue();
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.floor(n) : 0;
-}
-
-function setPointer_(n) {
-    const ss = SpreadsheetApp.getActive();
-    const state = ss.getSheetByName('RR_STATE');
-    if (!state) throw new Error('RR_STATE sheet not found.');
-
-    state.getRange('B2').setValue(n);
-}
-
-function normalizePointer_(pointer, len) {
-    if (!Number.isFinite(pointer) || pointer < 0) return 0;
-    if (len <= 0) return 0;
-    return pointer % len;
-}
-
-// Better than getActiveUser(); still may be blank on consumer accounts.
-function safeUserEmail_() {
-  try {
-    return Session.getEffectiveUser().getEmail() || '';
-  } catch (e) {
-    return '';
-  }
+// Re-export getAssignmentUsers for the client-side loader
+function getAssignmentUsers() {
+  // Use the internal helper (which we keep locally or define in round_robin.js?)
+  // The original file had getAssignmentUsers_ duplicated.
+  // Let's check if round_robin.js has `getAssignmentUsers_`.
+  // Checking previous file view... round_robin.js does NOT have getAssignmentUsers_.
+  // So we MUST keep getAssignmentUsers_ HERE, or move it to round_robin.js.
+  // The plan said "Remove... getAssignmentUsers_", implying it was a duplicate.
+  // Let me double check round_robin.js content from Step 8.
+  // Step 8 content for round_robin.js shows: getEligibleRoster_, getPointer_, setPointer_, normalizePointer_, getActiveRow_, safeUserEmail_, getApptsSheet_, getStateSheet_.
+  // It does NOT show getAssignmentUsers_.
+  // So I must KEEP getAssignmentUsers_ here or moving it to round_robin.js.
+  // I'll keep it here for now to avoid breaking the "Assigned By" dropdown,
+  // but I will rename it or keep it as is.
+  // Actually, to be safe and clean, I will keep it here but remove the other duplicates.
+  return getAssignmentUsers_();
 }
 
 function getAssignmentUsers_() {
     const ss = SpreadsheetApp.getActive();
+    // We can use a constant if we want, or just literal string 'RR_USERS'
     const sheet = ss.getSheetByName('RR_USERS');
     if (!sheet) return [];
 
@@ -149,8 +130,4 @@ function getAssignmentUsers_() {
     .map(r => String(r[0]).trim());
 }
 
-// Exposed to HTML
-function getAssignmentUsers() {
-  return getAssignmentUsers_();
-}
 
