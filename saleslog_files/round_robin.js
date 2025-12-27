@@ -38,10 +38,31 @@ function onEdit(e) {
   const row = e.range.getRow();
   const col = e.range.getColumn();
 
-  // Only react when user edits the input columns B/C/D
-  if (![COL_APPT_DT, COL_CUST_NAME, COL_PHONE].includes(col)) return;
+  // Only react when user edits the input columns B/C/D OR the Assigned column E
+  if (![COL_APPT_DT, COL_CUST_NAME, COL_PHONE, COL_ASSIGNED].includes(col)) return;
 
   const appts = getApptsSheet_();
+  // We need safe access to the *new* value and potentially *old* value.
+  // getValues() is safer for the 'current' state of the row.
+
+  // CASE 1: MANUAL OVERRIDE (Column E changed)
+  if (col === COL_ASSIGNED) {
+    const newValue = e.value;
+    const oldValue = e.oldValue;
+
+    // Only log if it actually changed (though onEdit usually implies change)
+    // and if it wasn't just cleared (optional judgment, but let's log everything)
+    logRoundRobinAction_('Manual Override', {
+        row: row,
+        oldAssignee: oldValue || '(empty)',
+        newAssignee: newValue || '(empty)',
+        reason: 'User manual edit in sheet'
+    });
+    return;
+  }
+
+  // CASE 2: NEW INPUT (Check B/C/D for auto-assign trigger)
+  // Fetch row data to see if it's ready for auto-assignment
   const values = appts.getRange(row, 1, 1, COL_ASSIGNED_BY).getValues()[0];
 
   const apptDt = values[COL_APPT_DT - 1];
@@ -139,6 +160,12 @@ function assignRowAuto_(row, opts = {}) {
     const roster = getEligibleRoster_(); // array of names
     if (roster.length === 0) {
       appts.getRange(row, COL_MODE).setValue('No Eligible Reps');
+
+      logRoundRobinAction_('Assignment Failed', {
+          row: row,
+          reason: 'No Eligible Reps',
+          customer: name
+      });
       return;
     }
 

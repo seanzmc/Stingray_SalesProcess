@@ -40,7 +40,14 @@ function createAppointmentFromSidebar(payload) {
 
     // Check for eligible roster (function from round_robin.js)
     const roster = getEligibleRoster_();
-    if (roster.length === 0) throw new Error('No eligible salespeople found in RR_ROSTER.');
+    if (roster.length === 0) {
+      logRoundRobinAction_('Assignment Failed', {
+          reason: 'No Eligible Reps',
+          customer: customerName,
+          creator: assignedByName
+      });
+      throw new Error('No eligible salespeople found in RR_ROSTER.');
+    }
 
     // --- CENTRALIZED LOGIC CALL ---
     // This handles finding the assignee, advancing variable, and LOGGING TO AUDIT

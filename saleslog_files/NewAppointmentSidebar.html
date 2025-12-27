@@ -166,7 +166,7 @@
                             successDiv.style.display = 'block';
 
                         } else {
-                            setStatus('Unexpected response from server.', false);
+                            setStatus(res.message || 'Unexpected response from server.', false);
                         }
                     })
                     .withFailureHandler((err) => {
