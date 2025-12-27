@@ -16,7 +16,7 @@ const COL_ASSIGNED_BY= 7;   // G
 const CELL_POINTER = 'B2';
 
 // Where to optionally display "Next Up" on APPOINTMENTS
-const NEXT_UP_DISPLAY_CELL = 'J2'; // tweak or ignore
+
 
 const SHEET_AUDIT = 'RR_AUDIT';
 
@@ -112,7 +112,7 @@ function menuRewindPointer() {
       }
 
       setPointer_(newPointer);
-      refreshNextUp_();
+
 
       logRoundRobinAction_('Rewind', {
           pointerBefore: current,
@@ -149,14 +149,10 @@ function menuResetPointer() {
       reason: 'Admin Reset'
   });
 
-  refreshNextUp_();
+
 }
 
-function refreshNextUp_() {
-  const appts = getApptsSheet_();
-  const next = peekNextAssignee_();
-  appts.getRange(NEXT_UP_DISPLAY_CELL).setValue(next || '(no eligible reps)');
-}
+
 
 /***** CORE LOGIC *****/
 
@@ -220,21 +216,14 @@ function assignRowAuto_(row, opts = {}) {
     appts.getRange(row, COL_MODE).setValue(opts.mode || 'Auto');
     appts.getRange(row, COL_ASSIGNED_BY).setValue(user);
 
-    // Update Next Up display (optional)
-    const next = result.nextUp || '';
-    appts.getRange(NEXT_UP_DISPLAY_CELL).setValue(next || '(no eligible reps)');
+
 
   } finally {
     lock.releaseLock();
   }
 }
 
-function peekNextAssignee_() {
-  const roster = getEligibleRoster_();
-  if (roster.length === 0) return '';
-  let pointer = normalizePointer_(getPointer_(), roster.length);
-  return roster[pointer];
-}
+
 
 function skipPointer_() {
   const lock = LockService.getDocumentLock();
@@ -250,7 +239,7 @@ function skipPointer_() {
         details: { reason: 'User requested skip' }
     });
 
-    refreshNextUp_();
+
 
   } finally {
     lock.releaseLock();
