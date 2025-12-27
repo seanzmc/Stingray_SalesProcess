@@ -86,14 +86,14 @@ function menuSkipAndReassignSelectedRow() {
   const row = getActiveRow_();
   if (!row) return;
 
-  // Skip first (advances pointer)
-  skipPointer_();
+  // Use the CURRENT pointer (Next Up) to reassign.
+  // This implicitly advances the pointer by 1 (normal assignment behavior).
 
-  // Then reassign (force) with 'Manual' mode
-  // The user requested that this specific action be logged as 'Manual'
+  // Reassign (force) with 'Manual' mode
   assignRowAuto_(row, {
       forceReassign: true,
-      mode: 'Manual'
+      mode: 'Manual',
+      actionType: 'Reassign' // For audit log clarity
   });
 }
 
@@ -120,7 +120,7 @@ function menuRewindPointer() {
           reason: 'User requested rewind'
       });
 
-      SpreadsheetApp.getUi().toast(`Pointer rewound to ${newPointer} (${roster[newPointer]})`);
+      SpreadsheetApp.getActive().toast(`Pointer rewound to ${newPointer} (${roster[newPointer]})`);
 
   } finally {
       lock.releaseLock();
@@ -306,15 +306,12 @@ function logRoundRobinAction_(action, detailsObj) {
 
         const now = new Date();
 
-        // Use provided user override (e.g. from sidebar) or fallback to system user
-        let user = safeUserEmail_();
-        if (detailsObj && detailsObj.user) {
-            user = detailsObj.user;
-            delete detailsObj.user; // Don't duplicate in details string
-        } else if (detailsObj && detailsObj.creator) {
-             user = detailsObj.creator; // Handle sidebar 'creator' field
-             delete detailsObj.creator;
-        }
+        // Use system user for the 'User' column strictly
+        const user = safeUserEmail_();
+
+        // If 'detailsObj.user' or 'detailsObj.creator' was passed (e.g. from Sidebar),
+        // keep it in the DETAILS object so it appears in column E, but NOT column B.
+        // We do NOT overwrite 'user' variable here.
 
         // Format details as Key: Value string instead of JSON
         let detailsStr = '';
