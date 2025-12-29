@@ -15,3 +15,4 @@ dep/*
 work_handbook/*
 chatCDKmerge.js
 mergeCDKDataOptimized.js
+.editorconfig

@@ -1,6 +1,7 @@
 function showNewAppointmentSidebar() {
-  const html = HtmlService.createHtmlOutputFromFile('NewAppointmentSidebar')
-    .setTitle('New Appointment');
+  const html = HtmlService.createHtmlOutputFromFile(
+    'NewAppointmentSidebar'
+  ).setTitle('New Appointment');
   SpreadsheetApp.getUi().showSidebar(html);
 }
 
@@ -36,15 +37,16 @@ function createAppointmentFromSidebar(payload) {
 
     // Parse appt date/time from ISO-ish input (from datetime-local)
     const apptDt = new Date(apptIso);
-    if (isNaN(apptDt.getTime())) throw new Error('Invalid appointment date/time.');
+    if (isNaN(apptDt.getTime()))
+      throw new Error('Invalid appointment date/time.');
 
     // Check for eligible roster (function from round_robin.js)
     const roster = getEligibleRoster_();
     if (roster.length === 0) {
       logRoundRobinAction_('Assignment Failed', {
-          reason: 'No Eligible Reps',
-          customer: customerName,
-          creator: assignedByName
+        reason: 'No Eligible Reps',
+        customer: customerName,
+        creator: assignedByName,
       });
       throw new Error('No eligible salespeople found in RR_ROSTER.');
     }
@@ -52,12 +54,12 @@ function createAppointmentFromSidebar(payload) {
     // --- CENTRALIZED LOGIC CALL ---
     // This handles finding the assignee, advancing variable, and LOGGING TO AUDIT
     const result = advanceRoundRobinPointer_(roster, {
-        actionType: 'Sidebar Appointment',
-        details: {
-            appt: apptIso,
-            customer: customerName,
-            creator: assignedByName
-        }
+      actionType: 'Sidebar Appointment',
+      details: {
+        appt: apptIso,
+        customer: customerName,
+        creator: assignedByName,
+      },
     });
 
     const assignee = result.assignee;
@@ -72,16 +74,18 @@ function createAppointmentFromSidebar(payload) {
 
     // Columns: A=Created, B=ApptDt, C=Customer, D=Phone, E=Assigned, F=Mode, G=AssignedBy, H=Notes
     // Ensure we are setting exactly 8 columns
-    const rowValues = [[
-      now,          // A
-      apptDt,       // B
-      customerName, // C
-      phone,        // D
-      assignee,     // E
-      'Auto',       // F
-      assignedByName, // G
-      notes         // H
-    ]];
+    const rowValues = [
+      [
+        now, // A
+        apptDt, // B
+        customerName, // C
+        phone, // D
+        assignee, // E
+        'Auto', // F
+        assignedByName, // G
+        notes, // H
+      ],
+    ];
 
     appts.getRange(newRow, 1, 1, 8).setValues(rowValues);
 
@@ -89,14 +93,13 @@ function createAppointmentFromSidebar(payload) {
     return {
       ok: true,
       assignedTo: assignee,
-      nextUp
+      nextUp,
     };
-
   } catch (err) {
     // Return error to client so it can be shown in the sidebar
     return {
       ok: false,
-      message: err.message || String(err)
+      message: err.message || String(err),
     };
   } finally {
     lock.releaseLock();
@@ -122,19 +125,17 @@ function getAssignmentUsers() {
 }
 
 function getAssignmentUsers_() {
-    const ss = SpreadsheetApp.getActive();
-    // We can use a constant if we want, or just literal string 'RR_USERS'
-    const sheet = ss.getSheetByName('RR_USERS');
-    if (!sheet) return [];
+  const ss = SpreadsheetApp.getActive();
+  // We can use a constant if we want, or just literal string 'RR_USERS'
+  const sheet = ss.getSheetByName('RR_USERS');
+  if (!sheet) return [];
 
-    const lastRow = sheet.getLastRow();
-    if (lastRow < 2) return [];
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
 
-    // A: name, B: active
-    const data = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  // A: name, B: active
+  const data = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
   return data
-    .filter(r => r[0] && r[1] === true)
-    .map(r => String(r[0]).trim());
+    .filter((r) => r[0] && r[1] === true)
+    .map((r) => String(r[0]).trim());
 }
-
-

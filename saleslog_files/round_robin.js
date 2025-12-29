@@ -4,19 +4,16 @@ const SHEET_ROSTER = 'RR_ROSTER';
 const SHEET_STATE = 'RR_STATE';
 
 // APPOINTMENTS column indexes (1-based)
-const COL_CREATED_TS = 1;   // A
-const COL_APPT_DT    = 2;   // B
-const COL_CUST_NAME  = 3;   // C
-const COL_PHONE      = 4;   // D
-const COL_ASSIGNED   = 5;   // E
-const COL_MODE       = 6;   // F
-const COL_ASSIGNED_BY= 7;   // G
+const COL_CREATED_TS = 1; // A
+const COL_APPT_DT = 2; // B
+const COL_CUST_NAME = 3; // C
+const COL_PHONE = 4; // D
+const COL_ASSIGNED = 5; // E
+const COL_MODE = 6; // F
+const COL_ASSIGNED_BY = 7; // G
 
 // RR_STATE cells
 const CELL_POINTER = 'B2';
-
-// Where to optionally display "Next Up" on APPOINTMENTS
-
 
 const SHEET_AUDIT = 'RR_AUDIT';
 
@@ -41,7 +38,8 @@ function onEditInstallable(e) {
   const col = e.range.getColumn();
 
   // Only react when user edits the input columns B/C/D OR the Assigned column E
-  if (![COL_APPT_DT, COL_CUST_NAME, COL_PHONE, COL_ASSIGNED].includes(col)) return;
+  if (![COL_APPT_DT, COL_CUST_NAME, COL_PHONE, COL_ASSIGNED].includes(col))
+    return;
 
   const appts = getApptsSheet_();
   // We need safe access to the *new* value and potentially *old* value.
@@ -55,10 +53,10 @@ function onEditInstallable(e) {
     // Only log if it actually changed (though onEdit usually implies change)
     // and if it wasn't just cleared (optional judgment, but let's log everything)
     logRoundRobinAction_('Manual Override', {
-        row: row,
-        oldAssignee: oldValue || '(empty)',
-        newAssignee: newValue || '(empty)',
-        reason: 'User manual edit in sheet'
+      row: row,
+      oldAssignee: oldValue || '(empty)',
+      newAssignee: newValue || '(empty)',
+      reason: 'User manual edit in sheet',
     });
     return;
   }
@@ -68,8 +66,8 @@ function onEditInstallable(e) {
   const values = appts.getRange(row, 1, 1, COL_ASSIGNED_BY).getValues()[0];
 
   const apptDt = values[COL_APPT_DT - 1];
-  const name   = values[COL_CUST_NAME - 1];
-  const phone  = values[COL_PHONE - 1];
+  const name = values[COL_CUST_NAME - 1];
+  const phone = values[COL_PHONE - 1];
   const assigned = values[COL_ASSIGNED - 1];
 
   // If already assigned, do nothing (allows manual override)
@@ -91,9 +89,9 @@ function menuSkipAndReassignSelectedRow() {
 
   // Reassign (force) with 'Manual' mode
   assignRowAuto_(row, {
-      forceReassign: true,
-      mode: 'Manual',
-      actionType: 'Reassign' // For audit log clarity
+    forceReassign: true,
+    mode: 'Manual',
+    actionType: 'Reassign', // For audit log clarity
   });
 }
 
@@ -101,33 +99,31 @@ function menuRewindPointer() {
   const lock = LockService.getDocumentLock();
   lock.waitLock(5000);
   try {
-      const roster = getEligibleRoster_();
-      if (roster.length === 0) return; // Can't compute modulus correctly if empty
+    const roster = getEligibleRoster_();
+    if (roster.length === 0) return; // Can't compute modulus correctly if empty
 
-      const current = getPointer_();
-      // Logic: (current - 1) but wrap around if negative
-      let newPointer = current - 1;
-      if (newPointer < 0) {
-          newPointer = roster.length - 1;
-      }
+    const current = getPointer_();
+    // Logic: (current - 1) but wrap around if negative
+    let newPointer = current - 1;
+    if (newPointer < 0) {
+      newPointer = roster.length - 1;
+    }
 
-      setPointer_(newPointer);
+    setPointer_(newPointer);
 
+    logRoundRobinAction_('Rewind', {
+      pointerBefore: current,
+      pointerAfter: newPointer,
+      reason: 'User requested rewind',
+    });
 
-      logRoundRobinAction_('Rewind', {
-          pointerBefore: current,
-          pointerAfter: newPointer,
-          reason: 'User requested rewind'
-      });
-
-      SpreadsheetApp.getActive().toast(`Pointer rewound to ${newPointer} (${roster[newPointer]})`);
-
+    SpreadsheetApp.getActive().toast(
+      `Pointer rewound to ${newPointer} (${roster[newPointer]})`
+    );
   } finally {
-      lock.releaseLock();
+    lock.releaseLock();
   }
 }
-
-
 
 function menuResetPointer() {
   // Optional: restrict by email/domain if you want.
@@ -135,15 +131,11 @@ function menuResetPointer() {
   setPointer_(0);
 
   logRoundRobinAction_('Reset Pointer', {
-      pointerBefore: oldPointer,
-      pointerAfter: 0,
-      reason: 'Admin Reset'
+    pointerBefore: oldPointer,
+    pointerAfter: 0,
+    reason: 'Admin Reset',
   });
-
-
 }
-
-
 
 /***** CORE LOGIC *****/
 
@@ -163,8 +155,8 @@ function assignRowAuto_(row, opts = {}) {
     const vals = rowRange.getValues()[0];
 
     const apptDt = vals[COL_APPT_DT - 1];
-    const name   = vals[COL_CUST_NAME - 1];
-    const phone  = vals[COL_PHONE - 1];
+    const name = vals[COL_CUST_NAME - 1];
+    const phone = vals[COL_PHONE - 1];
 
     // Must have the minimal appointment info
     if (!apptDt || !name || !phone) return;
@@ -179,21 +171,21 @@ function assignRowAuto_(row, opts = {}) {
       appts.getRange(row, COL_MODE).setValue('No Eligible Reps');
 
       logRoundRobinAction_('Assignment Failed', {
-          row: row,
-          reason: 'No Eligible Reps',
-          customer: name
+        row: row,
+        reason: 'No Eligible Reps',
+        customer: name,
       });
       return;
     }
 
     // --- CENTRALIZED LOGIC CALL ---
     const result = advanceRoundRobinPointer_(roster, {
-        actionType: 'Assignment',
-        details: {
-            row: row,
-            customer: name,
-            notes: opts.forceReassign ? 'Reassignment (Force)' : 'New Assignment'
-        }
+      actionType: 'Assignment',
+      details: {
+        row: row,
+        customer: name,
+        notes: opts.forceReassign ? 'Reassignment (Force)' : 'New Assignment',
+      },
     });
 
     const assignee = result.assignee;
@@ -206,15 +198,10 @@ function assignRowAuto_(row, opts = {}) {
     appts.getRange(row, COL_ASSIGNED).setValue(assignee);
     appts.getRange(row, COL_MODE).setValue(opts.mode || 'Auto');
     appts.getRange(row, COL_ASSIGNED_BY).setValue(user);
-
-
-
   } finally {
     lock.releaseLock();
   }
 }
-
-
 
 function skipPointer_() {
   const lock = LockService.getDocumentLock();
@@ -226,12 +213,9 @@ function skipPointer_() {
 
     // Advance without assigning
     advanceRoundRobinPointer_(roster, {
-        actionType: 'Skip',
-        details: { reason: 'User requested skip' }
+      actionType: 'Skip',
+      details: { reason: 'User requested skip' },
     });
-
-
-
   } finally {
     lock.releaseLock();
   }
@@ -242,76 +226,81 @@ function skipPointer_() {
  * returns { assignee, pointerBefore, pointerAfter, nextUp }
  */
 function advanceRoundRobinPointer_(roster, auditInfo) {
-    if (!roster || roster.length === 0) throw new Error('Roster empty');
+  if (!roster || roster.length === 0) throw new Error('Roster empty');
 
-    const pointerBefore = normalizePointer_(getPointer_(), roster.length);
-    const assignee = roster[pointerBefore];
+  const pointerBefore = normalizePointer_(getPointer_(), roster.length);
+  const assignee = roster[pointerBefore];
 
-    // Calc new pointer
-    const pointerAfter = (pointerBefore + 1) % roster.length;
+  // Calc new pointer
+  const pointerAfter = (pointerBefore + 1) % roster.length;
 
-    // Update state
-    setPointer_(pointerAfter);
+  // Update state
+  setPointer_(pointerAfter);
 
-    // Log it
-    const nextUp = roster[pointerAfter];
+  // Log it
+  const nextUp = roster[pointerAfter];
 
-    logRoundRobinAction_(auditInfo.actionType || 'Advance', {
-        pointerBefore: pointerBefore,
-        pointerAfter: pointerAfter,
-        assignee: assignee,
-        nextUp: nextUp,
-        rosterCount: roster.length,
-        ...auditInfo.details
-    });
+  logRoundRobinAction_(auditInfo.actionType || 'Advance', {
+    pointerBefore: pointerBefore,
+    pointerAfter: pointerAfter,
+    assignee: assignee,
+    nextUp: nextUp,
+    rosterCount: roster.length,
+    ...auditInfo.details,
+  });
 
-    return {
-        assignee,
-        pointerBefore,
-        pointerAfter,
-        nextUp
-    };
+  return {
+    assignee,
+    pointerBefore,
+    pointerAfter,
+    nextUp,
+  };
 }
 
 /***** AUDITING *****/
 function logRoundRobinAction_(action, detailsObj) {
-    try {
-        const ss = SpreadsheetApp.getActive();
-        let auditSheet = ss.getSheetByName(SHEET_AUDIT);
-        if (!auditSheet) {
-            auditSheet = ss.insertSheet(SHEET_AUDIT);
-            auditSheet.appendRow(['Timestamp', 'User', 'Action', 'Reference', 'Details']);
-            auditSheet.setFrozenRows(1);
-        }
-
-        const now = new Date();
-
-        // Use system user for the 'User' column strictly
-        const user = safeUserEmail_();
-
-        // If 'detailsObj.user' or 'detailsObj.creator' was passed (e.g. from Sidebar),
-        // keep it in the DETAILS object so it appears in column E, but NOT column B.
-        // We do NOT overwrite 'user' variable here.
-
-        // Format details as Key: Value string instead of JSON
-        let detailsStr = '';
-        if (detailsObj) {
-            // Filter out row as it's in Reference
-            const { row, ...rest } = detailsObj;
-
-            detailsStr = Object.entries(rest)
-                .map(([k, v]) => `${k}: ${v}`)
-                .join(' | ');
-        }
-
-        const reference = detailsObj.row ? `Row ${detailsObj.row}` : '';
-
-        auditSheet.appendRow([now, user, action, reference, detailsStr]);
-
-    } catch(e) {
-        console.error('Audit Log Failed', e);
-        // Don't block main flow if audit fails
+  try {
+    const ss = SpreadsheetApp.getActive();
+    let auditSheet = ss.getSheetByName(SHEET_AUDIT);
+    if (!auditSheet) {
+      auditSheet = ss.insertSheet(SHEET_AUDIT);
+      auditSheet.appendRow([
+        'Timestamp',
+        'User',
+        'Action',
+        'Reference',
+        'Details',
+      ]);
+      auditSheet.setFrozenRows(1);
     }
+
+    const now = new Date();
+
+    // Use system user for the 'User' column strictly
+    const user = safeUserEmail_();
+
+    // If 'detailsObj.user' or 'detailsObj.creator' was passed (e.g. from Sidebar),
+    // keep it in the DETAILS object so it appears in column E, but NOT column B.
+    // We do NOT overwrite 'user' variable here.
+
+    // Format details as Key: Value string instead of JSON
+    let detailsStr = '';
+    if (detailsObj) {
+      // Filter out row as it's in Reference
+      const { row, ...rest } = detailsObj;
+
+      detailsStr = Object.entries(rest)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(' | ');
+    }
+
+    const reference = detailsObj.row ? `Row ${detailsObj.row}` : '';
+
+    auditSheet.appendRow([now, user, action, reference, detailsStr]);
+  } catch (e) {
+    console.error('Audit Log Failed', e);
+    // Don't block main flow if audit fails
+  }
 }
 
 /***** DATA ACCESS *****/
@@ -331,8 +320,8 @@ function getEligibleRoster_() {
   // A: name, B: active, C: eligible
   const data = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
   return data
-    .filter(r => r[0] && r[1] === true && r[2] === true)
-    .map(r => String(r[0]).trim());
+    .filter((r) => r[0] && r[1] === true && r[2] === true)
+    .map((r) => String(r[0]).trim());
 }
 
 /***** POINTER STATE *****/

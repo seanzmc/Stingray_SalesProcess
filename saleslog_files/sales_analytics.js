@@ -14,8 +14,8 @@
 // ============================================================================
 
 const ANALYTICS_START_COL = 19; // Column S (1-indexed)
-const ANALYTICS_COL_COUNT = 6;  // Columns S through X
-const CACHE_KEY_ANALYTICS = "monthlyAnalytics";
+const ANALYTICS_COL_COUNT = 6; // Columns S through X
+const CACHE_KEY_ANALYTICS = 'monthlyAnalytics';
 const CACHE_TTL_ANALYTICS = 300; // 5 minutes (consistent with existing patterns)
 
 // ============================================================================
@@ -46,7 +46,9 @@ function calculateMonthlyAnalytics() {
       try {
         return JSON.parse(cached);
       } catch (e) {
-        logWarning('calculateMonthlyAnalytics', 'Analytics cache parse error', { error: e.toString() });
+        logWarning('calculateMonthlyAnalytics', 'Analytics cache parse error', {
+          error: e.toString(),
+        });
       }
     }
 
@@ -57,7 +59,9 @@ function calculateMonthlyAnalytics() {
     // Validate sheet has sufficient columns
     const maxCols = monthlySheet.getMaxColumns();
     if (maxCols < 26) {
-      const msg = 'MONTHLY sheet needs at least 26 columns (A-Z) for analytics. Current: ' + maxCols;
+      const msg =
+        'MONTHLY sheet needs at least 26 columns (A-Z) for analytics. Current: ' +
+        maxCols;
       logError('calculateMonthlyAnalytics', msg, { maxCols, required: 26 });
       return null;
     }
@@ -73,25 +77,35 @@ function calculateMonthlyAnalytics() {
     const { aliasMap, displayCodeMap } = getSalespersonMaps();
 
     // Batch read all MONTHLY data at once (columns A-N)
-    const monthlyData = monthlySheet.getRange(2, 1, lastRow - 1, 14).getValues();
+    const monthlyData = monthlySheet
+      .getRange(2, 1, lastRow - 1, 14)
+      .getValues();
 
     // Process data to extract metrics
     const processedData = processMonthlyDataForAnalytics(monthlyData, aliasMap);
 
     // Format for display
-    const analyticsData = formatAnalyticsForDisplay(processedData, displayCodeMap);
+    const analyticsData = formatAnalyticsForDisplay(
+      processedData,
+      displayCodeMap
+    );
 
     // Validate before returning
     const validationErrors = validateAnalyticsData(analyticsData);
     if (validationErrors.length > 0) {
-      logWarning('calculateMonthlyAnalytics', 'Analytics validation warnings', { errors: validationErrors });
+      logWarning('calculateMonthlyAnalytics', 'Analytics validation warnings', {
+        errors: validationErrors,
+      });
     }
 
     // Cache the result
-    CACHE.put(CACHE_KEY_ANALYTICS, JSON.stringify(analyticsData), CACHE_TTL_ANALYTICS);
+    CACHE.put(
+      CACHE_KEY_ANALYTICS,
+      JSON.stringify(analyticsData),
+      CACHE_TTL_ANALYTICS
+    );
 
     return analyticsData;
-
   } catch (e) {
     logError('calculateMonthlyAnalytics', e);
     return null;
@@ -130,13 +144,16 @@ function writeAnalyticsToMonthly(analyticsData, monthlySheet) {
   try {
     // Clear existing analytics columns (S:X)
     const maxRows = monthlySheet.getMaxRows();
-    monthlySheet.getRange(1, ANALYTICS_START_COL, maxRows, ANALYTICS_COL_COUNT).clear();
+    monthlySheet
+      .getRange(1, ANALYTICS_START_COL, maxRows, ANALYTICS_COL_COUNT)
+      .clear();
 
     // Build summary section (rows 1-8)
     const summaryData = buildSummarySection(analyticsData);
 
     // Write summary section
-    monthlySheet.getRange(1, ANALYTICS_START_COL, summaryData.length, ANALYTICS_COL_COUNT)
+    monthlySheet
+      .getRange(1, ANALYTICS_START_COL, summaryData.length, ANALYTICS_COL_COUNT)
       .setValues(summaryData);
 
     // Apply summary formatting
@@ -147,7 +164,13 @@ function writeAnalyticsToMonthly(analyticsData, monthlySheet) {
 
     // Write salesperson data starting at row 9
     if (salespersonData.length > 0) {
-      monthlySheet.getRange(9, ANALYTICS_START_COL, salespersonData.length, ANALYTICS_COL_COUNT)
+      monthlySheet
+        .getRange(
+          9,
+          ANALYTICS_START_COL,
+          salespersonData.length,
+          ANALYTICS_COL_COUNT
+        )
         .setValues(salespersonData);
 
       // Apply salesperson data formatting
@@ -156,7 +179,6 @@ function writeAnalyticsToMonthly(analyticsData, monthlySheet) {
 
     SpreadsheetApp.flush();
     Logger.log('Analytics written to MONTHLY sheet columns S-X');
-
   } catch (e) {
     logError('writeAnalyticsToMonthly', e);
     throw e;
@@ -178,7 +200,9 @@ function getMonthlyAnalyticsSummary() {
       try {
         return JSON.parse(cached);
       } catch (e) {
-        logWarning('getMonthlyAnalyticsSummary', 'Cache parse error', { error: e.toString() });
+        logWarning('getMonthlyAnalyticsSummary', 'Cache parse error', {
+          error: e.toString(),
+        });
       }
     }
 
@@ -187,7 +211,12 @@ function getMonthlyAnalyticsSummary() {
     const monthlySheet = sheets.monthly;
 
     // Read summary values from rows 3-5, column T (index 1 in our range)
-    const summaryRange = monthlySheet.getRange(3, ANALYTICS_START_COL + 1, 3, 1);
+    const summaryRange = monthlySheet.getRange(
+      3,
+      ANALYTICS_START_COL + 1,
+      3,
+      1
+    );
     const summaryValues = summaryRange.getValues();
 
     // Check if analytics exist
@@ -196,23 +225,24 @@ function getMonthlyAnalyticsSummary() {
     }
 
     // Read timestamp from row 6
-    const timestampValue = monthlySheet.getRange(6, ANALYTICS_START_COL + 1, 1, 1).getValue();
+    const timestampValue = monthlySheet
+      .getRange(6, ANALYTICS_START_COL + 1, 1, 1)
+      .getValue();
 
     // Build summary object from sheet data
     return {
-      version: "1.0",
+      version: '1.0',
       timestamp: timestampValue || new Date().toISOString(),
       totals: {
         delivered: summaryValues[0][0] || 0,
         newDelivered: summaryValues[1][0] || 0,
-        usedDelivered: summaryValues[2][0] || 0
+        usedDelivered: summaryValues[2][0] || 0,
       },
       dataQuality: {
         unknownSalespeople: [],
-        errorCount: 0
-      }
+        errorCount: 0,
+      },
     };
-
   } catch (e) {
     logError('getMonthlyAnalyticsSummary', e);
     return null;
@@ -232,7 +262,8 @@ function invalidateAnalyticsCache() {
       severity: 'MEDIUM',
       operation: 'cache_invalidation',
       cacheKey: CACHE_KEY_ANALYTICS,
-      impact: 'Stale analytics data may be served until cache expires naturally (5 minutes)'
+      impact:
+        'Stale analytics data may be served until cache expires naturally (5 minutes)',
     });
     // Continue execution - cache invalidation failure is non-fatal
   }
@@ -240,7 +271,7 @@ function invalidateAnalyticsCache() {
 /**
  * Internal helper that performs analytics refresh without user prompts.
  * Used by both recalcMtdFromMonthly() and refreshAnalyticsManually().
- * 
+ *
  * @param {Object} sheets - Sheet references from getSheets()
  * @returns {Object} Result object with structure:
  *   {
@@ -253,36 +284,35 @@ function refreshAnalyticsInternal(sheets) {
   try {
     // Invalidate cache
     invalidateAnalyticsCache();
-    
+
     // Calculate analytics
     const analytics = calculateMonthlyAnalytics();
-    
+
     if (!analytics) {
       return {
         success: false,
         data: null,
-        error: "Analytics calculation returned no data"
+        error: 'Analytics calculation returned no data',
       };
     }
-    
+
     // Write to sheet
     writeAnalyticsToMonthly(analytics, sheets.monthly);
-    
+
     return {
       success: true,
       data: analytics,
-      error: null
+      error: null,
     };
   } catch (e) {
-    Logger.log("refreshAnalyticsInternal error: " + e);
+    Logger.log('refreshAnalyticsInternal error: ' + e);
     return {
       success: false,
       data: null,
-      error: e.message || String(e)
+      error: e.message || String(e),
     };
   }
 }
-
 
 // ============================================================================
 // DATA PROCESSING FUNCTIONS
@@ -313,7 +343,7 @@ function processMonthlyDataForAnalytics(monthlyData, aliasMap) {
     salespersonAccumulator: {},
     unknownSalespeople: [],
     totalRowsProcessed: monthlyData.length,
-    deliveredRowsProcessed: 0
+    deliveredRowsProcessed: 0,
   };
 
   monthlyData.forEach((row, index) => {
@@ -324,8 +354,10 @@ function processMonthlyDataForAnalytics(monthlyData, aliasMap) {
       }
 
       // Process New Car Section (columns B-G, array indices 1-6)
-      const newFI = String(row[2] || "").trim().toUpperCase(); // Col C (index 2)
-      const newSalesperson = String(row[6] || "").trim(); // Col G (index 6)
+      const newFI = String(row[2] || '')
+        .trim()
+        .toUpperCase(); // Col C (index 2)
+      const newSalesperson = String(row[6] || '').trim(); // Col G (index 6)
 
       if (isValidFIFlag(newFI) && newSalesperson) {
         processNewSale(newSalesperson, metrics, aliasMap);
@@ -333,8 +365,10 @@ function processMonthlyDataForAnalytics(monthlyData, aliasMap) {
       }
 
       // Process Used Car Section (columns I-N, array indices 8-13)
-      const usedFI = String(row[9] || "").trim().toUpperCase(); // Col J (index 9)
-      const usedSalesperson = String(row[13] || "").trim(); // Col N (index 13)
+      const usedFI = String(row[9] || '')
+        .trim()
+        .toUpperCase(); // Col J (index 9)
+      const usedSalesperson = String(row[13] || '').trim(); // Col N (index 13)
 
       if (isValidFIFlag(usedFI) && usedSalesperson) {
         processUsedSale(usedSalesperson, metrics, aliasMap);
@@ -343,9 +377,11 @@ function processMonthlyDataForAnalytics(monthlyData, aliasMap) {
           metrics.deliveredRowsProcessed++;
         }
       }
-
     } catch (e) {
-      logWarning('processMonthlyDataForAnalytics', 'Error processing row', { row: index + 2, error: e.toString() });
+      logWarning('processMonthlyDataForAnalytics', 'Error processing row', {
+        row: index + 2,
+        error: e.toString(),
+      });
     }
   });
 
@@ -363,10 +399,10 @@ function processMonthlyDataForAnalytics(monthlyData, aliasMap) {
  * @returns {void}
  */
 function processNewSale(salespersonInput, metrics, aliasMap) {
-  const parts = salespersonInput.split("/").map(s => s.trim());
+  const parts = salespersonInput.split('/').map((s) => s.trim());
   const increment = parts.length > 1 ? 0.5 : 1;
 
-  parts.forEach(part => {
+  parts.forEach((part) => {
     if (!part) return;
 
     const upperPart = part.toUpperCase();
@@ -376,7 +412,7 @@ function processNewSale(salespersonInput, metrics, aliasMap) {
       if (!metrics.salespersonAccumulator[fullName]) {
         metrics.salespersonAccumulator[fullName] = {
           newCount: 0,
-          usedCount: 0
+          usedCount: 0,
         };
       }
       metrics.salespersonAccumulator[fullName].newCount += increment;
@@ -401,10 +437,10 @@ function processNewSale(salespersonInput, metrics, aliasMap) {
  * @returns {void}
  */
 function processUsedSale(salespersonInput, metrics, aliasMap) {
-  const parts = salespersonInput.split("/").map(s => s.trim());
+  const parts = salespersonInput.split('/').map((s) => s.trim());
   const increment = parts.length > 1 ? 0.5 : 1;
 
-  parts.forEach(part => {
+  parts.forEach((part) => {
     if (!part) return;
 
     const upperPart = part.toUpperCase();
@@ -414,7 +450,7 @@ function processUsedSale(salespersonInput, metrics, aliasMap) {
       if (!metrics.salespersonAccumulator[fullName]) {
         metrics.salespersonAccumulator[fullName] = {
           newCount: 0,
-          usedCount: 0
+          usedCount: 0,
         };
       }
       metrics.salespersonAccumulator[fullName].usedCount += increment;
@@ -450,25 +486,34 @@ function formatAnalyticsForDisplay(processedData, displayCodeMap) {
   // Calculate team-level metrics
   const teamMetrics = {
     sellingDays: sellingDays,
-    newPerDay: sellingDays > 0 ? Math.round((processedData.totalNew / sellingDays) * 100) / 100 : 0,
-    usedPerDay: sellingDays > 0 ? Math.round((processedData.totalUsed / sellingDays) * 100) / 100 : 0
+    newPerDay:
+      sellingDays > 0
+        ? Math.round((processedData.totalNew / sellingDays) * 100) / 100
+        : 0,
+    usedPerDay:
+      sellingDays > 0
+        ? Math.round((processedData.totalUsed / sellingDays) * 100) / 100
+        : 0,
   };
 
   // Convert accumulator to array
   const salespersonMetrics = [];
-  Object.entries(processedData.salespersonAccumulator).forEach(([fullName, counts]) => {
-    const totalSales = counts.newCount + counts.usedCount;
+  Object.entries(processedData.salespersonAccumulator).forEach(
+    ([fullName, counts]) => {
+      const totalSales = counts.newCount + counts.usedCount;
 
-    salespersonMetrics.push({
-      fullName: fullName,
-      displayCode: displayCodeMap[fullName] || fullName,
-      newSales: counts.newCount,
-      usedSales: counts.usedCount,
-      totalSales: totalSales,
-      percentOfTeam: totalDelivered > 0 ? (totalSales / totalDelivered * 100) : 0,
-      rank: 0 // Will be set after sorting
-    });
-  });
+      salespersonMetrics.push({
+        fullName: fullName,
+        displayCode: displayCodeMap[fullName] || fullName,
+        newSales: counts.newCount,
+        usedSales: counts.usedCount,
+        totalSales: totalSales,
+        percentOfTeam:
+          totalDelivered > 0 ? (totalSales / totalDelivered) * 100 : 0,
+        rank: 0, // Will be set after sorting
+      });
+    }
+  );
 
   // Sort by total sales descending
   salespersonMetrics.sort((a, b) => b.totalSales - a.totalSales);
@@ -479,12 +524,12 @@ function formatAnalyticsForDisplay(processedData, displayCodeMap) {
   });
 
   return {
-    version: "1.0",
+    version: '1.0',
     timestamp: new Date().toISOString(),
     totals: {
       delivered: totalDelivered,
       newDelivered: processedData.totalNew,
-      usedDelivered: processedData.totalUsed
+      usedDelivered: processedData.totalUsed,
     },
     teamMetrics: teamMetrics,
     salespersonMetrics: salespersonMetrics,
@@ -492,8 +537,8 @@ function formatAnalyticsForDisplay(processedData, displayCodeMap) {
       unknownSalespeople: processedData.unknownSalespeople || [],
       totalRowsProcessed: processedData.totalRowsProcessed || 0,
       deliveredRowsProcessed: processedData.deliveredRowsProcessed || 0,
-      errorCount: (processedData.unknownSalespeople || []).length
-    }
+      errorCount: (processedData.unknownSalespeople || []).length,
+    },
   };
 }
 
@@ -506,21 +551,46 @@ function formatAnalyticsForDisplay(processedData, displayCodeMap) {
  */
 function buildSummarySection(analyticsData) {
   const now = new Date();
-  const dateStr = `${now.getMonth() + 1}/${now.getDate()}/${now.getFullYear()} ${now.toLocaleTimeString()}`;
+  const dateStr = `${
+    now.getMonth() + 1
+  }/${now.getDate()}/${now.getFullYear()} ${now.toLocaleTimeString()}`;
 
   const sellingDays = analyticsData.teamMetrics.sellingDays;
-  const newPerDay = sellingDays > 0 ? analyticsData.teamMetrics.newPerDay : "N/A";
-  const usedPerDay = sellingDays > 0 ? analyticsData.teamMetrics.usedPerDay : "N/A";
+  const newPerDay =
+    sellingDays > 0 ? analyticsData.teamMetrics.newPerDay : 'N/A';
+  const usedPerDay =
+    sellingDays > 0 ? analyticsData.teamMetrics.usedPerDay : 'N/A';
 
   return [
-    ["MONTHLY ANALYTICS", "", "", "", "", ""],              // Row 1 (will merge S1:X1)
-    ["Metric", "Value", "Metric", "Value", "", ""],         // Row 2
-    ["Total Delivered", analyticsData.totals.delivered, "Selling Days", sellingDays, "", ""],  // Row 3
-    ["New Delivered", analyticsData.totals.newDelivered, "New Sold per Day", newPerDay, "", ""],  // Row 4
-    ["Used Delivered", analyticsData.totals.usedDelivered, "Used Sold per Day", usedPerDay, "", ""],  // Row 5
-    ["Last Updated", dateStr, "", "", "", ""],              // Row 6
-    ["", "", "", "", "", ""],                               // Row 7 (separator)
-    ["Salesperson", "New", "Used", "Total", "% of Team", "Rank"]  // Row 8
+    ['MONTHLY ANALYTICS', '', '', '', '', ''], // Row 1 (will merge S1:X1)
+    ['Metric', 'Value', 'Metric', 'Value', '', ''], // Row 2
+    [
+      'Total Delivered',
+      analyticsData.totals.delivered,
+      'Selling Days',
+      sellingDays,
+      '',
+      '',
+    ], // Row 3
+    [
+      'New Delivered',
+      analyticsData.totals.newDelivered,
+      'New Sold per Day',
+      newPerDay,
+      '',
+      '',
+    ], // Row 4
+    [
+      'Used Delivered',
+      analyticsData.totals.usedDelivered,
+      'Used Sold per Day',
+      usedPerDay,
+      '',
+      '',
+    ], // Row 5
+    ['Last Updated', dateStr, '', '', '', ''], // Row 6
+    ['', '', '', '', '', ''], // Row 7 (separator)
+    ['Salesperson', 'New', 'Used', 'Total', '% of Team', 'Rank'], // Row 8
   ];
 }
 
@@ -533,13 +603,13 @@ function buildSummarySection(analyticsData) {
  * @returns {Array<Array>} 2D array for salesperson section
  */
 function buildSalespersonSection(analyticsData) {
-  return analyticsData.salespersonMetrics.map(person => [
-    person.displayCode,                         // Column S
-    person.newSales,                            // Column T
-    person.usedSales,                           // Column U
-    person.totalSales,                          // Column V
+  return analyticsData.salespersonMetrics.map((person) => [
+    person.displayCode, // Column S
+    person.newSales, // Column T
+    person.usedSales, // Column U
+    person.totalSales, // Column V
     Math.round(person.percentOfTeam * 10) / 10, // Column W - Round to 1 decimal
-    person.rank                                 // Column X
+    person.rank, // Column X
   ]);
 }
 
@@ -553,40 +623,45 @@ function buildSalespersonSection(analyticsData) {
 function formatSummarySection(sheet) {
   try {
     // Merge and format header (row 1)
-    sheet.getRange(1, ANALYTICS_START_COL, 1, ANALYTICS_COL_COUNT)
+    sheet
+      .getRange(1, ANALYTICS_START_COL, 1, ANALYTICS_COL_COUNT)
       .merge()
-      .setHorizontalAlignment("center")
-      .setFontWeight("bold")
+      .setHorizontalAlignment('center')
+      .setFontWeight('bold')
       .setFontSize(12)
-      .setBackground("#4A86E8")
-      .setFontColor("#FFFFFF")
-      .setFontFamily("Calibri");
+      .setBackground('#4A86E8')
+      .setFontColor('#FFFFFF')
+      .setFontFamily('Calibri');
 
     // Format column headers (row 2)
-    sheet.getRange(2, ANALYTICS_START_COL, 1, ANALYTICS_COL_COUNT)
-      .setFontWeight("bold")
-      .setBackground("#E8F0FE")
-      .setHorizontalAlignment("center")
-      .setFontFamily("Calibri")
+    sheet
+      .getRange(2, ANALYTICS_START_COL, 1, ANALYTICS_COL_COUNT)
+      .setFontWeight('bold')
+      .setBackground('#E8F0FE')
+      .setHorizontalAlignment('center')
+      .setFontFamily('Calibri')
       .setFontSize(10);
 
     // Format data rows (3-6)
-    sheet.getRange(3, ANALYTICS_START_COL, 4, ANALYTICS_COL_COUNT)
-      .setFontFamily("Calibri")
+    sheet
+      .getRange(3, ANALYTICS_START_COL, 4, ANALYTICS_COL_COUNT)
+      .setFontFamily('Calibri')
       .setFontSize(10)
-      .setHorizontalAlignment("center")
-      .setFontWeight("bold");
+      .setHorizontalAlignment('center')
+      .setFontWeight('bold');
 
     // Format salesperson header row (row 8)
-    sheet.getRange(8, ANALYTICS_START_COL, 1, ANALYTICS_COL_COUNT)
-      .setFontWeight("bold")
-      .setBackground("#E8F0FE")
-      .setHorizontalAlignment("center")
-      .setFontFamily("Calibri")
+    sheet
+      .getRange(8, ANALYTICS_START_COL, 1, ANALYTICS_COL_COUNT)
+      .setFontWeight('bold')
+      .setBackground('#E8F0FE')
+      .setHorizontalAlignment('center')
+      .setFontFamily('Calibri')
       .setFontSize(10);
-
   } catch (e) {
-    logWarning('formatSummarySection', 'Error formatting summary section', { error: e.toString() });
+    logWarning('formatSummarySection', 'Error formatting summary section', {
+      error: e.toString(),
+    });
   }
 }
 
@@ -602,23 +677,33 @@ function formatSalespersonSection(sheet, rowCount) {
   try {
     if (rowCount === 0) return;
 
-    const dataRange = sheet.getRange(9, ANALYTICS_START_COL, rowCount, ANALYTICS_COL_COUNT);
+    const dataRange = sheet.getRange(
+      9,
+      ANALYTICS_START_COL,
+      rowCount,
+      ANALYTICS_COL_COUNT
+    );
 
     dataRange
-      .setFontFamily("Calibri")
+      .setFontFamily('Calibri')
       .setFontSize(10)
-      .setHorizontalAlignment("center")
-      .setFontWeight("bold");
+      .setHorizontalAlignment('center')
+      .setFontWeight('bold');
 
     // Set number formats
-    sheet.getRange(9, ANALYTICS_START_COL + 1, rowCount, 3) // Columns T-V (counts)
-      .setNumberFormat("0.#");
+    sheet
+      .getRange(9, ANALYTICS_START_COL + 1, rowCount, 3) // Columns T-V (counts)
+      .setNumberFormat('0.#');
 
-    sheet.getRange(9, ANALYTICS_START_COL + 4, rowCount, 1) // Column W (percentage)
-      .setNumberFormat("0.0\"%\"");
-
+    sheet
+      .getRange(9, ANALYTICS_START_COL + 4, rowCount, 1) // Column W (percentage)
+      .setNumberFormat('0.0"%"');
   } catch (e) {
-    logWarning('formatSalespersonSection', 'Error formatting salesperson section', { error: e.toString() });
+    logWarning(
+      'formatSalespersonSection',
+      'Error formatting salesperson section',
+      { error: e.toString() }
+    );
   }
 }
 
@@ -639,33 +724,36 @@ function validateAnalyticsData(analyticsData) {
   const errors = [];
 
   if (!analyticsData) {
-    errors.push("Analytics data is null or undefined");
+    errors.push('Analytics data is null or undefined');
     return errors;
   }
 
   // Validate totals
   if (!analyticsData.totals) {
-    errors.push("Missing totals object");
+    errors.push('Missing totals object');
   } else {
     if (typeof analyticsData.totals.delivered !== 'number') {
-      errors.push("Invalid delivered count");
+      errors.push('Invalid delivered count');
     }
     if (typeof analyticsData.totals.newDelivered !== 'number') {
-      errors.push("Invalid newDelivered count");
+      errors.push('Invalid newDelivered count');
     }
     if (typeof analyticsData.totals.usedDelivered !== 'number') {
-      errors.push("Invalid usedDelivered count");
+      errors.push('Invalid usedDelivered count');
     }
 
     // Check for negative values
-    if (analyticsData.totals.delivered < 0 ||
-        analyticsData.totals.newDelivered < 0 ||
-        analyticsData.totals.usedDelivered < 0) {
-      errors.push("Negative count values detected");
+    if (
+      analyticsData.totals.delivered < 0 ||
+      analyticsData.totals.newDelivered < 0 ||
+      analyticsData.totals.usedDelivered < 0
+    ) {
+      errors.push('Negative count values detected');
     }
 
     // Check totals match
-    const expectedTotal = analyticsData.totals.newDelivered + analyticsData.totals.usedDelivered;
+    const expectedTotal =
+      analyticsData.totals.newDelivered + analyticsData.totals.usedDelivered;
     if (Math.abs(analyticsData.totals.delivered - expectedTotal) > 0.01) {
       errors.push("Total delivered doesn't match sum of new and used");
     }
@@ -673,7 +761,7 @@ function validateAnalyticsData(analyticsData) {
 
   // Validate salesperson metrics
   if (!Array.isArray(analyticsData.salespersonMetrics)) {
-    errors.push("salespersonMetrics is not an array");
+    errors.push('salespersonMetrics is not an array');
   } else {
     analyticsData.salespersonMetrics.forEach((person, index) => {
       if (!person.displayCode) {
@@ -699,20 +787,20 @@ function validateAnalyticsData(analyticsData) {
  */
 function createEmptyAnalytics() {
   return {
-    version: "1.0",
+    version: '1.0',
     timestamp: new Date().toISOString(),
     totals: {
       delivered: 0,
       newDelivered: 0,
-      usedDelivered: 0
+      usedDelivered: 0,
     },
     salespersonMetrics: [],
     dataQuality: {
       unknownSalespeople: [],
       totalRowsProcessed: 0,
       deliveredRowsProcessed: 0,
-      errorCount: 0
-    }
+      errorCount: 0,
+    },
   };
 }
 
@@ -724,51 +812,55 @@ function refreshAnalyticsManually() {
   withScriptLock(() => {
     try {
       const ui = SpreadsheetApp.getUi();
-      
+
       // Confirmation dialog
       const response = ui.alert(
-        "Refresh Monthly Analytics",
-        "This will recalculate all monthly analytics from MONTHLY sheet data.\n\nContinue?",
+        'Refresh Monthly Analytics',
+        'This will recalculate all monthly analytics from MONTHLY sheet data.\n\nContinue?',
         ui.ButtonSet.YES_NO
       );
-      
+
       if (response !== ui.Button.YES) {
         return;
       }
-      
+
       // Get sheet references
       const sheets = getSheets();
       if (!sheets) {
-        alertError("Required sheets not found.");
+        alertError('Required sheets not found.');
         return;
       }
-      
+
       // Execute analytics refresh
-      toastInfo("Refreshing analytics...", "Analytics", 3);
+      toastInfo('Refreshing analytics...', 'Analytics', 3);
       const result = refreshAnalyticsInternal(sheets);
-      
+
       if (!result.success) {
-        alertError("Analytics refresh failed: " + (result.error || "Unknown error"));
+        alertError(
+          'Analytics refresh failed: ' + (result.error || 'Unknown error')
+        );
         return;
       }
-      
+
       // Show summary dialog
       const analytics = result.data;
-      const topPerformer = analytics.salespersonMetrics[0] || { displayCode: "N/A", totalSales: 0 };
-      
+      const topPerformer = analytics.salespersonMetrics[0] || {
+        displayCode: 'N/A',
+        totalSales: 0,
+      };
+
       ui.alert(
-        "Analytics Updated",
+        'Analytics Updated',
         `Monthly analytics refreshed successfully!\n\n` +
-        `Total Delivered: ${analytics.totals.delivered || 0}\n` +
-        `New: ${analytics.totals.newDelivered || 0}\n` +
-        `Used: ${analytics.totals.usedDelivered || 0}\n\n` +
-        `Top Performer: ${topPerformer.displayCode} (${topPerformer.totalSales} units)`,
+          `Total Delivered: ${analytics.totals.delivered || 0}\n` +
+          `New: ${analytics.totals.newDelivered || 0}\n` +
+          `Used: ${analytics.totals.usedDelivered || 0}\n\n` +
+          `Top Performer: ${topPerformer.displayCode} (${topPerformer.totalSales} units)`,
         ui.ButtonSet.OK
       );
-      
     } catch (e) {
-      logError("refreshAnalyticsManually", e);
-      alertError("Error refreshing analytics: " + e.message);
+      logError('refreshAnalyticsManually', e);
+      alertError('Error refreshing analytics: ' + e.message);
     }
   });
 }

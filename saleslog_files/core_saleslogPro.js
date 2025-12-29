@@ -54,35 +54,41 @@
 
 // Module-scope constants & caches
 const CACHE = CacheService.getScriptCache();
-const CACHE_KEY_NAME_MAP = "salespersonMaps"; // Updated cache key name
-const CACHE_KEY_COLORS = "visualConfig"; // Cache key for color configuration
+const CACHE_KEY_NAME_MAP = 'salespersonMaps'; // Updated cache key name
+const CACHE_KEY_COLORS = 'visualConfig'; // Cache key for color configuration
 const sellingDaysCache = {};
 // Cached global reference for SpreadsheetApp's active spreadsheet
 const SS = SpreadsheetApp.getActive();
 const RANGES = {
-  dailyData: "A2:N51", // Range on TODAY sheet for daily input
-  dailyClear: "B2:N51", // Range on TODAY sheet to clear after processing (excludes Col A)
-  todayNewCarDataRange: "B2:G101", // For rules 1 & 3
-  todayUsedCarDataRange: "I2:N101", // For rules 2 & 4
+  dailyData: 'A2:N51', // Range on TODAY sheet for daily input
+  dailyClear: 'B2:N51', // Range on TODAY sheet to clear after processing (excludes Col A)
+  todayNewCarDataRange: 'B2:G101', // For rules 1 & 3
+  todayUsedCarDataRange: 'I2:N101', // For rules 2 & 4
 
   // Dynamic ranges computed based on salesperson count
-  get leaderboard() { return getDynamicLeaderboardRanges().leaderboard; },
-  get mtd() { return getDynamicLeaderboardRanges().mtd; },
-  get avg() { return getDynamicLeaderboardRanges().avg; }
+  get leaderboard() {
+    return getDynamicLeaderboardRanges().leaderboard;
+  },
+  get mtd() {
+    return getDynamicLeaderboardRanges().mtd;
+  },
+  get avg() {
+    return getDynamicLeaderboardRanges().avg;
+  },
 };
 
 // Default color constants (used as fallbacks if configuration not available)
 const DEFAULT_COLORS = {
-  nonDeliveredColor: "#FF0000",
-  salespersonErrorColor: "#FFEBEE",
-  duplicateStockFillColor: "#b4ff0c",
-  duplicateStockTextColor: "#ff0000",
-  leaderboardZeroMtdBgColor: "#F0F8FF",
+  nonDeliveredColor: '#FF0000',
+  salespersonErrorColor: '#FFEBEE',
+  duplicateStockFillColor: '#b4ff0c',
+  duplicateStockTextColor: '#ff0000',
+  leaderboardZeroMtdBgColor: '#F0F8FF',
   paceThresholds: {
     green: 10,
     yellow: 8,
-    red: 0
-  }
+    red: 0,
+  },
 };
 
 // Module-scope color configuration cache
@@ -155,15 +161,25 @@ function getPaceThresholds() {
  */
 function getSheets() {
   if (!SS) {
-    logError('getSheets', 'SpreadsheetApp.getActive() returned null', { issue: 'script_not_bound' });
-    throw new Error("SpreadsheetApp.getActive() returned null. Script might not be properly bound or accessed.");
+    logError('getSheets', 'SpreadsheetApp.getActive() returned null', {
+      issue: 'script_not_bound',
+    });
+    throw new Error(
+      'SpreadsheetApp.getActive() returned null. Script might not be properly bound or accessed.'
+    );
   }
-  const today = SS.getSheetByName("TODAY");
-  const monthly = SS.getSheetByName("MONTHLY");
-  const sales = SS.getSheetByName("SALESPEOPLE");
+  const today = SS.getSheetByName('TODAY');
+  const monthly = SS.getSheetByName('MONTHLY');
+  const sales = SS.getSheetByName('SALESPEOPLE');
   if (!today || !monthly || !sales) {
-    logError('getSheets', 'Required sheets missing', { today: !!today, monthly: !!monthly, sales: !!sales });
-    throw new Error("Required sheets missing. Ensure 'TODAY', 'MONTHLY', and 'SALESPEOPLE' sheets exist.");
+    logError('getSheets', 'Required sheets missing', {
+      today: !!today,
+      monthly: !!monthly,
+      sales: !!sales,
+    });
+    throw new Error(
+      "Required sheets missing. Ensure 'TODAY', 'MONTHLY', and 'SALESPEOPLE' sheets exist."
+    );
   }
   return { today, monthly, sales };
 }
@@ -190,7 +206,11 @@ function memoizedGetSellingDays(year, month) {
     total = 0;
 
   // Calculate elapsed selling days up to today within the month
-  for (let d = new Date(first); d <= todayDate && d <= last; d.setDate(d.getDate() + 1)) {
+  for (
+    let d = new Date(first);
+    d <= todayDate && d <= last;
+    d.setDate(d.getDate() + 1)
+  ) {
     const dayOfWeek = d.getDay();
     // Count day if: (1) skipSundays is false, OR (2) day is not Sunday
     if (!skipSundays || dayOfWeek !== 0) {
@@ -258,10 +278,17 @@ function getSalespersonMaps() {
   if (cached) {
     try {
       const parsedCache = JSON.parse(cached);
-      if (parsedCache && typeof parsedCache.aliasMap === "object" && typeof parsedCache.displayCodeMap === "object") {
+      if (
+        parsedCache &&
+        typeof parsedCache.aliasMap === 'object' &&
+        typeof parsedCache.displayCodeMap === 'object'
+      ) {
         return parsedCache;
       } else {
-        logWarning('getSalespersonMaps', 'Cached salesperson map has invalid structure. Rebuilding.');
+        logWarning(
+          'getSalespersonMaps',
+          'Cached salesperson map has invalid structure. Rebuilding.'
+        );
       }
     } catch (e) {
       logError('getSalespersonMaps', e, { operation: 'parse_cache' });
@@ -277,9 +304,9 @@ function getSalespersonMaps() {
   const displayCodeMap = {};
 
   values.forEach((row) => {
-    const fullName = String(row[0] || "").trim();
-    const aliasesStr = String(row[1] || "").trim();
-    const displayCode = String(row[2] || "").trim();
+    const fullName = String(row[0] || '').trim();
+    const aliasesStr = String(row[1] || '').trim();
+    const displayCode = String(row[2] || '').trim();
     if (fullName) {
       const displayName = displayCode || fullName;
       displayCodeMap[fullName] = displayName;
@@ -288,11 +315,16 @@ function getSalespersonMaps() {
         aliasMap[displayName.toUpperCase()] = fullName;
       }
       if (aliasesStr) {
-        aliasesStr.split(",").forEach((alias) => {
+        aliasesStr.split(',').forEach((alias) => {
           const standardizedAlias = alias.trim().toUpperCase();
           if (standardizedAlias) {
-            if (aliasMap[standardizedAlias] && aliasMap[standardizedAlias] !== fullName) {
-              Logger.log(`Warning: Duplicate alias '${standardizedAlias}' mapped to '${aliasMap[standardizedAlias]}' and now also to '${fullName}'. Using mapping to '${fullName}'.`);
+            if (
+              aliasMap[standardizedAlias] &&
+              aliasMap[standardizedAlias] !== fullName
+            ) {
+              Logger.log(
+                `Warning: Duplicate alias '${standardizedAlias}' mapped to '${aliasMap[standardizedAlias]}' and now also to '${fullName}'. Using mapping to '${fullName}'.`
+              );
             }
             aliasMap[standardizedAlias] = fullName;
           }
@@ -317,7 +349,9 @@ function getActiveSalespersonCount() {
     const count = Math.max(0, lastRow - 1); // Header is row 1
 
     if (count > 200) {
-      Logger.log(`Warning: Unusually high salesperson count: ${count}. Capping at 200.`);
+      Logger.log(
+        `Warning: Unusually high salesperson count: ${count}. Capping at 200.`
+      );
       return 200; // Performance cap
     }
 
@@ -343,7 +377,7 @@ function getDynamicLeaderboardRanges() {
     avg: `R2:R${endRow}`,
     leaderboardStartRow: 2,
     leaderboardEndRow: endRow,
-    leaderboardRowCount: rowCount
+    leaderboardRowCount: rowCount,
   };
 }
 
@@ -354,7 +388,11 @@ function invalidateSalespersonMapCache() {
   try {
     CACHE.remove(CACHE_KEY_NAME_MAP);
   } catch (e) {
-    logWarning('invalidateSalespersonMapCache', 'Failed to clear salesperson map cache', { error: e.toString() });
+    logWarning(
+      'invalidateSalespersonMapCache',
+      'Failed to clear salesperson map cache',
+      { error: e.toString() }
+    );
   }
 }
 
@@ -365,7 +403,11 @@ function invalidateSalespersonMapCache() {
  */
 function computeThreeMonthAverageMap(names) {
   const uniqueNames = Array.from(
-    new Set((names || []).map((name) => String(name || '').trim()).filter((name) => name))
+    new Set(
+      (names || [])
+        .map((name) => String(name || '').trim())
+        .filter((name) => name)
+    )
   );
 
   if (uniqueNames.length === 0) {
@@ -415,10 +457,14 @@ function computeThreeMonthAverageMap(names) {
       archiveCache[sheetName] = map;
       return archiveCache[sheetName];
     } catch (e) {
-      logWarning('computeThreeMonthAverageMap', 'Error reading archive sheet for averages', {
-        sheetName,
-        error: e.toString()
-      });
+      logWarning(
+        'computeThreeMonthAverageMap',
+        'Error reading archive sheet for averages',
+        {
+          sheetName,
+          error: e.toString(),
+        }
+      );
       archiveCache[sheetName] = {};
       return archiveCache[sheetName];
     }
@@ -436,7 +482,9 @@ function computeThreeMonthAverageMap(names) {
         archiveMonthIndex = 11;
         archiveYear--;
       }
-      const sheetName = `${archiveMonthIndex + 1}/${String(archiveYear % 100).padStart(2, "0")}`;
+      const sheetName = `${archiveMonthIndex + 1}/${String(
+        archiveYear % 100
+      ).padStart(2, '0')}`;
       const archiveMap = loadArchiveMap(sheetName);
       const value = archiveMap[name];
       if (typeof value === 'number' && !isNaN(value)) {
@@ -487,19 +535,26 @@ function syncLeaderboardWithSalespeople(options = {}) {
 
     const availableRows = Math.max(0, todaySheet.getMaxRows() - 1);
     const rowsToRead = preserveMtd
-      ? Math.min(Math.max(rowCount, Math.min(availableRows, 200)), availableRows)
+      ? Math.min(
+          Math.max(rowCount, Math.min(availableRows, 200)),
+          availableRows
+        )
       : 0;
     const existingDataMap = {};
 
     if (preserveMtd && rowsToRead > 0) {
-      const existingValues = todaySheet.getRange(2, 16, rowsToRead, 3).getValues();
+      const existingValues = todaySheet
+        .getRange(2, 16, rowsToRead, 3)
+        .getValues();
       existingValues.forEach((row) => {
         const name = String(row[0] || '').trim();
         if (!name) {
           return;
         }
-        const mtdValue = typeof row[1] === 'number' ? row[1] : Number(row[1]) || 0;
-        const avgValue = typeof row[2] === 'number' ? row[2] : Number(row[2]) || 0;
+        const mtdValue =
+          typeof row[1] === 'number' ? row[1] : Number(row[1]) || 0;
+        const avgValue =
+          typeof row[2] === 'number' ? row[2] : Number(row[2]) || 0;
         existingDataMap[name] = { mtd: mtdValue, avg: avgValue };
       });
     }
@@ -511,15 +566,22 @@ function syncLeaderboardWithSalespeople(options = {}) {
     }
 
     if (todaySheet.getMaxRows() < endRow) {
-      todaySheet.insertRowsAfter(todaySheet.getMaxRows(), endRow - todaySheet.getMaxRows());
+      todaySheet.insertRowsAfter(
+        todaySheet.getMaxRows(),
+        endRow - todaySheet.getMaxRows()
+      );
     }
 
-    const averages = recalculateAverages ? computeThreeMonthAverageMap(salespeople) : {};
+    const averages = recalculateAverages
+      ? computeThreeMonthAverageMap(salespeople)
+      : {};
 
     const populatedRows = salespeople.map((name) => {
       const preserved = preserveMtd ? existingDataMap[name] : null;
       const mtd = preserved ? preserved.mtd : 0;
-      const avg = recalculateAverages ? averages[name] ?? 0 : preserved?.avg ?? 0;
+      const avg = recalculateAverages
+        ? averages[name] ?? 0
+        : preserved?.avg ?? 0;
       return [name, mtd, avg];
     });
 
@@ -551,17 +613,26 @@ function syncLeaderboardWithSalespeople(options = {}) {
 
     // MODIFIED: Apply specific formatting to the active leaderboard range
     targetRange
-      .setBorder(true, true, true, true, true, true, "#000000", SpreadsheetApp.BorderStyle.SOLID)
-      .setFontFamily("Calibri")
+      .setBorder(
+        true,
+        true,
+        true,
+        true,
+        true,
+        true,
+        '#000000',
+        SpreadsheetApp.BorderStyle.SOLID
+      )
+      .setFontFamily('Calibri')
       .setFontSize(14)
-      .setFontWeight("bold");
+      .setFontWeight('bold');
 
     // Name column (P)
-    todaySheet.getRange(`P2:P${endRow}`)
-      .setHorizontalAlignment('left');
+    todaySheet.getRange(`P2:P${endRow}`).setHorizontalAlignment('left');
 
     // Number columns (Q-R)
-    todaySheet.getRange(`Q2:R${endRow}`)
+    todaySheet
+      .getRange(`Q2:R${endRow}`)
       .setHorizontalAlignment('center')
       .setNumberFormat('0.#');
 
@@ -572,9 +643,10 @@ function syncLeaderboardWithSalespeople(options = {}) {
     return {
       success: true,
       count: salespeople.length,
-      message: salespeople.length > 0
-        ? `Leaderboard refreshed for ${salespeople.length} salespeople.`
-        : 'No salespeople found in SALESPEOPLE; leaderboard cleared.'
+      message:
+        salespeople.length > 0
+          ? `Leaderboard refreshed for ${salespeople.length} salespeople.`
+          : 'No salespeople found in SALESPEOPLE; leaderboard cleared.',
     };
   } catch (e) {
     logError('syncLeaderboardWithSalespeople', e);
@@ -593,7 +665,10 @@ function manualRefreshLeaderboard() {
     toastInfo(result.message, toastTitle);
     return result;
   } catch (e) {
-    alertError(e.message || 'Unable to refresh leaderboard.', 'Leaderboard Refresh Failed');
+    alertError(
+      e.message || 'Unable to refresh leaderboard.',
+      'Leaderboard Refresh Failed'
+    );
     throw e;
   }
 }
@@ -649,7 +724,10 @@ function filterTrafficLightRules(rules) {
   return rules.filter((r) => {
     const bc = r.getBooleanCondition();
     // Keep if it's not a boolean condition or if it is, it's not a custom formula.
-    return !bc || bc.getCriteriaType() !== SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA;
+    return (
+      !bc ||
+      bc.getCriteriaType() !== SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA
+    );
   });
 }
 
@@ -678,20 +756,28 @@ function withScriptLock(fn) {
 
   // Check if lock acquisition was successful
   if (!lockResult.success) {
-    const msg = "Could not acquire script lock after " + lockResult.attempts +
-                " attempts (" + lockResult.totalTime + "ms). " +
-                "Another operation may be running. Please try again.";
+    const msg =
+      'Could not acquire script lock after ' +
+      lockResult.attempts +
+      ' attempts (' +
+      lockResult.totalTime +
+      'ms). ' +
+      'Another operation may be running. Please try again.';
     Logger.log(msg);
     try {
       SpreadsheetApp.getUi()?.alert(msg);
     } catch (e) {
-      Logger.log("UI alert failed for lock: " + e);
+      Logger.log('UI alert failed for lock: ' + e);
     }
     throw new Error(msg);
   }
 
   try {
-    Logger.log('Script lock acquired on attempt ' + lockResult.attempts + ' for operation');
+    Logger.log(
+      'Script lock acquired on attempt ' +
+        lockResult.attempts +
+        ' for operation'
+    );
     return fn();
   } finally {
     // Always release lock, even if operation failed
@@ -701,17 +787,24 @@ function withScriptLock(fn) {
 
 // alertOps
 function toastInfo(msg, title) {
-  if (SS) SS.toast(msg, title || "Info");
-  else Logger.log(`Toast (SS not avail): ${title ? title + ": " : ""}${msg}`);
+  if (SS) SS.toast(msg, title || 'Info');
+  else Logger.log(`Toast (SS not avail): ${title ? title + ': ' : ''}${msg}`);
 }
 function showCustomAlert(title, msg) {
   try {
-    SpreadsheetApp.getUi().alert(title, msg, SpreadsheetApp.getUi().ButtonSet.OK);
+    SpreadsheetApp.getUi().alert(
+      title,
+      msg,
+      SpreadsheetApp.getUi().ButtonSet.OK
+    );
   } catch (e) {
-    logWarning('showCustomAlert', 'UI not available for alert', { title, message: msg });
+    logWarning('showCustomAlert', 'UI not available for alert', {
+      title,
+      message: msg,
+    });
   }
 }
-function alertError(msg, title = "Error") {
+function alertError(msg, title = 'Error') {
   showCustomAlert(title, msg);
 }
 
@@ -722,20 +815,32 @@ function tallyCounts(rows, aliasMap, sides) {
   rows.forEach((row) => {
     sides.forEach(({ fiIdx, saleIdx }) => {
       if (fiIdx >= row.length || saleIdx >= row.length) return;
-      const fiFlag = String(row[fiIdx] || "")
+      const fiFlag = String(row[fiIdx] || '')
         .trim()
         .toUpperCase();
       if (!isValidFIFlag(fiFlag)) return; // Only delivered
-      const salespersonInput = String(row[saleIdx] || "").trim();
+      const salespersonInput = String(row[saleIdx] || '').trim();
       if (!salespersonInput) return;
-      const parts = salespersonInput.split("/").map((s) => s.trim().toUpperCase());
+      const parts = salespersonInput
+        .split('/')
+        .map((s) => s.trim().toUpperCase());
       const inc = parts.length > 1 ? 0.5 : 1;
       parts.forEach((part) => {
         if (!part) return;
         const fullName = aliasMap[part];
         if (fullName) counts[fullName] = (counts[fullName] || 0) + inc;
-        else if (!unknownInputs.includes(salespersonInput.split("/").find((p) => p.trim().toUpperCase() === part) || part)) {
-          unknownInputs.push(salespersonInput.split("/").find((p) => p.trim().toUpperCase() === part) || part);
+        else if (
+          !unknownInputs.includes(
+            salespersonInput
+              .split('/')
+              .find((p) => p.trim().toUpperCase() === part) || part
+          )
+        ) {
+          unknownInputs.push(
+            salespersonInput
+              .split('/')
+              .find((p) => p.trim().toUpperCase() === part) || part
+          );
         }
       });
     });
@@ -750,39 +855,47 @@ function summarizeRows(rows) {
   rows.forEach((row) => {
     const newFi =
       row.length > 2
-        ? String(row[2] || "")
-          .trim()
-          .toUpperCase()
-        : "";
+        ? String(row[2] || '')
+            .trim()
+            .toUpperCase()
+        : '';
     const usedFi =
       row.length > 9
-        ? String(row[9] || "")
-          .trim()
-          .toUpperCase()
-        : "";
-    const newHasContent = row.length > 1 && row.slice(1, Math.min(7, row.length)).some((val) => val && String(val).trim() !== "");
-    const usedHasContent = row.length > 8 && row.slice(8, Math.min(14, row.length)).some((val) => val && String(val).trim() !== "");
+        ? String(row[9] || '')
+            .trim()
+            .toUpperCase()
+        : '';
+    const newHasContent =
+      row.length > 1 &&
+      row
+        .slice(1, Math.min(7, row.length))
+        .some((val) => val && String(val).trim() !== '');
+    const usedHasContent =
+      row.length > 8 &&
+      row
+        .slice(8, Math.min(14, row.length))
+        .some((val) => val && String(val).trim() !== '');
     let newDelivered = isValidFIFlag(newFi) && newHasContent;
     let usedDelivered = isValidFIFlag(usedFi) && usedHasContent;
     if (newDelivered) {
       newCount++;
       const tradeNew =
         row.length > 5
-          ? String(row[5] || "")
-            .trim()
-            .toUpperCase()
-          : "";
-      if (tradeNew && tradeNew !== "NT") tradeCount++;
+          ? String(row[5] || '')
+              .trim()
+              .toUpperCase()
+          : '';
+      if (tradeNew && tradeNew !== 'NT') tradeCount++;
     }
     if (usedDelivered) {
       usedCount++;
       const tradeUsed =
         row.length > 12
-          ? String(row[12] || "")
-            .trim()
-            .toUpperCase()
-          : "";
-      if (tradeUsed && tradeUsed !== "NT") tradeCount++;
+          ? String(row[12] || '')
+              .trim()
+              .toUpperCase()
+          : '';
+      if (tradeUsed && tradeUsed !== 'NT') tradeCount++;
     }
   });
   return { newCount, usedCount, tradeCount };
@@ -822,18 +935,33 @@ function processCarSection(
   let hasSalespersonError = false;
 
   // Extract section data
-  const fiFlag = rowData.length > fiIndex ? String(rowData[fiIndex] || "").trim().toUpperCase() : "";
-  const salespersonInput = rowData.length > salespersonIndex ? String(rowData[salespersonIndex] || "").trim() : "";
+  const fiFlag =
+    rowData.length > fiIndex
+      ? String(rowData[fiIndex] || '')
+          .trim()
+          .toUpperCase()
+      : '';
+  const salespersonInput =
+    rowData.length > salespersonIndex
+      ? String(rowData[salespersonIndex] || '').trim()
+      : '';
   const isDelivered = isValidFIFlag(fiFlag);
-  const hasData = rowData.length > dataStartIndex &&
-                  rowData.slice(dataStartIndex, dataEndIndex).some((cell) => cell && String(cell).trim() !== "");
+  const hasData =
+    rowData.length > dataStartIndex &&
+    rowData
+      .slice(dataStartIndex, dataEndIndex)
+      .some((cell) => cell && String(cell).trim() !== '');
 
   if (hasData && !isDelivered) {
     // Non-delivered deal with data: highlight entire section (except trade column at index 4)
     applyNonDeliveredHighlight(sectionBgRow, nonDeliveredColor);
   } else if (isDelivered) {
     // Delivered deal: clear non-delivered highlights and check salesperson
-    clearNonDeliveredHighlight(sectionBgRow, originalBackgroundRow, nonDeliveredColorUpper);
+    clearNonDeliveredHighlight(
+      sectionBgRow,
+      originalBackgroundRow,
+      nonDeliveredColorUpper
+    );
     hasSalespersonError = checkSalespersonError(
       salespersonInput,
       sectionBgRow,
@@ -844,7 +972,12 @@ function processCarSection(
     );
   } else {
     // No data or empty: clear all formatting
-    clearAllHighlights(sectionBgRow, originalBackgroundRow, nonDeliveredColorUpper, salespersonErrorColorUpper);
+    clearAllHighlights(
+      sectionBgRow,
+      originalBackgroundRow,
+      nonDeliveredColorUpper,
+      salespersonErrorColorUpper
+    );
   }
 
   return { backgroundRow: sectionBgRow, hasSalespersonError };
@@ -858,7 +991,8 @@ function processCarSection(
  */
 function applyNonDeliveredHighlight(sectionBgRow, nonDeliveredColor) {
   for (let k = 0; k < 6; k++) {
-    if (k !== 4) { // Skip trade column (index 4)
+    if (k !== 4) {
+      // Skip trade column (index 4)
       sectionBgRow[k] = nonDeliveredColor;
     }
   }
@@ -871,9 +1005,17 @@ function applyNonDeliveredHighlight(sectionBgRow, nonDeliveredColor) {
  * @param {string[]} originalBackgroundRow Original backgrounds for comparison
  * @param {string} nonDeliveredColorUpper Uppercase color for comparison
  */
-function clearNonDeliveredHighlight(sectionBgRow, originalBackgroundRow, nonDeliveredColorUpper) {
+function clearNonDeliveredHighlight(
+  sectionBgRow,
+  originalBackgroundRow,
+  nonDeliveredColorUpper
+) {
   for (let k = 0; k < 6; k++) {
-    if (k !== 4 && originalBackgroundRow[k] && originalBackgroundRow[k].toUpperCase() === nonDeliveredColorUpper) {
+    if (
+      k !== 4 &&
+      originalBackgroundRow[k] &&
+      originalBackgroundRow[k].toUpperCase() === nonDeliveredColorUpper
+    ) {
       sectionBgRow[k] = null;
     }
   }
@@ -902,13 +1044,18 @@ function checkSalespersonError(
     return false;
   }
 
-  const salespersonParts = salespersonInput.split("/").map((s) => s.trim().toUpperCase());
+  const salespersonParts = salespersonInput
+    .split('/')
+    .map((s) => s.trim().toUpperCase());
   const hasError = salespersonParts.some((part) => part && !aliasMap[part]);
 
   if (hasError) {
     sectionBgRow[5] = salespersonErrorColor; // Salesperson column is at index 5
     return true;
-  } else if (originalBackgroundRow[5] && originalBackgroundRow[5].toUpperCase() === salespersonErrorColorUpper) {
+  } else if (
+    originalBackgroundRow[5] &&
+    originalBackgroundRow[5].toUpperCase() === salespersonErrorColorUpper
+  ) {
     sectionBgRow[5] = null; // Clear previous error highlight
   }
 
@@ -923,14 +1070,26 @@ function checkSalespersonError(
  * @param {string} nonDeliveredColorUpper Uppercase color for comparison
  * @param {string} salespersonErrorColorUpper Uppercase color for comparison
  */
-function clearAllHighlights(sectionBgRow, originalBackgroundRow, nonDeliveredColorUpper, salespersonErrorColorUpper) {
+function clearAllHighlights(
+  sectionBgRow,
+  originalBackgroundRow,
+  nonDeliveredColorUpper,
+  salespersonErrorColorUpper
+) {
   for (let k = 0; k < 6; k++) {
-    if (k !== 4 && originalBackgroundRow[k] && originalBackgroundRow[k].toUpperCase() === nonDeliveredColorUpper) {
+    if (
+      k !== 4 &&
+      originalBackgroundRow[k] &&
+      originalBackgroundRow[k].toUpperCase() === nonDeliveredColorUpper
+    ) {
       sectionBgRow[k] = null;
     }
   }
 
-  if (originalBackgroundRow[5] && originalBackgroundRow[5].toUpperCase() === salespersonErrorColorUpper) {
+  if (
+    originalBackgroundRow[5] &&
+    originalBackgroundRow[5].toUpperCase() === salespersonErrorColorUpper
+  ) {
     sectionBgRow[5] = null;
   }
 }
@@ -959,8 +1118,12 @@ function applyMonthlyRowFormatting(sheet, rowsData, startSheetRow, aliasMap) {
   const salespersonErrorSheetRows = [];
   const numRows = rowsData.length;
 
-  const originalBackgroundsNew = sheet.getRange(startSheetRow, 2, numRows, 6).getBackgrounds(); // B:G
-  const originalBackgroundsUsed = sheet.getRange(startSheetRow, 9, numRows, 6).getBackgrounds(); // I:N
+  const originalBackgroundsNew = sheet
+    .getRange(startSheetRow, 2, numRows, 6)
+    .getBackgrounds(); // B:G
+  const originalBackgroundsUsed = sheet
+    .getRange(startSheetRow, 9, numRows, 6)
+    .getBackgrounds(); // I:N
 
   const backgroundsNewSection = [];
   const backgroundsUsedSection = [];
@@ -973,10 +1136,10 @@ function applyMonthlyRowFormatting(sheet, rowsData, startSheetRow, aliasMap) {
     const newResult = processCarSection(
       rowData,
       originalBackgroundsNew[i],
-      2,  // FI column index
-      6,  // Salesperson column index
-      1,  // Data start index
-      7,  // Data end index
+      2, // FI column index
+      6, // Salesperson column index
+      1, // Data start index
+      7, // Data end index
       aliasMap,
       NON_DELIVERED_COLOR,
       NON_DELIVERED_COLOR_UPPER,
@@ -984,7 +1147,10 @@ function applyMonthlyRowFormatting(sheet, rowsData, startSheetRow, aliasMap) {
       SALESPERSON_ERROR_COLOR_UPPER
     );
     backgroundsNewSection.push(newResult.backgroundRow);
-    if (newResult.hasSalespersonError && !salespersonErrorSheetRows.includes(currentRowInSheet)) {
+    if (
+      newResult.hasSalespersonError &&
+      !salespersonErrorSheetRows.includes(currentRowInSheet)
+    ) {
       salespersonErrorSheetRows.push(currentRowInSheet);
     }
 
@@ -992,9 +1158,9 @@ function applyMonthlyRowFormatting(sheet, rowsData, startSheetRow, aliasMap) {
     const usedResult = processCarSection(
       rowData,
       originalBackgroundsUsed[i],
-      9,  // FI column index
+      9, // FI column index
       13, // Salesperson column index
-      8,  // Data start index
+      8, // Data start index
       14, // Data end index
       aliasMap,
       NON_DELIVERED_COLOR,
@@ -1003,15 +1169,22 @@ function applyMonthlyRowFormatting(sheet, rowsData, startSheetRow, aliasMap) {
       SALESPERSON_ERROR_COLOR_UPPER
     );
     backgroundsUsedSection.push(usedResult.backgroundRow);
-    if (usedResult.hasSalespersonError && !salespersonErrorSheetRows.includes(currentRowInSheet)) {
+    if (
+      usedResult.hasSalespersonError &&
+      !salespersonErrorSheetRows.includes(currentRowInSheet)
+    ) {
       salespersonErrorSheetRows.push(currentRowInSheet);
     }
   }
 
   // Apply all backgrounds at once
   if (numRows > 0) {
-    sheet.getRange(startSheetRow, 2, numRows, 6).setBackgrounds(backgroundsNewSection); // Columns B:G
-    sheet.getRange(startSheetRow, 9, numRows, 6).setBackgrounds(backgroundsUsedSection); // Columns I:N
+    sheet
+      .getRange(startSheetRow, 2, numRows, 6)
+      .setBackgrounds(backgroundsNewSection); // Columns B:G
+    sheet
+      .getRange(startSheetRow, 9, numRows, 6)
+      .setBackgrounds(backgroundsUsedSection); // Columns I:N
   }
   return salespersonErrorSheetRows.sort((a, b) => a - b);
 }
@@ -1052,12 +1225,18 @@ function findLastRowInCols(sheet, startCol, endCol) {
     const chunkSize = currentRow - chunkStart + 1;
 
     // Read only this chunk of data
-    const chunkValues = sheet.getRange(chunkStart, startCol, chunkSize, numCols).getValues();
+    const chunkValues = sheet
+      .getRange(chunkStart, startCol, chunkSize, numCols)
+      .getValues();
 
     // Search backwards through the chunk for data
     for (let i = chunkValues.length - 1; i >= 0; i--) {
       // Check if any cell in the current row has content
-      if (chunkValues[i].some(cell => cell !== '' && cell !== null && cell !== undefined)) {
+      if (
+        chunkValues[i].some(
+          (cell) => cell !== '' && cell !== null && cell !== undefined
+        )
+      ) {
         // Found data! Return the 1-based row number
         return chunkStart + i;
       }
@@ -1070,7 +1249,6 @@ function findLastRowInCols(sheet, startCol, endCol) {
   // No data found in the specified columns
   return 0;
 }
-
 
 /**
  * Creates a timeout manager for tracking execution time
@@ -1087,13 +1265,21 @@ function createTimeoutManager(thresholdMinutes = 5.0) {
      * @param {string} operation - Description of current operation for logging
      * @returns {boolean} true if OK to continue, false if threshold exceeded
      */
-    checkTime: function(operation) {
+    checkTime: function (operation) {
       const elapsed = Date.now() - startTime;
       if (elapsed > thresholdMs) {
-        Logger.log(`⏱️ Timeout threshold (${thresholdMinutes}m) exceeded after ${(elapsed/1000).toFixed(1)}s during: ${operation}`);
+        Logger.log(
+          `⏱️ Timeout threshold (${thresholdMinutes}m) exceeded after ${(
+            elapsed / 1000
+          ).toFixed(1)}s during: ${operation}`
+        );
         return false;
       }
-      Logger.log(`✓ Time check OK: ${(elapsed/1000).toFixed(1)}s elapsed at: ${operation}`);
+      Logger.log(
+        `✓ Time check OK: ${(elapsed / 1000).toFixed(
+          1
+        )}s elapsed at: ${operation}`
+      );
       return true;
     },
 
@@ -1101,9 +1287,9 @@ function createTimeoutManager(thresholdMinutes = 5.0) {
      * Gets elapsed time in seconds
      * @returns {number} Seconds elapsed since creation
      */
-    getElapsed: function() {
+    getElapsed: function () {
       return (Date.now() - startTime) / 1000;
-    }
+    },
   };
 }
 
@@ -1131,7 +1317,7 @@ function createOperationCheckpoint(operationData) {
       rowCount: operationData.rowCount,
       status: 'STARTED',
       phase: 'PRE_MONTHLY_WRITE',
-      dataHash: generateDataHash(operationData.rows)
+      dataHash: generateDataHash(operationData.rows),
     };
 
     PropertiesService.getScriptProperties().setProperty(
@@ -1139,7 +1325,9 @@ function createOperationCheckpoint(operationData) {
       JSON.stringify(checkpoint)
     );
 
-    Logger.log(`✓ Checkpoint created for ${operationData.dateStr} (${operationData.rowCount} rows)`);
+    Logger.log(
+      `✓ Checkpoint created for ${operationData.dateStr} (${operationData.rowCount} rows)`
+    );
     return true;
   } catch (e) {
     Logger.log(`⚠️ Failed to create checkpoint: ${e.toString()}`);
@@ -1198,7 +1386,8 @@ function clearOperationCheckpoint() {
  */
 function getOperationCheckpoint() {
   try {
-    const checkpointStr = PropertiesService.getScriptProperties().getProperty(CHECKPOINT_KEY);
+    const checkpointStr =
+      PropertiesService.getScriptProperties().getProperty(CHECKPOINT_KEY);
     if (!checkpointStr) return null;
 
     const checkpoint = JSON.parse(checkpointStr);
@@ -1208,7 +1397,11 @@ function getOperationCheckpoint() {
     const maxAge = CHECKPOINT_RETENTION_HOURS * 60 * 60 * 1000;
 
     if (checkpointAge > maxAge) {
-      Logger.log(`⚠️ Checkpoint is ${(checkpointAge / 3600000).toFixed(1)}h old - discarding`);
+      Logger.log(
+        `⚠️ Checkpoint is ${(checkpointAge / 3600000).toFixed(
+          1
+        )}h old - discarding`
+      );
       clearOperationCheckpoint();
       return null;
     }
@@ -1230,13 +1423,14 @@ function generateDataHash(rows) {
     // Simple hash: rowCount + first/last row checksums
     const rowCount = rows.length;
     const firstRow = rows[0] ? JSON.stringify(rows[0]).slice(0, 50) : '';
-    const lastRow = rows[rows.length - 1] ? JSON.stringify(rows[rows.length - 1]).slice(0, 50) : '';
+    const lastRow = rows[rows.length - 1]
+      ? JSON.stringify(rows[rows.length - 1]).slice(0, 50)
+      : '';
     return `${rowCount}|${firstRow}|${lastRow}`;
   } catch (e) {
     return 'hash_error';
   }
 }
-
 
 /**
  * Recovers analytics for a checkpoint operation
@@ -1262,7 +1456,9 @@ function recoverAnalyticsForCheckpoint(checkpoint) {
       Logger.log('✓ Analytics recovery successful');
       return true;
     } else {
-      updateCheckpoint('ANALYTICS_FAILED', { recoveryAttempts: (checkpoint.recoveryAttempts || 0) + 1 });
+      updateCheckpoint('ANALYTICS_FAILED', {
+        recoveryAttempts: (checkpoint.recoveryAttempts || 0) + 1,
+      });
       alertError(
         'Analytics recovery failed. You can try "Recalculate MTD & Check Formats" from the menu to retry.',
         'Recovery Failed'
@@ -1271,12 +1467,17 @@ function recoverAnalyticsForCheckpoint(checkpoint) {
       return false;
     }
   } catch (e) {
-    logError('recoverAnalyticsForCheckpoint', e, { dateProcessed: checkpoint.dateProcessed });
+    logError('recoverAnalyticsForCheckpoint', e, {
+      dateProcessed: checkpoint.dateProcessed,
+    });
     updateCheckpoint('ANALYTICS_FAILED', {
       error: e.toString(),
-      recoveryAttempts: (checkpoint.recoveryAttempts || 0) + 1
+      recoveryAttempts: (checkpoint.recoveryAttempts || 0) + 1,
     });
-    alertError('Error during analytics recovery: ' + e.toString(), 'Recovery Error');
+    alertError(
+      'Error during analytics recovery: ' + e.toString(),
+      'Recovery Error'
+    );
     return false;
   }
 }
@@ -1298,12 +1499,17 @@ function processDaily() {
     // In Google Apps Script, Sunday is 0, Monday is 1, ..., Saturday is 6
     if (skipSundays && today.getDay() === 0) {
       // 0 represents Sunday
-      Logger.log("Today is Sunday and skipSundays is enabled. Skipping processDaily execution.");
-      toastInfo("Sunday is configured as a non-sales day. No processing performed.", "Sunday Skip");
+      Logger.log(
+        'Today is Sunday and skipSundays is enabled. Skipping processDaily execution.'
+      );
+      toastInfo(
+        'Sunday is configured as a non-sales day. No processing performed.',
+        'Sunday Skip'
+      );
       return; // Exit the function if it's Sunday and skipSundays is true
     }
 
-    toastInfo("Processing daily sales...", "Working");
+    toastInfo('Processing daily sales...', 'Working');
     let errorSheetRows = [];
     let unknownInputs = [];
     let countsByFullName = {};
@@ -1320,8 +1526,12 @@ function processDaily() {
       let backgroundsToLogToMonthly = []; // *** NEW: Array for corresponding background colors ***
 
       allDailyData.forEach((row, index) => {
-        const hasNewActivity = row.slice(1, 7).some((cell) => cell && String(cell).trim() !== "");
-        const hasUsedActivity = row.slice(8, 14).some((cell) => cell && String(cell).trim() !== "");
+        const hasNewActivity = row
+          .slice(1, 7)
+          .some((cell) => cell && String(cell).trim() !== '');
+        const hasUsedActivity = row
+          .slice(8, 14)
+          .some((cell) => cell && String(cell).trim() !== '');
         if (hasNewActivity || hasUsedActivity) {
           rowsToLogToMonthly.push([...row]); // Push a copy of the row
           fontColorsToLogToMonthly.push([...allDailyFontColors[index]]); // Push a copy of the font color row
@@ -1330,16 +1540,22 @@ function processDaily() {
       });
 
       if (!rowsToLogToMonthly.length) {
-        showCustomAlert("Process Complete", "No sales activity found on the TODAY sheet to log to monthly.");
-        sheets.today.getRange(RANGES.dailyClear).setBackground(null).setFontColor(null); // Reset font color here too
+        showCustomAlert(
+          'Process Complete',
+          'No sales activity found on the TODAY sheet to log to monthly.'
+        );
+        sheets.today
+          .getRange(RANGES.dailyClear)
+          .setBackground(null)
+          .setFontColor(null); // Reset font color here too
         return;
       }
 
       // CHECKPOINT 1: Before MONTHLY operations (critical)
-      if (!timer.checkTime("Before MONTHLY write")) {
+      if (!timer.checkTime('Before MONTHLY write')) {
         alertError(
-          "Processing time too close to limit. Please retry when system load is lower.",
-          "Timeout Prevention"
+          'Processing time too close to limit. Please retry when system load is lower.',
+          'Timeout Prevention'
         );
         return; // Exit before any changes
       }
@@ -1349,7 +1565,7 @@ function processDaily() {
       createOperationCheckpoint({
         dateStr: dateStr,
         rowCount: rowsToLogToMonthly.length,
-        rows: rowsToLogToMonthly
+        rows: rowsToLogToMonthly,
       });
 
       // Modify Column A
@@ -1365,23 +1581,83 @@ function processDaily() {
       const dataInsertRow = headerInsertRow + 1;
 
       sheets.monthly.insertRowBefore(headerInsertRow);
-      sheets.monthly.getRange(headerInsertRow, 1, 1, 14).merge().setValue(dateStr).setHorizontalAlignment("center").setFontFamily("Calibri").setFontSize(10).setFontWeight("bold").setBackground("#FFFF00").setBorder(true, true, true, true, true, true, "#000000", SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+      sheets.monthly
+        .getRange(headerInsertRow, 1, 1, 14)
+        .merge()
+        .setValue(dateStr)
+        .setHorizontalAlignment('center')
+        .setFontFamily('Calibri')
+        .setFontSize(10)
+        .setFontWeight('bold')
+        .setBackground('#FFFF00')
+        .setBorder(
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          '#000000',
+          SpreadsheetApp.BorderStyle.SOLID_MEDIUM
+        );
 
       const numRowsToInsert = rowsToLogToMonthly.length;
       const numColsToInsert = 14;
 
-      const monthlyDataRange = sheets.monthly.getRange(dataInsertRow, 1, numRowsToInsert, numColsToInsert);
+      const monthlyDataRange = sheets.monthly.getRange(
+        dataInsertRow,
+        1,
+        numRowsToInsert,
+        numColsToInsert
+      );
       monthlyDataRange.setValues(rowsToLogToMonthly);
       SpreadsheetApp.flush();
 
       // Apply general formatting (font family, size, borders) to B:N
-      sheets.monthly.getRange(dataInsertRow, 2, numRowsToInsert, 13).setFontFamily("Calibri").setFontWeight("bold").setFontSize(10).setHorizontalAlignment("center").setVerticalAlignment("middle").setBorder(true, true, true, true, true, true, "#000000", SpreadsheetApp.BorderStyle.SOLID);
+      sheets.monthly
+        .getRange(dataInsertRow, 2, numRowsToInsert, 13)
+        .setFontFamily('Calibri')
+        .setFontWeight('bold')
+        .setFontSize(10)
+        .setHorizontalAlignment('center')
+        .setVerticalAlignment('middle')
+        .setBorder(
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          '#000000',
+          SpreadsheetApp.BorderStyle.SOLID
+        );
 
       // Specific formatting for Column A on monthly
-      sheets.monthly.getRange(dataInsertRow, 1, numRowsToInsert, 1).setNumberFormat("0").setFontFamily("Calibri").setFontWeight("bold").setFontSize(10).setHorizontalAlignment("center").setVerticalAlignment("middle").setBorder(true, true, true, true, true, true, "#000000", SpreadsheetApp.BorderStyle.SOLID);
+      sheets.monthly
+        .getRange(dataInsertRow, 1, numRowsToInsert, 1)
+        .setNumberFormat('0')
+        .setFontFamily('Calibri')
+        .setFontWeight('bold')
+        .setFontSize(10)
+        .setHorizontalAlignment('center')
+        .setVerticalAlignment('middle')
+        .setBorder(
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          '#000000',
+          SpreadsheetApp.BorderStyle.SOLID
+        );
 
-      sheets.monthly.getRange(dataInsertRow, 6, numRowsToInsert, 1).setFontSize(7); // Col F
-      sheets.monthly.getRange(dataInsertRow, 13, numRowsToInsert, 1).setFontSize(7); // Col M
+      sheets.monthly
+        .getRange(dataInsertRow, 6, numRowsToInsert, 1)
+        .setFontSize(7); // Col F
+      sheets.monthly
+        .getRange(dataInsertRow, 13, numRowsToInsert, 1)
+        .setFontSize(7); // Col M
 
       // *** NEW: Apply font colors to the new rows on monthly sheet ***
       if (fontColorsToLogToMonthly.length > 0) {
@@ -1391,43 +1667,61 @@ function processDaily() {
       // *** NEW: Apply background colors to Columns E and L on monthly sheet ***
       if (backgroundsToLogToMonthly.length > 0) {
         // Extract backgrounds for Column E (Index 4) and Column L (Index 11)
-        const backgroundsE = backgroundsToLogToMonthly.map(r => [r[4]]);
-        const backgroundsL = backgroundsToLogToMonthly.map(r => [r[11]]);
+        const backgroundsE = backgroundsToLogToMonthly.map((r) => [r[4]]);
+        const backgroundsL = backgroundsToLogToMonthly.map((r) => [r[11]]);
 
         // Apply to Monthly Sheet (Col E = 5, Col L = 12)
-        sheets.monthly.getRange(dataInsertRow, 5, numRowsToInsert, 1).setBackgrounds(backgroundsE);
-        sheets.monthly.getRange(dataInsertRow, 12, numRowsToInsert, 1).setBackgrounds(backgroundsL);
+        sheets.monthly
+          .getRange(dataInsertRow, 5, numRowsToInsert, 1)
+          .setBackgrounds(backgroundsE);
+        sheets.monthly
+          .getRange(dataInsertRow, 12, numRowsToInsert, 1)
+          .setBackgrounds(backgroundsL);
       }
       SpreadsheetApp.flush(); // Ensure formatting is applied
 
       const { aliasMap, displayCodeMap } = getSalespersonMaps();
 
-      errorSheetRows = applyMonthlyRowFormatting(sheets.monthly, rowsToLogToMonthly, dataInsertRow, aliasMap);
+      errorSheetRows = applyMonthlyRowFormatting(
+        sheets.monthly,
+        rowsToLogToMonthly,
+        dataInsertRow,
+        aliasMap
+      );
 
       // Update checkpoint: MONTHLY data written successfully
       updateCheckpoint('MONTHLY_WRITTEN', {
         monthlyInsertRow: dataInsertRow,
-        rowsInserted: numRowsToInsert
+        rowsInserted: numRowsToInsert,
       });
 
       const sidesToTally = [
         { fiIdx: 2, saleIdx: 6 },
         { fiIdx: 9, saleIdx: 13 },
       ];
-      const tallyResult = tallyCounts(rowsToLogToMonthly, aliasMap, sidesToTally);
+      const tallyResult = tallyCounts(
+        rowsToLogToMonthly,
+        aliasMap,
+        sidesToTally
+      );
       countsByFullName = tallyResult.counts;
       unknownInputs = tallyResult.unknownInputs;
 
       const lbRange = sheets.today.getRange(RANGES.leaderboard);
       const lbValues = lbRange.getValues();
       lbValues.forEach((r) => {
-        if (countsByFullName[r[0]]) r[1] = (Number(r[1]) || 0) + countsByFullName[r[0]];
+        if (countsByFullName[r[0]])
+          r[1] = (Number(r[1]) || 0) + countsByFullName[r[0]];
       });
-      lbValues.sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0) || (Number(b[2]) || 0) - (Number(a[2]) || 0));
+      lbValues.sort(
+        (a, b) =>
+          (Number(b[1]) || 0) - (Number(a[1]) || 0) ||
+          (Number(b[2]) || 0) - (Number(a[2]) || 0)
+      );
       lbRange.setValues(lbValues);
 
-      sheets.today.getRange(RANGES.mtd).setNumberFormat("0.#");
-      sheets.today.getRange(RANGES.avg).setNumberFormat("0.#");
+      sheets.today.getRange(RANGES.mtd).setNumberFormat('0.#');
+      sheets.today.getRange(RANGES.avg).setNumberFormat('0.#');
       reapplyCF();
 
       // --- Clean Up TODAY Sheet ---
@@ -1440,30 +1734,36 @@ function processDaily() {
       updateCheckpoint('ANALYTICS_PENDING');
 
       // CHECKPOINT 2: Before optional analytics (after critical operations)
-      if (!timer.checkTime("Before analytics calculation")) {
-        Logger.log("⚠️ Skipping analytics due to time constraints");
+      if (!timer.checkTime('Before analytics calculation')) {
+        Logger.log('⚠️ Skipping analytics due to time constraints');
         updateCheckpoint('ANALYTICS_FAILED', { reason: 'timeout_prevention' });
         analyticsSkipped = true;
       } else {
         // Try analytics
         try {
-          Logger.log("Calculating monthly analytics...");
+          Logger.log('Calculating monthly analytics...');
           invalidateAnalyticsCache();
           const analyticsData = calculateMonthlyAnalytics();
           if (analyticsData) {
             writeAnalyticsToMonthly(analyticsData, sheets.monthly);
-            Logger.log("✓ Monthly analytics calculation successful");
+            Logger.log('✓ Monthly analytics calculation successful');
             // Clear checkpoint - operation fully complete
             clearOperationCheckpoint();
           } else {
-            updateCheckpoint('ANALYTICS_FAILED', { reason: 'no_data_generated' });
+            updateCheckpoint('ANALYTICS_FAILED', {
+              reason: 'no_data_generated',
+            });
             analyticsSkipped = true;
           }
         } catch (analyticsError) {
-          logWarning('processDaily', 'Analytics calculation failed (non-critical)', { error: analyticsError.toString() });
+          logWarning(
+            'processDaily',
+            'Analytics calculation failed (non-critical)',
+            { error: analyticsError.toString() }
+          );
           updateCheckpoint('ANALYTICS_FAILED', {
             reason: 'exception',
-            error: analyticsError.toString()
+            error: analyticsError.toString(),
           });
           analyticsSkipped = true;
         }
@@ -1474,34 +1774,54 @@ function processDaily() {
       Logger.log(`✓ processDaily completed in ${elapsed.toFixed(1)}s`);
 
       // Construct summary message
-      const { newCount, usedCount, tradeCount } = summarizeRows(rowsToLogToMonthly);
+      const { newCount, usedCount, tradeCount } =
+        summarizeRows(rowsToLogToMonthly);
       const repLines = Object.entries(countsByFullName)
         .filter(([, c]) => c > 0)
-        .map(([name, count]) => `  - ${displayCodeMap[name] || name}: ${count}`);
+        .map(
+          ([name, count]) => `  - ${displayCodeMap[name] || name}: ${count}`
+        );
 
       let summaryTitle = `Daily Sales Logged: ${dateStr}`;
-      let summaryMsg = `NEW DELIVERED SALES: ${newCount}\n` + `USED DELIVERED SALES: ${usedCount}\n` + `TOTAL DELIVERED UNITS: ${newCount + usedCount}\n` + `DELIVERED DEALS WITH TRADES: ${tradeCount}\n\n` + `SALESPERSON DELIVERED COUNTS:\n` + (repLines.length > 0 ? repLines.join("\n") : "  - No specific salesperson counts for delivered deals today.") + `\n\nSALESPERSON CODE ERRORS (on delivered deals): ${errorSheetRows.length}`;
+      let summaryMsg =
+        `NEW DELIVERED SALES: ${newCount}\n` +
+        `USED DELIVERED SALES: ${usedCount}\n` +
+        `TOTAL DELIVERED UNITS: ${newCount + usedCount}\n` +
+        `DELIVERED DEALS WITH TRADES: ${tradeCount}\n\n` +
+        `SALESPERSON DELIVERED COUNTS:\n` +
+        (repLines.length > 0
+          ? repLines.join('\n')
+          : '  - No specific salesperson counts for delivered deals today.') +
+        `\n\nSALESPERSON CODE ERRORS (on delivered deals): ${errorSheetRows.length}`;
 
       if (errorSheetRows.length > 0) {
-        summaryMsg += `\n(Salesperson code errors for delivered deals are highlighted on 'MONTHLY' in rows ${dataInsertRow}-${dataInsertRow + numRowsToInsert - 1}.)`;
+        summaryMsg += `\n(Salesperson code errors for delivered deals are highlighted on 'MONTHLY' in rows ${dataInsertRow}-${
+          dataInsertRow + numRowsToInsert - 1
+        }.)`;
       }
       if (unknownInputs.length > 0) {
-        summaryMsg += `\n\nUNKNOWN SALESPEOPLE INPUTS: ${[...new Set(unknownInputs)].join(", ")}\n(Check spelling or add to 'SALESPEOPLE' sheet.)`;
+        summaryMsg += `\n\nUNKNOWN SALESPEOPLE INPUTS: ${[
+          ...new Set(unknownInputs),
+        ].join(', ')}\n(Check spelling or add to 'SALESPEOPLE' sheet.)`;
       }
 
       // Enhance summary message if analytics was skipped
       if (analyticsSkipped) {
-        summaryMsg += "\n\n⚠️ Analytics calculation was skipped due to time constraints. " +
-                      "Use 'Sales Tools > Recalculate MTD & Check Formats' and confirm analytics refresh when prompted.";
+        summaryMsg +=
+          '\n\n⚠️ Analytics calculation was skipped due to time constraints. ' +
+          "Use 'Sales Tools > Recalculate MTD & Check Formats' and confirm analytics refresh when prompted.";
       }
 
       // NOW show the complete message to user
       showCustomAlert(summaryTitle, summaryMsg);
 
-      Logger.log("Daily processing complete.");
+      Logger.log('Daily processing complete.');
     } catch (e) {
       logError('processDaily', e);
-      alertError("Error during daily processing: " + e.toString(), "Processing Failed");
+      alertError(
+        'Error during daily processing: ' + e.toString(),
+        'Processing Failed'
+      );
     }
   });
 }
@@ -1516,7 +1836,8 @@ function reapplyCF() {
   try {
     // Get configured colors and thresholds
     const LEADERBOARD_ZERO_BG_COLOR = getColor('leaderboardZeroMtdBgColor');
-    const LEADERBOARD_ZERO_BG_COLOR_UPPER = LEADERBOARD_ZERO_BG_COLOR.toUpperCase();
+    const LEADERBOARD_ZERO_BG_COLOR_UPPER =
+      LEADERBOARD_ZERO_BG_COLOR.toUpperCase();
     const DUPLICATE_FILL_COLOR = getColor('duplicateStockFillColor');
     const DUPLICATE_TEXT_COLOR = getColor('duplicateStockTextColor');
     const paceThresholds = getPaceThresholds();
@@ -1528,14 +1849,19 @@ function reapplyCF() {
     let rulesToKeep = [];
 
     const now = new Date();
-    const { daysElapsed, totalDays } = memoizedGetSellingDays(now.getFullYear(), now.getMonth());
+    const { daysElapsed, totalDays } = memoizedGetSellingDays(
+      now.getFullYear(),
+      now.getMonth()
+    );
     const paceBase = totalDays > 0 ? `($Q2/${daysElapsed}*${totalDays})` : null;
 
     const managedLeaderboardBlueRuleSignature = {
-      formula: "=1=1",
+      formula: '=1=1',
       background: LEADERBOARD_ZERO_BG_COLOR_UPPER,
     };
-    const PACE_COLORS_UPPER = ["#70AD47", "#FFEE32", "#C00000"].map((c) => c.toUpperCase());
+    const PACE_COLORS_UPPER = ['#70AD47', '#FFEE32', '#C00000'].map((c) =>
+      c.toUpperCase()
+    );
 
     // Filter out existing rules that should be replaced
     existingRules.forEach((rule) => {
@@ -1543,7 +1869,7 @@ function reapplyCF() {
       const ranges = rule.getRanges();
 
       // Check if any range in this rule intersects with Leaderboard columns (P, Q, R -> 16, 17, 18)
-      const intersectsLeaderboard = ranges.some(range => {
+      const intersectsLeaderboard = ranges.some((range) => {
         const startCol = range.getColumn();
         const endCol = range.getLastColumn();
         // Check intersection with columns 16, 17, 18 (P, Q, R)
@@ -1552,22 +1878,40 @@ function reapplyCF() {
 
       if (intersectsLeaderboard) {
         const bc = rule.getBooleanCondition();
-        if (bc && bc.getCriteriaType() === SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA) {
+        if (
+          bc &&
+          bc.getCriteriaType() === SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA
+        ) {
           const currentFormulaFull = bc.getCriteriaValues()[0].toString();
-          const currentFormulaNormalized = currentFormulaFull.replace(/\s+/g, "");
-          const ruleBg = bc.getBackground() ? bc.getBackground().toUpperCase() : null;
+          const currentFormulaNormalized = currentFormulaFull.replace(
+            /\s+/g,
+            ''
+          );
+          const ruleBg = bc.getBackground()
+            ? bc.getBackground().toUpperCase()
+            : null;
 
           // Check for "Blue" zero-sales rule
-          if (currentFormulaNormalized === managedLeaderboardBlueRuleSignature.formula &&
-              ruleBg === managedLeaderboardBlueRuleSignature.background) {
+          if (
+            currentFormulaNormalized ===
+              managedLeaderboardBlueRuleSignature.formula &&
+            ruleBg === managedLeaderboardBlueRuleSignature.background
+          ) {
             shouldRemove = true;
           }
 
           // Check for Pace rules (Green, Yellow, Red)
           // Identify by color AND formula content (referencing column Q)
-          if (PACE_COLORS_UPPER.includes(ruleBg) && currentFormulaNormalized.includes("$Q")) {
+          if (
+            PACE_COLORS_UPPER.includes(ruleBg) &&
+            currentFormulaNormalized.includes('$Q')
+          ) {
             shouldRemove = true;
-            Logger.log(`Removing old pace rule: ${currentFormulaFull} on range ${ranges.map(r => r.getA1Notation()).join(',')}`);
+            Logger.log(
+              `Removing old pace rule: ${currentFormulaFull} on range ${ranges
+                .map((r) => r.getA1Notation())
+                .join(',')}`
+            );
           }
         }
       }
@@ -1591,51 +1935,117 @@ function reapplyCF() {
           }
         }
       } else {
-        Logger.log(`RANGES.mtd ("${RANGES.mtd}") is not defined or invalid. Defaulting to standard pace rules.`);
+        Logger.log(
+          `RANGES.mtd ("${RANGES.mtd}") is not defined or invalid. Defaulting to standard pace rules.`
+        );
         allMtdAreZero = false;
       }
     } catch (e) {
-      logWarning('reapplyCF', 'Error reading MTD values for CF logic. Defaulting to standard pace rules.', { error: e.toString() });
+      logWarning(
+        'reapplyCF',
+        'Error reading MTD values for CF logic. Defaulting to standard pace rules.',
+        { error: e.toString() }
+      );
       allMtdAreZero = false;
     }
 
     const cfLeaderboardRange = todaySheet.getRange(RANGES.leaderboard);
 
     if (allMtdAreZero) {
-      Logger.log("All MTD are zero. Applying configured background to leaderboard.");
-      newRules.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied(managedLeaderboardBlueRuleSignature.formula).setBackground(LEADERBOARD_ZERO_BG_COLOR).setRanges([cfLeaderboardRange]).build());
+      Logger.log(
+        'All MTD are zero. Applying configured background to leaderboard.'
+      );
+      newRules.push(
+        SpreadsheetApp.newConditionalFormatRule()
+          .whenFormulaSatisfied(managedLeaderboardBlueRuleSignature.formula)
+          .setBackground(LEADERBOARD_ZERO_BG_COLOR)
+          .setRanges([cfLeaderboardRange])
+          .build()
+      );
     } else {
-      Logger.log("MTD sales detected or error in MTD check. Applying standard pace conditional formatting.");
+      Logger.log(
+        'MTD sales detected or error in MTD check. Applying standard pace conditional formatting.'
+      );
       if (totalDays > 0 && paceBase) {
         newRules.push(
-          SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied(`=${paceBase}>=${paceThresholds.green}`).setBackground(PACE_COLORS_UPPER[0]).setRanges([cfLeaderboardRange]).build(), // Green
-          SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied(`=AND(${paceBase}>=${paceThresholds.yellow},${paceBase}<${paceThresholds.green})`).setBackground(PACE_COLORS_UPPER[1]).setRanges([cfLeaderboardRange]).build(), // Yellow
-          SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied(`=${paceBase}<${paceThresholds.yellow}`).setBackground(PACE_COLORS_UPPER[2]).setRanges([cfLeaderboardRange]).build() // Red
+          SpreadsheetApp.newConditionalFormatRule()
+            .whenFormulaSatisfied(`=${paceBase}>=${paceThresholds.green}`)
+            .setBackground(PACE_COLORS_UPPER[0])
+            .setRanges([cfLeaderboardRange])
+            .build(), // Green
+          SpreadsheetApp.newConditionalFormatRule()
+            .whenFormulaSatisfied(
+              `=AND(${paceBase}>=${paceThresholds.yellow},${paceBase}<${paceThresholds.green})`
+            )
+            .setBackground(PACE_COLORS_UPPER[1])
+            .setRanges([cfLeaderboardRange])
+            .build(), // Yellow
+          SpreadsheetApp.newConditionalFormatRule()
+            .whenFormulaSatisfied(`=${paceBase}<${paceThresholds.yellow}`)
+            .setBackground(PACE_COLORS_UPPER[2])
+            .setRanges([cfLeaderboardRange])
+            .build() // Red
         );
       } else {
-        Logger.log("Cannot apply leaderboard pace CF: Total selling days is zero or paceBase is null.");
+        Logger.log(
+          'Cannot apply leaderboard pace CF: Total selling days is zero or paceBase is null.'
+        );
       }
     }
 
     const todayNewCarRange = todaySheet.getRange(RANGES.todayNewCarDataRange);
     const todayUsedCarRange = todaySheet.getRange(RANGES.todayUsedCarDataRange);
 
-    newRules.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied("=COUNTIF($E$2:$E$101,$E2)>1").setFontColor(DUPLICATE_TEXT_COLOR).setBackground(DUPLICATE_FILL_COLOR).setRanges([todayNewCarRange]).build());
-    newRules.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied("=COUNTIF($L$2:$L$101,$L2)>1").setFontColor(DUPLICATE_TEXT_COLOR).setBackground(DUPLICATE_FILL_COLOR).setRanges([todayUsedCarRange]).build());
-    newRules.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=COUNTIF(INDIRECT("DEPOSITS!G:G"),$E2)>0').setFontColor(DUPLICATE_TEXT_COLOR).setBackground(DUPLICATE_FILL_COLOR).setRanges([todayNewCarRange]).build());
-    newRules.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=COUNTIF(INDIRECT("DEPOSITS!G:G"),$L2)>0').setFontColor(DUPLICATE_TEXT_COLOR).setBackground(DUPLICATE_FILL_COLOR).setRanges([todayUsedCarRange]).build());
+    newRules.push(
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied('=COUNTIF($E$2:$E$101,$E2)>1')
+        .setFontColor(DUPLICATE_TEXT_COLOR)
+        .setBackground(DUPLICATE_FILL_COLOR)
+        .setRanges([todayNewCarRange])
+        .build()
+    );
+    newRules.push(
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied('=COUNTIF($L$2:$L$101,$L2)>1')
+        .setFontColor(DUPLICATE_TEXT_COLOR)
+        .setBackground(DUPLICATE_FILL_COLOR)
+        .setRanges([todayUsedCarRange])
+        .build()
+    );
+    newRules.push(
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied('=COUNTIF(INDIRECT("DEPOSITS!G:G"),$E2)>0')
+        .setFontColor(DUPLICATE_TEXT_COLOR)
+        .setBackground(DUPLICATE_FILL_COLOR)
+        .setRanges([todayNewCarRange])
+        .build()
+    );
+    newRules.push(
+      SpreadsheetApp.newConditionalFormatRule()
+        .whenFormulaSatisfied('=COUNTIF(INDIRECT("DEPOSITS!G:G"),$L2)>0')
+        .setFontColor(DUPLICATE_TEXT_COLOR)
+        .setBackground(DUPLICATE_FILL_COLOR)
+        .setRanges([todayUsedCarRange])
+        .build()
+    );
 
     setCFRulesSheet(todaySheet, newRules);
-    toastInfo("Conditional formatting updated for Leaderboard and Data Entry.", "CF Updated");
+    toastInfo(
+      'Conditional formatting updated for Leaderboard and Data Entry.',
+      'CF Updated'
+    );
   } catch (e) {
     logError('reapplyCF', e);
-    alertError("Error reapplying CF: " + e.toString(), "CF Error");
+    alertError('Error reapplying CF: ' + e.toString(), 'CF Error');
   }
 }
 
 function recalcMtdFromMonthly() {
   withScriptLock(() => {
-    toastInfo("Recalculating MTD & checking 'MONTHLY' sheet formats...", "Working");
+    toastInfo(
+      "Recalculating MTD & checking 'MONTHLY' sheet formats...",
+      'Working'
+    );
     let totalSalespersonErrors = 0;
 
     try {
@@ -1652,49 +2062,77 @@ function recalcMtdFromMonthly() {
       if (lastRowMonthly < 2) {
         todaySheet.getRange(RANGES.mtd).clearContent();
         reapplyCF();
-        toastInfo("MTD Cleared. No data in 'MONTHLY' to recalculate.", "Recalc Info");
+        toastInfo(
+          "MTD Cleared. No data in 'MONTHLY' to recalculate.",
+          'Recalc Info'
+        );
         return;
       }
 
       const { aliasMap } = getSalespersonMaps();
-      const monthlyValues = monthlySheet.getRange(2, 1, lastRowMonthly - 1, maxColsMonthly).getValues();
-      toastInfo("Reading MONTHLY sheet data...", "Working (1/6)");
+      const monthlyValues = monthlySheet
+        .getRange(2, 1, lastRowMonthly - 1, maxColsMonthly)
+        .getValues();
+      toastInfo('Reading MONTHLY sheet data...', 'Working (1/6)');
 
-      const salespersonErrorRowsFound = applyMonthlyRowFormatting(monthlySheet, monthlyValues, 2, aliasMap);
+      const salespersonErrorRowsFound = applyMonthlyRowFormatting(
+        monthlySheet,
+        monthlyValues,
+        2,
+        aliasMap
+      );
       totalSalespersonErrors = salespersonErrorRowsFound.length;
-      toastInfo("Applying formatting and checking for errors...", "Working (2/6)");
+      toastInfo(
+        'Applying formatting and checking for errors...',
+        'Working (2/6)'
+      );
 
-      const allMonthlyContent = monthlySheet.getRange(1, 1, lastRowMonthly, maxColsMonthly).getValues();
-      const mergedRanges = monthlySheet.getRange(1, 1, lastRowMonthly, 1).getMergedRanges();
+      const allMonthlyContent = monthlySheet
+        .getRange(1, 1, lastRowMonthly, maxColsMonthly)
+        .getValues();
+      const mergedRanges = monthlySheet
+        .getRange(1, 1, lastRowMonthly, 1)
+        .getMergedRanges();
       let actualDataRows = [];
       const dateHeaderRows = mergedRanges
-        .filter((mr) => mr.getRow() > 0 && mr.getColumn() === 1 && mr.getWidth() >= 14)
+        .filter(
+          (mr) => mr.getRow() > 0 && mr.getColumn() === 1 && mr.getWidth() >= 14
+        )
         .map((mr) => mr.getRow())
         .sort((a, b) => a - b);
-      toastInfo("Identifying date sections...", "Working (3/6)");
+      toastInfo('Identifying date sections...', 'Working (3/6)');
 
       if (dateHeaderRows.length > 0) {
         let startDataRowIdx = dateHeaderRows[0];
         for (let i = 1; i < dateHeaderRows.length; i++) {
           let endDataRowIdx = dateHeaderRows[i] - 1;
           if (startDataRowIdx < endDataRowIdx) {
-            actualDataRows = actualDataRows.concat(allMonthlyContent.slice(startDataRowIdx, endDataRowIdx));
+            actualDataRows = actualDataRows.concat(
+              allMonthlyContent.slice(startDataRowIdx, endDataRowIdx)
+            );
           }
           startDataRowIdx = dateHeaderRows[i];
         }
         if (startDataRowIdx < lastRowMonthly) {
-          actualDataRows = actualDataRows.concat(allMonthlyContent.slice(startDataRowIdx));
+          actualDataRows = actualDataRows.concat(
+            allMonthlyContent.slice(startDataRowIdx)
+          );
         }
       } else {
-        Logger.log("No distinct date headers found. Reading all rows from row 2 for MTD.");
+        Logger.log(
+          'No distinct date headers found. Reading all rows from row 2 for MTD.'
+        );
         if (lastRowMonthly > 1) actualDataRows = monthlyValues;
       }
 
-      toastInfo("Extracting sales data...", "Working (4/6)");
+      toastInfo('Extracting sales data...', 'Working (4/6)');
       if (!actualDataRows.length) {
         todaySheet.getRange(RANGES.mtd).clearContent();
         reapplyCF();
-        toastInfo("MTD Cleared. No data rows found in 'MONTHLY' after filtering headers.", "Recalc Info");
+        toastInfo(
+          "MTD Cleared. No data rows found in 'MONTHLY' after filtering headers.",
+          'Recalc Info'
+        );
         return;
       }
 
@@ -1702,42 +2140,54 @@ function recalcMtdFromMonthly() {
         { fiIdx: 2, saleIdx: 6 },
         { fiIdx: 9, saleIdx: 13 },
       ];
-      const { counts: countsByFullName } = tallyCounts(actualDataRows, aliasMap, sidesToTally);
+      const { counts: countsByFullName } = tallyCounts(
+        actualDataRows,
+        aliasMap,
+        sidesToTally
+      );
 
       const lbRange = todaySheet.getRange(RANGES.leaderboard);
       const lbValues = lbRange.getValues();
       lbValues.forEach((r) => {
         r[1] = countsByFullName[r[0]] || 0;
       });
-      lbValues.sort((a, b) => (Number(b[1]) || 0) - (Number(a[1]) || 0) || (Number(b[2]) || 0) - (Number(a[2]) || 0));
+      lbValues.sort(
+        (a, b) =>
+          (Number(b[1]) || 0) - (Number(a[1]) || 0) ||
+          (Number(b[2]) || 0) - (Number(a[2]) || 0)
+      );
       lbRange.setValues(lbValues);
-      todaySheet.getRange(RANGES.mtd).setNumberFormat("0.#");
-      toastInfo("Updating leaderboard counts...", "Working (5/6)");
+      todaySheet.getRange(RANGES.mtd).setNumberFormat('0.#');
+      toastInfo('Updating leaderboard counts...', 'Working (5/6)');
       reapplyCF();
-      toastInfo("Reapplying conditional formatting...", "Working (6/6)");
+      toastInfo('Reapplying conditional formatting...', 'Working (6/6)');
 
-      toastInfo(`MTD recalculated. Found ${totalSalespersonErrors} salesperson code errors in 'MONTHLY'. Non-delivered deals also highlighted.`, "Recalc & Format Complete", 5);
+      toastInfo(
+        `MTD recalculated. Found ${totalSalespersonErrors} salesperson code errors in 'MONTHLY'. Non-delivered deals also highlighted.`,
+        'Recalc & Format Complete',
+        5
+      );
       // === NEW: Analytics Prompt and Execution ===
       // Get UI reference
       const ui = SpreadsheetApp.getUi();
 
       // Prompt user to refresh analytics
       const analyticsResponse = ui.alert(
-        "Update Monthly Analytics?",
-        "MTD recalculation complete!\n\n" +
-        "Would you like to refresh the monthly analytics now?\n\n" +
-        "This will update the comprehensive sales metrics in columns S-X " +
-        "of the MONTHLY sheet, including:\n" +
-        "• Total delivered units (new/used breakdown)\n" +
-        "• Per-salesperson sales counts\n" +
-        "• Team performance metrics\n\n" +
-        "This typically takes 5-10 seconds.",
+        'Update Monthly Analytics?',
+        'MTD recalculation complete!\n\n' +
+          'Would you like to refresh the monthly analytics now?\n\n' +
+          'This will update the comprehensive sales metrics in columns S-X ' +
+          'of the MONTHLY sheet, including:\n' +
+          '• Total delivered units (new/used breakdown)\n' +
+          '• Per-salesperson sales counts\n' +
+          '• Team performance metrics\n\n' +
+          'This typically takes 5-10 seconds.',
         ui.ButtonSet.YES_NO
       );
 
       if (analyticsResponse === ui.Button.YES) {
         try {
-          toastInfo("Refreshing analytics...", "Working", 5);
+          toastInfo('Refreshing analytics...', 'Working', 5);
 
           // Call the internal analytics helper (imported from sales_analytics.js)
           const analyticsResult = refreshAnalyticsInternal(sheets);
@@ -1745,54 +2195,66 @@ function recalcMtdFromMonthly() {
           if (analyticsResult.success) {
             // Show summary dialog
             const analytics = analyticsResult.data;
-            const topPerformer = analytics.salespersonMetrics[0] || { displayCode: "N/A", totalSales: 0 };
+            const topPerformer = analytics.salespersonMetrics[0] || {
+              displayCode: 'N/A',
+              totalSales: 0,
+            };
 
             ui.alert(
-              "Update Complete",
-              "MTD and Analytics have been updated successfully!\n\n" +
-              "MTD Recalculation:\n" +
-              `• Found ${totalSalespersonErrors} salesperson code errors in MONTHLY\n` +
-              "• Non-delivered deals highlighted\n" +
-              "• Leaderboard updated\n\n" +
-              "Monthly Analytics:\n" +
-              `• Total Delivered: ${analytics.totals.delivered || 0}\n` +
-              `• New: ${analytics.totals.newDelivered || 0}\n` +
-              `• Used: ${analytics.totals.usedDelivered || 0}\n` +
-              `• Top Performer: ${topPerformer.displayCode} (${topPerformer.totalSales} units)`,
+              'Update Complete',
+              'MTD and Analytics have been updated successfully!\n\n' +
+                'MTD Recalculation:\n' +
+                `• Found ${totalSalespersonErrors} salesperson code errors in MONTHLY\n` +
+                '• Non-delivered deals highlighted\n' +
+                '• Leaderboard updated\n\n' +
+                'Monthly Analytics:\n' +
+                `• Total Delivered: ${analytics.totals.delivered || 0}\n` +
+                `• New: ${analytics.totals.newDelivered || 0}\n` +
+                `• Used: ${analytics.totals.usedDelivered || 0}\n` +
+                `• Top Performer: ${topPerformer.displayCode} (${topPerformer.totalSales} units)`,
               ui.ButtonSet.OK
             );
 
-            toastInfo("MTD and Analytics update complete!", "Complete", 5);
+            toastInfo('MTD and Analytics update complete!', 'Complete', 5);
           } else {
             // Analytics failed but MTD succeeded
             alertError(
-              "Analytics Update Failed\n\n" +
-              "MTD recalculation completed successfully, but analytics " +
-              "update encountered an error:\n\n" +
-              (analyticsResult.error || "Unknown error") + "\n\n" +
-              "Your MTD and formatting updates have been saved.\n\n" +
-              "You can refresh analytics manually later via the menu."
+              'Analytics Update Failed\n\n' +
+                'MTD recalculation completed successfully, but analytics ' +
+                'update encountered an error:\n\n' +
+                (analyticsResult.error || 'Unknown error') +
+                '\n\n' +
+                'Your MTD and formatting updates have been saved.\n\n' +
+                'You can refresh analytics manually later via the menu.'
             );
-            toastInfo("MTD complete. Analytics update failed.", "Warning", 5);
+            toastInfo('MTD complete. Analytics update failed.', 'Warning', 5);
           }
         } catch (analyticsError) {
           // Log but don't fail the whole operation since MTD succeeded
-          Logger.log("Analytics refresh error after MTD: " + analyticsError);
+          Logger.log('Analytics refresh error after MTD: ' + analyticsError);
           alertError(
-            "Analytics update failed: " + analyticsError.message + "\n\n" +
-            "MTD recalculation was successful."
+            'Analytics update failed: ' +
+              analyticsError.message +
+              '\n\n' +
+              'MTD recalculation was successful.'
           );
-          toastInfo("MTD complete. Analytics update failed.", "Warning", 5);
+          toastInfo('MTD complete. Analytics update failed.', 'Warning', 5);
         }
       } else {
         // User declined analytics refresh
-        toastInfo("MTD recalculation complete. Analytics not updated.", "Complete", 5);
+        toastInfo(
+          'MTD recalculation complete. Analytics not updated.',
+          'Complete',
+          5
+        );
       }
       // === END NEW CODE ===
-
     } catch (e) {
       logError('recalcMtdFromMonthly', e);
-      alertError("Error during MTD recalculation: " + e.toString(), "Recalc Failed");
+      alertError(
+        'Error during MTD recalculation: ' + e.toString(),
+        'Recalc Failed'
+      );
     }
   });
 }
@@ -1800,13 +2262,23 @@ function recalcMtdFromMonthly() {
 function rolloverMonth() {
   withScriptLock(() => {
     const ui = SpreadsheetApp.getUi();
-    const response = ui.alert("Confirm Month Rollover", "This will:\n" + '1. Archive the current "MONTHLY" sheet (e.g., as "5/25").\n' + "2. Copy the final leaderboard to the archive.\n" + '3. Clear the "MONTHLY" sheet for the new month.\n' + '4. Clear MTD sales (Column Q) on the "TODAY" sheet.\n' + '5. Recalculate 3-Month Rolling Averages (Column R) on "TODAY".\n\n' + "Are you sure you want to proceed?", ui.ButtonSet.YES_NO);
+    const response = ui.alert(
+      'Confirm Month Rollover',
+      'This will:\n' +
+        '1. Archive the current "MONTHLY" sheet (e.g., as "5/25").\n' +
+        '2. Copy the final leaderboard to the archive.\n' +
+        '3. Clear the "MONTHLY" sheet for the new month.\n' +
+        '4. Clear MTD sales (Column Q) on the "TODAY" sheet.\n' +
+        '5. Recalculate 3-Month Rolling Averages (Column R) on "TODAY".\n\n' +
+        'Are you sure you want to proceed?',
+      ui.ButtonSet.YES_NO
+    );
     if (response !== ui.Button.YES) {
-      toastInfo("Rollover cancelled.", "Cancelled");
+      toastInfo('Rollover cancelled.', 'Cancelled');
       return;
     }
 
-    toastInfo("Starting month rollover...", "Working (1/5)");
+    toastInfo('Starting month rollover...', 'Working (1/5)');
     try {
       const sheets = getSheets();
       const currentDate = new Date();
@@ -1816,16 +2288,20 @@ function rolloverMonth() {
         archiveMonth = 11;
         archiveYear--;
       }
-      const archiveSheetName = `${archiveMonth + 1}/${String(archiveYear % 100).padStart(2, "0")}`;
+      const archiveSheetName = `${archiveMonth + 1}/${String(
+        archiveYear % 100
+      ).padStart(2, '0')}`;
 
       if (SS.getSheetByName(archiveSheetName)) {
-        alertError(`Archive "${archiveSheetName}" already exists. Rollover aborted.`);
+        alertError(
+          `Archive "${archiveSheetName}" already exists. Rollover aborted.`
+        );
         return;
       }
 
       // Recalculate final analytics before archiving for accuracy
       try {
-        Logger.log("Recalculating final analytics for archive...");
+        Logger.log('Recalculating final analytics for archive...');
         invalidateAnalyticsCache();
         const finalAnalytics = calculateMonthlyAnalytics();
         if (finalAnalytics) {
@@ -1833,7 +2309,7 @@ function rolloverMonth() {
           SpreadsheetApp.flush(); // Ensure writes complete before copy
         }
       } catch (e) {
-        Logger.log("Pre-rollover analytics refresh failed: " + e);
+        Logger.log('Pre-rollover analytics refresh failed: ' + e);
         // Continue with rollover even if analytics fail
       }
 
@@ -1842,10 +2318,18 @@ function rolloverMonth() {
         archiveSheet.setName(archiveSheetName);
         archiveSheet.setTabColor(null);
         SpreadsheetApp.flush();
-        toastInfo(`"MONTHLY" archived as "${archiveSheetName}".`, "Working (2/5)");
+        toastInfo(
+          `"MONTHLY" archived as "${archiveSheetName}".`,
+          'Working (2/5)'
+        );
       } catch (e) {
-        logError('rolloverMonth', e, { operation: 'rename_archive', archiveName: archiveSheetName });
-        alertError(`Error renaming archive: ${e}. Try deleting partial archive.`);
+        logError('rolloverMonth', e, {
+          operation: 'rename_archive',
+          archiveName: archiveSheetName,
+        });
+        alertError(
+          `Error renaming archive: ${e}. Try deleting partial archive.`
+        );
         try {
           SS.deleteSheet(archiveSheet);
         } catch (delErr) {
@@ -1864,23 +2348,42 @@ function rolloverMonth() {
         .setFontFamilies(lbRangeToday.getFontFamilies())
         .setFontColors(lbRangeToday.getFontColors());
       [16, 17, 18].forEach((col) => archiveSheet.autoResizeColumn(col));
-      toastInfo("Leaderboard copied to archive.", "Working (3/5)");
+      toastInfo('Leaderboard copied to archive.', 'Working (3/5)');
 
       const lastRowMonthly = sheets.monthly.getLastRow();
       if (lastRowMonthly > 1) {
-        sheets.monthly.getRange(2, 1, lastRowMonthly - 1, sheets.monthly.getMaxColumns()).clear();
+        sheets.monthly
+          .getRange(2, 1, lastRowMonthly - 1, sheets.monthly.getMaxColumns())
+          .clear();
         sheets.monthly.setRowHeights(2, lastRowMonthly - 1, 21);
       }
-      sheets.monthly.getRange(1, 1, 51, 14).setBorder(null, null, null, null, null, null).setBorder(true, true, true, true, true, true, "#000000", SpreadsheetApp.BorderStyle.SOLID);
-      toastInfo(`"MONTHLY" sheet cleared.`, "Working (4/5)");
+      sheets.monthly
+        .getRange(1, 1, 51, 14)
+        .setBorder(null, null, null, null, null, null)
+        .setBorder(
+          true,
+          true,
+          true,
+          true,
+          true,
+          true,
+          '#000000',
+          SpreadsheetApp.BorderStyle.SOLID
+        );
+      toastInfo(`"MONTHLY" sheet cleared.`, 'Working (4/5)');
 
       sheets.today.getRange(RANGES.mtd).clearContent();
-      const leaderboardData = sheets.today.getRange(RANGES.leaderboard).getValues();
-      const avgValues = Array(leaderboardData.length).fill(null).map(() => [0]);
+      const leaderboardData = sheets.today
+        .getRange(RANGES.leaderboard)
+        .getValues();
+      const avgValues = Array(leaderboardData.length)
+        .fill(null)
+        .map(() => [0]);
       let tempDate = new Date(currentDate);
       for (let i = 0; i < leaderboardData.length; i++) {
         const currentFullName = leaderboardData[i][0];
-        let totalSales = 0, months = 0;
+        let totalSales = 0,
+          months = 0;
         let cursorDate = new Date(tempDate);
         for (let j = 0; j < 3; j++) {
           let loopYear = cursorDate.getFullYear();
@@ -1889,7 +2392,9 @@ function rolloverMonth() {
             loopM = 11;
             loopYear--;
           }
-          const prevArchiveName = `${loopM + 1}/${String(loopYear % 100).padStart(2, "0")}`;
+          const prevArchiveName = `${loopM + 1}/${String(
+            loopYear % 100
+          ).padStart(2, '0')}`;
           const prevSheet = SS.getSheetByName(prevArchiveName);
           if (prevSheet) {
             try {
@@ -1897,27 +2402,43 @@ function rolloverMonth() {
               const archiveEndRow = Math.max(2, archiveLastRow);
               const prevLbRange = `P2:R${archiveEndRow}`;
               const prevLbVals = prevSheet.getRange(prevLbRange).getValues();
-              const personRow = prevLbVals.find((row) => row[0] === currentFullName);
-              if (personRow && typeof personRow[1] === "number") {
+              const personRow = prevLbVals.find(
+                (row) => row[0] === currentFullName
+              );
+              if (personRow && typeof personRow[1] === 'number') {
                 totalSales += personRow[1];
                 months++;
               }
             } catch (e) {
-              logWarning('rolloverMonth', 'Error reading archive for average calculation', { archiveName: prevArchiveName, error: e.toString() });
+              logWarning(
+                'rolloverMonth',
+                'Error reading archive for average calculation',
+                { archiveName: prevArchiveName, error: e.toString() }
+              );
             }
           }
           cursorDate.setMonth(cursorDate.getMonth() - 1);
         }
         avgValues[i][0] = months > 0 ? roundHalf(totalSales / months) : 0;
       }
-      sheets.today.getRange(RANGES.avg).setValues(avgValues).setNumberFormat("0.#");
-      toastInfo("MTD cleared & Averages recalculated.", "Working (5/5)");
+      sheets.today
+        .getRange(RANGES.avg)
+        .setValues(avgValues)
+        .setNumberFormat('0.#');
+      toastInfo('MTD cleared & Averages recalculated.', 'Working (5/5)');
       reapplyCF();
       SpreadsheetApp.flush();
-      ui.alert("Month Rollover Complete!", `"${archiveSheetName}" created. "MONTHLY" & MTD reset. Averages updated.`, ui.ButtonSet.OK);
+      ui.alert(
+        'Month Rollover Complete!',
+        `"${archiveSheetName}" created. "MONTHLY" & MTD reset. Averages updated.`,
+        ui.ButtonSet.OK
+      );
     } catch (e) {
       logError('rolloverMonth', e);
-      alertError("Error during month rollover: " + e.toString(), "Rollover Failed");
+      alertError(
+        'Error during month rollover: ' + e.toString(),
+        'Rollover Failed'
+      );
     }
   });
 }
@@ -1925,8 +2446,6 @@ function rolloverMonth() {
 // ============================================================================
 // CONFIGURATION UI FUNCTIONS
 // ============================================================================
-
-
 
 // ============================================================================
 // MENU & INITIALIZATION
@@ -1941,43 +2460,47 @@ function onOpen() {
 
     // Check required sheets (keep your existing logic if you use it elsewhere)
     const hasAllSheets =
-      ss.getSheetByName("TODAY") &&
-      ss.getSheetByName("MONTHLY") &&
-      ss.getSheetByName("SALESPEOPLE") &&
-      ss.getSheetByName("DEPOSITS");
+      ss.getSheetByName('TODAY') &&
+      ss.getSheetByName('MONTHLY') &&
+      ss.getSheetByName('SALESPEOPLE') &&
+      ss.getSheetByName('DEPOSITS');
 
     const ui = SpreadsheetApp.getUi();
-    const menu = ui.createMenu("BDC Appts");
+    const menu = ui.createMenu('BDC Appts');
 
     // 1. Top Item: New Appointment
-    menu.addItem("New Appointment…", "showNewAppointmentSidebar")
-        .addSeparator();
+    menu
+      .addItem('New Appointment…', 'showNewAppointmentSidebar')
+      .addSeparator();
 
     // 2. Round Robin Submenu (Admin Tools)
-    const rrMenu = ui.createMenu("Round Robin");
-    rrMenu.addItem("Reassign to next available sales", "menuSkipAndReassignSelectedRow")
-          .addSeparator()
-          .addItem("Rewind Pointer (Undo)", "menuRewindPointer")
-          .addSeparator()
-          .addItem("Reset Round Robin pointer to top", "menuResetPointer");
+    const rrMenu = ui.createMenu('Round Robin');
+    rrMenu
+      .addItem(
+        'Reassign to next available sales',
+        'menuSkipAndReassignSelectedRow'
+      )
+      .addSeparator()
+      .addItem('Rewind Pointer (Undo)', 'menuRewindPointer')
+      .addSeparator()
+      .addItem('Reset Round Robin pointer to top', 'menuResetPointer');
 
-    menu.addSubMenu(rrMenu)
-        .addSeparator();
+    menu.addSubMenu(rrMenu).addSeparator();
 
     // 3. SalesLog Tools (admin) Submenu
-    const analyticsMenu = ui.createMenu("SalesLog Tools (admin)");
-    analyticsMenu.addItem("Log Yesterday's Sales", "processDaily")
-                 .addSeparator()
-                 .addItem("Recalculate MTD & Check Formats", "recalcMtdFromMonthly")
-                 .addSeparator()
-                 .addItem("Start New Month (Rollover)", "rolloverMonth")
-                 .addSeparator()
-                 .addItem("Refresh Leaderboard", "manualRefreshLeaderboard");
+    const analyticsMenu = ui.createMenu('SalesLog Tools (admin)');
+    analyticsMenu
+      .addItem("Log Yesterday's Sales", 'processDaily')
+      .addSeparator()
+      .addItem('Recalculate MTD & Check Formats', 'recalcMtdFromMonthly')
+      .addSeparator()
+      .addItem('Start New Month (Rollover)', 'rolloverMonth')
+      .addSeparator()
+      .addItem('Refresh Leaderboard', 'manualRefreshLeaderboard');
 
     menu.addSubMenu(analyticsMenu);
 
     menu.addToUi();
-
   } catch (e) {
     // Log error with full context for debugging
     try {
@@ -1993,7 +2516,9 @@ function onOpen() {
       );
     } catch (toastError) {
       try {
-        logWarning('onOpen', 'Could not display error toast', { error: toastError.toString() });
+        logWarning('onOpen', 'Could not display error toast', {
+          error: toastError.toString(),
+        });
       } catch (_) {}
     }
   } finally {
