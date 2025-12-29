@@ -2525,12 +2525,3 @@ function onOpen() {
     Logger.log('[onOpen] Trigger execution completed');
   }
 }
-
-/**
- * Appends Round Robin items to an existing menu.
- * Keeps everything in one place for the desk.
- * @deprecated - Merged directly into onOpen for custom layout
- */
-function addRoundRobinMenuItems_(menu) {
-  // Deprecated/Unused now
-}

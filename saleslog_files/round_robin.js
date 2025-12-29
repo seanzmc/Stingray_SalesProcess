@@ -1,3 +1,18 @@
+/**
+ * Round Robin Logic for Sales Log Pro
+ *
+ * REQUIRED INSTALLABLE TRIGGERS:
+ * 1. "On form submit" -> handleFormSubmit (for APPOINTMENTS sheet)
+ * 2. "On edit"        -> handleAppointmentEdit (for APPOINTMENTS sheet manual edits)
+ * 3. "On edit"        -> handleRRStateEdit (for RR_STATE sheet - Audit Pointer Edits)
+ * 4. "On edit"        -> handleRosterEdit (for RR_ROSTER sheet - Audit Roster Changes)
+ *
+ * NOTE ON LISTS:
+ * - RR_ROSTER = Salespeople who RECEIVE appointments (Active + Eligible)
+ * - RR_USERS  = BDC/Desk staff who CREATE appointments ("Assigned By")
+ * These lists are distinct and should not be consolidated.
+ */
+
 /***** CONFIG *****/
 const SHEET_APPTS = 'APPOINTMENTS';
 const SHEET_ROSTER = 'RR_ROSTER';
@@ -18,89 +33,175 @@ const CELL_POINTER = 'B2';
 const SHEET_AUDIT = 'RR_AUDIT';
 
 /***** TRIGGERS *****/
-// If using Google Form → install an "On form submit" trigger for this.
-function onFormSubmit(e) {
-  const sheet = e.range.getSheet();
-  if (sheet.getName() !== SHEET_APPTS) return;
 
-  const row = e.range.getRow();
-  assignRowAuto_(row);
+/**
+ * Handle form submission for new appointments.
+ * Must be bound to an installable "On form submit" trigger.
+ */
+function handleFormSubmit(e) {
+  try {
+    const sheet = e.range.getSheet();
+    if (sheet.getName() !== SHEET_APPTS) return;
+
+    const row = e.range.getRow();
+    assignRowAuto_(row);
+  } catch (err) {
+    logError('handleFormSubmit', err, {
+      range: e ? e.range.getA1Notation() : 'unknown',
+    });
+  }
 }
 
-// If allowing direct entry into APPOINTMENTS → install an "On edit" trigger for this.
-// RENAMED from 'onEdit' to prevent double-firing if a simple trigger also exists.
-// User MUST set up an installable Trigger for this function.
-function onEditInstallable(e) {
-  const sheet = e.range.getSheet();
-  if (sheet.getName() !== SHEET_APPTS) return;
+/**
+ * Handle manual edits to the APPOINTMENTS sheet.
+ * Must be bound to an installable "On edit" trigger.
+ */
+function handleAppointmentEdit(e) {
+  try {
+    const sheet = e.range.getSheet();
+    if (sheet.getName() !== SHEET_APPTS) return;
 
-  const row = e.range.getRow();
-  const col = e.range.getColumn();
+    const row = e.range.getRow();
+    const col = e.range.getColumn();
 
-  // Only react when user edits the input columns B/C/D OR the Assigned column E
-  if (![COL_APPT_DT, COL_CUST_NAME, COL_PHONE, COL_ASSIGNED].includes(col))
-    return;
+    // Only react when user edits the input columns B/C/D OR the Assigned column E
+    if (![COL_APPT_DT, COL_CUST_NAME, COL_PHONE, COL_ASSIGNED].includes(col))
+      return;
 
-  const appts = getApptsSheet_();
-  // We need safe access to the *new* value and potentially *old* value.
-  // getValues() is safer for the 'current' state of the row.
+    const appts = getApptsSheet_();
 
-  // CASE 1: MANUAL OVERRIDE (Column E changed)
-  if (col === COL_ASSIGNED) {
-    const newValue = e.value;
-    const oldValue = e.oldValue;
+    // CASE 1: MANUAL OVERRIDE (Column E changed)
+    if (col === COL_ASSIGNED) {
+      const newValue = e.value;
+      const oldValue = e.oldValue;
 
-    // Only log if it actually changed (though onEdit usually implies change)
-    // and if it wasn't just cleared (optional judgment, but let's log everything)
-    logRoundRobinAction_('Manual Override', {
-      row: row,
-      oldAssignee: oldValue || '(empty)',
-      newAssignee: newValue || '(empty)',
-      reason: 'User manual edit in sheet',
-    });
-    return;
+      // Only log if it actually changed
+      logRoundRobinAction_('Manual Override', {
+        row: row,
+        oldAssignee: oldValue || '(empty)',
+        newAssignee: newValue || '(empty)',
+        reason: 'User manual edit in sheet',
+      });
+      return;
+    }
+
+    // CASE 2: NEW INPUT (Check B/C/D for auto-assign trigger)
+    const values = appts.getRange(row, 1, 1, COL_ASSIGNED_BY).getValues()[0];
+
+    const apptDt = values[COL_APPT_DT - 1];
+    const name = values[COL_CUST_NAME - 1];
+    const phone = values[COL_PHONE - 1];
+    const assigned = values[COL_ASSIGNED - 1];
+
+    // If already assigned, do nothing (allows manual override)
+    if (assigned) return;
+
+    // If required fields present, auto-assign
+    if (apptDt && name && phone) {
+      assignRowAuto_(row);
+    }
+  } catch (err) {
+    logError('handleAppointmentEdit', err, { user: safeUserEmail_() });
   }
+}
 
-  // CASE 2: NEW INPUT (Check B/C/D for auto-assign trigger)
-  // Fetch row data to see if it's ready for auto-assignment
-  const values = appts.getRange(row, 1, 1, COL_ASSIGNED_BY).getValues()[0];
+/**
+ * Handle manual edits to the RR_STATE sheet (Pointer protection).
+ * Must be bound to an installable "On edit" trigger.
+ */
+function handleRRStateEdit(e) {
+  try {
+    const sheet = e.range.getSheet();
+    if (sheet.getName() !== SHEET_STATE) return;
 
-  const apptDt = values[COL_APPT_DT - 1];
-  const name = values[COL_CUST_NAME - 1];
-  const phone = values[COL_PHONE - 1];
-  const assigned = values[COL_ASSIGNED - 1];
+    const range = e.range;
+    const a1 = range.getA1Notation();
 
-  // If already assigned, do nothing (allows manual override)
-  if (assigned) return;
+    // Check if B2 (Pointer) was edited
+    if (
+      a1 === CELL_POINTER ||
+      (range.getRow() === 2 && range.getColumn() === 2)
+    ) {
+      const oldValue = e.oldValue;
+      const newValue = e.value;
+      const user = safeUserEmail_();
 
-  // If required fields present, auto-assign
-  if (apptDt && name && phone) {
-    assignRowAuto_(row);
+      logRoundRobinAction_('POINTER_MANUAL_EDIT', {
+        pointerBefore: oldValue || '?',
+        pointerAfter: newValue || '?',
+        user: user,
+        reason: 'Direct edit to RR_STATE',
+      });
+    }
+  } catch (err) {
+    logError('handleRRStateEdit', err);
+  }
+}
+
+/**
+ * Handle manual edits to the RR_ROSTER sheet (Audit eligibility changes).
+ * Must be bound to an installable "On edit" trigger.
+ */
+function handleRosterEdit(e) {
+  try {
+    const sheet = e.range.getSheet();
+    if (sheet.getName() !== SHEET_ROSTER) return;
+
+    const row = e.range.getRow();
+    const col = e.range.getColumn();
+
+    if (row < 2) return; // Header
+
+    // Col 2 = Active, Col 3 = Eligible (assuming A=Name, B=Active, C=Eligible)
+    if (col === 2 || col === 3) {
+      const repName = sheet.getRange(row, 1).getValue();
+      const actionType =
+        col === 2 ? 'ROSTER_ACTIVE_CHANGE' : 'ROSTER_ELIGIBLE_CHANGE';
+      const user = safeUserEmail_();
+
+      logRoundRobinAction_(actionType, {
+        rep: repName,
+        oldValue: e.oldValue,
+        newValue: e.value,
+        user: user,
+      });
+    }
+  } catch (err) {
+    logError('handleRosterEdit', err);
   }
 }
 
 /***** MENU ACTIONS *****/
 function menuSkipAndReassignSelectedRow() {
-  const row = getActiveRow_();
-  if (!row) return;
+  try {
+    const row = getActiveRow_();
+    if (!row) return;
 
-  // Use the CURRENT pointer (Next Up) to reassign.
-  // This implicitly advances the pointer by 1 (normal assignment behavior).
-
-  // Reassign (force) with 'Manual' mode
-  assignRowAuto_(row, {
-    forceReassign: true,
-    mode: 'Manual',
-    actionType: 'Reassign', // For audit log clarity
-  });
+    // Reassign (force) with 'Manual' mode
+    assignRowAuto_(row, {
+      forceReassign: true,
+      mode: 'Manual',
+      actionType: 'Reassign', // For audit log clarity
+    });
+  } catch (err) {
+    logError('menuSkipAndReassignSelectedRow', err);
+    SpreadsheetApp.getUi().alert('Error: ' + err.message);
+  }
 }
 
 function menuRewindPointer() {
-  const lock = LockService.getDocumentLock();
-  lock.waitLock(5000);
+  const lockResult = acquireScriptLockWithRetry();
+  if (!lockResult.success) {
+    SpreadsheetApp.getUi().alert('System busy. Please try again.');
+    logError('menuRewindPointer', 'Lock acquisition failed', {
+      attempts: lockResult.attempts,
+    });
+    return;
+  }
+
   try {
     const roster = getEligibleRoster_();
-    if (roster.length === 0) return; // Can't compute modulus correctly if empty
+    if (roster.length === 0) return;
 
     const current = getPointer_();
     // Logic: (current - 1) but wrap around if negative
@@ -120,21 +221,29 @@ function menuRewindPointer() {
     SpreadsheetApp.getActive().toast(
       `Pointer rewound to ${newPointer} (${roster[newPointer]})`
     );
+  } catch (err) {
+    logError('menuRewindPointer', err);
+    SpreadsheetApp.getUi().alert('Error: ' + err.message);
   } finally {
-    lock.releaseLock();
+    lockResult.lock.releaseLock();
   }
 }
 
 function menuResetPointer() {
-  // Optional: restrict by email/domain if you want.
-  const oldPointer = getPointer_();
-  setPointer_(0);
+  try {
+    const oldPointer = getPointer_();
+    setPointer_(0);
 
-  logRoundRobinAction_('Reset Pointer', {
-    pointerBefore: oldPointer,
-    pointerAfter: 0,
-    reason: 'Admin Reset',
-  });
+    logRoundRobinAction_('Reset Pointer', {
+      pointerBefore: oldPointer,
+      pointerAfter: 0,
+      reason: 'Admin Reset',
+    });
+    SpreadsheetApp.getActive().toast('Pointer reset to 0 (Spreadsheet Top)');
+  } catch (err) {
+    logError('menuResetPointer', err);
+    SpreadsheetApp.getUi().alert('Error: ' + err.message);
+  }
 }
 
 /***** CORE LOGIC *****/
@@ -144,8 +253,14 @@ function menuResetPointer() {
  * Uses centralized advanceRoundRobinPointer_ for logic & auditing.
  */
 function assignRowAuto_(row, opts = {}) {
-  const lock = LockService.getDocumentLock();
-  lock.waitLock(15000);
+  const lockResult = acquireScriptLockWithRetry();
+  if (!lockResult.success) {
+    // If we can't lock, we can't assign safely. Log it.
+    logError('assignRowAuto_', 'Lock acquisition failed - row not assigned', {
+      row: row,
+    });
+    return;
+  }
 
   try {
     const appts = getApptsSheet_();
@@ -154,13 +269,10 @@ function assignRowAuto_(row, opts = {}) {
     const rowRange = appts.getRange(row, 1, 1, COL_ASSIGNED_BY);
     const vals = rowRange.getValues()[0];
 
-    const apptDt = vals[COL_APPT_DT - 1];
     const name = vals[COL_CUST_NAME - 1];
     const phone = vals[COL_PHONE - 1];
 
-    // Must have the minimal appointment info
-    if (!apptDt || !name || !phone) return;
-
+    // Must have the minimal appointment info - reuse logic or stricter?
     // Check existing assignment
     const alreadyAssigned = vals[COL_ASSIGNED - 1];
     if (alreadyAssigned && !opts.forceReassign) return;
@@ -198,14 +310,19 @@ function assignRowAuto_(row, opts = {}) {
     appts.getRange(row, COL_ASSIGNED).setValue(assignee);
     appts.getRange(row, COL_MODE).setValue(opts.mode || 'Auto');
     appts.getRange(row, COL_ASSIGNED_BY).setValue(user);
+  } catch (err) {
+    logError('assignRowAuto_', err, { row: row, opts: opts });
   } finally {
-    lock.releaseLock();
+    lockResult.lock.releaseLock();
   }
 }
 
 function skipPointer_() {
-  const lock = LockService.getDocumentLock();
-  lock.waitLock(15000);
+  const lockResult = acquireScriptLockWithRetry();
+  if (!lockResult.success) {
+    logError('skipPointer_', 'Lock acquisition failed');
+    return;
+  }
 
   try {
     const roster = getEligibleRoster_();
@@ -216,8 +333,10 @@ function skipPointer_() {
       actionType: 'Skip',
       details: { reason: 'User requested skip' },
     });
+  } catch (err) {
+    logError('skipPointer_', err);
   } finally {
-    lock.releaseLock();
+    lockResult.lock.releaseLock();
   }
 }
 
@@ -276,21 +395,18 @@ function logRoundRobinAction_(action, detailsObj) {
 
     const now = new Date();
 
-    // Use system user for the 'User' column strictly
-    const user = safeUserEmail_();
+    // Use system user unless specifically passed in details (e.g. from manual edit handler)
+    const user = detailsObj.user || safeUserEmail_();
 
-    // If 'detailsObj.user' or 'detailsObj.creator' was passed (e.g. from Sidebar),
-    // keep it in the DETAILS object so it appears in column E, but NOT column B.
-    // We do NOT overwrite 'user' variable here.
-
-    // Format details as Key: Value string instead of JSON
+    // Format details as Key: Value string
     let detailsStr = '';
     if (detailsObj) {
-      // Filter out row as it's in Reference
-      const { row, ...rest } = detailsObj;
+      // Filter out row/user from details string if they are redundant,
+      // but 'row' is often put in Reference.
+      const { row, user: _u, ...rest } = detailsObj;
 
       detailsStr = Object.entries(rest)
-        .map(([k, v]) => `${k}: ${v}`)
+        .map(([k, v]) => `${k}=${v}`) // Changed to k=v for tighter format
         .join(' | ');
     }
 
@@ -298,8 +414,13 @@ function logRoundRobinAction_(action, detailsObj) {
 
     auditSheet.appendRow([now, user, action, reference, detailsStr]);
   } catch (e) {
-    console.error('Audit Log Failed', e);
-    // Don't block main flow if audit fails
+    // CRITCIAL: Log this failure so admins know Audit is broken.
+    // Do NOT throw since we don't want to break the transaction if possible.
+    logError('logRoundRobinAction_', 'Audit Log Failed', {
+      originalError: e.toString(),
+      action: action,
+      details: detailsObj,
+    });
   }
 }
 

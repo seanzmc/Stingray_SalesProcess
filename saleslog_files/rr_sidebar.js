@@ -7,12 +7,20 @@ function showNewAppointmentSidebar() {
 
 /**
  * Called by the sidebar to create + auto-assign an appointment.
- * payload = { apptIso: string, customerName: string, phone: string, notes?: string }
+ * payload = { apptIso: string, customerName: string, phone: string, notes?: string, assignedByName: string }
  */
 function createAppointmentFromSidebar(payload) {
-  const lock = LockService.getDocumentLock();
-  // Wait longer for lock to avoid contention issues
-  lock.waitLock(15000);
+  // Use robust lock with retry
+  const lockResult = acquireScriptLockWithRetry();
+
+  if (!lockResult.success) {
+    logError('createAppointmentFromSidebar', 'Lock timeout', { payload });
+    return {
+      ok: false,
+      message:
+        'System is busy (lock timeout). Please try again in a few seconds.',
+    };
+  }
 
   try {
     // Basic validation
@@ -31,7 +39,6 @@ function createAppointmentFromSidebar(payload) {
     }
 
     const ss = SpreadsheetApp.getActive();
-    // Use string literal to avoid scope issues
     const appts = ss.getSheetByName('APPOINTMENTS');
     if (!appts) throw new Error('Sheet "APPOINTMENTS" not found.');
 
@@ -68,8 +75,6 @@ function createAppointmentFromSidebar(payload) {
     // Write row to APPOINTMENTS
     const now = new Date();
 
-    // We already checked appts exists.
-    // Append to bottom or empty row? Use getLastRow() + 1
     const newRow = appts.getLastRow() + 1;
 
     // Columns: A=Created, B=ApptDt, C=Customer, D=Phone, E=Assigned, F=Mode, G=AssignedBy, H=Notes
@@ -89,6 +94,16 @@ function createAppointmentFromSidebar(payload) {
 
     appts.getRange(newRow, 1, 1, 8).setValues(rowValues);
 
+    // PERSISTENCE: Save "Assigned By" for next time
+    try {
+      PropertiesService.getUserProperties().setProperty(
+        'LAST_ASSIGNED_BY',
+        assignedByName
+      );
+    } catch (e) {
+      // Ignore persistence errors
+    }
+
     // Success response
     return {
       ok: true,
@@ -96,37 +111,39 @@ function createAppointmentFromSidebar(payload) {
       nextUp,
     };
   } catch (err) {
+    // Log server-side before returning
+    logError('createAppointmentFromSidebar', err, { payload });
+
     // Return error to client so it can be shown in the sidebar
     return {
       ok: false,
       message: err.message || String(err),
     };
   } finally {
-    lock.releaseLock();
+    lockResult.lock.releaseLock();
   }
 }
 
 // Re-export getAssignmentUsers for the client-side loader
 function getAssignmentUsers() {
-  // Use the internal helper (which we keep locally or define in round_robin.js?)
-  // The original file had getAssignmentUsers_ duplicated.
-  // Let's check if round_robin.js has `getAssignmentUsers_`.
-  // Checking previous file view... round_robin.js does NOT have getAssignmentUsers_.
-  // So we MUST keep getAssignmentUsers_ HERE, or move it to round_robin.js.
-  // The plan said "Remove... getAssignmentUsers_", implying it was a duplicate.
-  // Let me double check round_robin.js content from Step 8.
-  // Step 8 content for round_robin.js shows: getEligibleRoster_, getPointer_, setPointer_, normalizePointer_, getActiveRow_, safeUserEmail_, getApptsSheet_, getStateSheet_.
-  // It does NOT show getAssignmentUsers_.
-  // So I must KEEP getAssignmentUsers_ here or moving it to round_robin.js.
-  // I'll keep it here for now to avoid breaking the "Assigned By" dropdown,
-  // but I will rename it or keep it as is.
-  // Actually, to be safe and clean, I will keep it here but remove the other duplicates.
-  return getAssignmentUsers_();
+  const users = getAssignmentUsers_();
+  let lastSelected = '';
+  try {
+    lastSelected =
+      PropertiesService.getUserProperties().getProperty('LAST_ASSIGNED_BY') ||
+      '';
+  } catch (e) {
+    // ignore
+  }
+
+  return {
+    users: users,
+    lastSelected: lastSelected,
+  };
 }
 
 function getAssignmentUsers_() {
   const ss = SpreadsheetApp.getActive();
-  // We can use a constant if we want, or just literal string 'RR_USERS'
   const sheet = ss.getSheetByName('RR_USERS');
   if (!sheet) return [];
 
