@@ -82,6 +82,18 @@ function handleAppointmentEdit(e) {
         newAssignee: newValue || '(empty)',
         reason: 'User manual edit in sheet',
       });
+
+      // Update Mode to "Manual" if not already (idempotent, side-effect only)
+      try {
+        const modeRange = sheet.getRange(row, COL_MODE);
+        if (modeRange.getValue() !== 'Manual') {
+          modeRange.setValue('Manual');
+        }
+      } catch (modeErr) {
+        // Log error but do not fail the function; this is a secondary action
+        logError('handleAppointmentEdit_SetMode', modeErr, { row: row });
+      }
+
       return;
     }
 
