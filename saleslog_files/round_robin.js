@@ -127,16 +127,7 @@ function menuRewindPointer() {
   }
 }
 
-function menuMarkSelectedRowManual() {
-  const row = getActiveRow_();
-  if (!row) return;
-  const appts = getApptsSheet_();
 
-  appts.getRange(row, COL_MODE).setValue('Manual');
-
-  const user = safeUserEmail_();
-  logRoundRobinAction_('Mark Manual', { row: row, user: user });
-}
 
 function menuResetPointer() {
   // Optional: restrict by email/domain if you want.

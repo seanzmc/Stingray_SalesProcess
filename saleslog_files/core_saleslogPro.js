@@ -1959,8 +1959,6 @@ function onOpen() {
           .addSeparator()
           .addItem("Rewind Pointer (Undo)", "menuRewindPointer")
           .addSeparator()
-          .addItem("Mark selected row as Manual", "menuMarkSelectedRowManual")
-          .addSeparator()
           .addItem("Reset Round Robin pointer to top", "menuResetPointer");
 
     menu.addSubMenu(rrMenu)
