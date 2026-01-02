@@ -118,7 +118,7 @@ function handleAppointmentEdit(e) {
 }
 
 /**
- * Handle manual edits to the RR_STATE sheet (Pointer protection).
+ * Handle manual edits to the RR_STATE sheet (Pointer protection & Phone Up Override).
  * Must be bound to an installable "On edit" trigger.
  */
 function handleRRStateEdit(e) {
@@ -127,13 +127,11 @@ function handleRRStateEdit(e) {
     if (sheet.getName() !== SHEET_STATE) return;
 
     const range = e.range;
-    const a1 = range.getA1Notation();
+    const row = range.getRow();
+    const col = range.getColumn();
 
     // Check if B2 (Pointer) was edited
-    if (
-      a1 === CELL_POINTER ||
-      (range.getRow() === 2 && range.getColumn() === 2)
-    ) {
+    if (row === 2 && col === 2) {
       const oldValue = e.oldValue;
       const newValue = e.value;
       const user = safeUserEmail_();
@@ -143,6 +141,25 @@ function handleRRStateEdit(e) {
         pointerAfter: newValue || '?',
         user: user,
         reason: 'Direct edit to RR_STATE',
+      });
+    }
+
+    // Check if C2 (Phone Up Next Up) was edited
+    if (row === 2 && col === 3) {
+      const oldValue = e.oldValue === undefined ? '(blank)' : e.oldValue;
+      const newValue = e.value === undefined ? '(blank)' : e.value;
+
+      // Determine user: try e.user.email first, then ActiveUser
+      let user = '';
+      if (e.user && e.user.email) {
+        user = e.user.email;
+      } else {
+        user = Session.getActiveUser().getEmail();
+      }
+
+      logRoundRobinAction_('Manual Override - Phone Up', {
+        user: user,
+        Details: `Changed from ${oldValue} to ${newValue}`
       });
     }
   } catch (err) {
