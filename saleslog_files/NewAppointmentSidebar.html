@@ -1,223 +1,251 @@
 <!doctype html>
 <html>
 
-    <head>
-        <base target="_top">
-        <style>
-            body {
-                font-family: Calibri, sans-serif;
-                padding: 12px;
-            }
+<head>
+    <base target="_top">
+    <style>
+        body {
+            font-family: Calibri, sans-serif;
+            padding: 12px;
+        }
 
-            label {
-                display: block;
-                margin-top: 10px;
-                font-weight: 600;
-            }
+        label {
+            display: block;
+            margin-top: 10px;
+            font-weight: 600;
+        }
 
-            input,
-            textarea,
-            select {
-                width: 100%;
-                box-sizing: border-box;
-                padding: 8px;
-                margin-top: 6px;
-            }
+        input,
+        textarea,
+        select {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 8px;
+            margin-top: 6px;
+        }
 
-            button {
-                margin-top: 14px;
-                padding: 10px;
-                width: 100%;
-            }
+        button {
+            margin-top: 14px;
+            padding: 10px;
+            width: 100%;
+        }
 
-            .hint {
-                margin-top: 10px;
-                font-size: 12px;
-                opacity: 0.8;
-            }
+        .hint {
+            margin-top: 10px;
+            font-size: 12px;
+            opacity: 0.8;
+        }
 
-            .status {
-                margin-top: 12px;
-                padding: 10px;
-                border-radius: 6px;
-            }
+        .status {
+            margin-top: 12px;
+            padding: 10px;
+            border-radius: 6px;
+        }
 
-            .ok {
-                background: #e8f5e9;
-            }
+        .ok {
+            background: #e8f5e9;
+        }
 
-            .err {
-                background: #ffebee;
-            }
-        </style>
-    </head>
+        .err {
+            background: #ffebee;
+        }
+    </style>
+</head>
 
-    <body>
-        <h3>New Appointment</h3>
+<body>
+    <h3>New Appointment</h3>
 
-        <div id="form-container">
-            <label>Appointment date/time</label>
-            <input id="apptIso"
-                   type="datetime-local" />
+    <div id="form-container">
+        <label>Appointment date/time</label>
+        <input id="apptIso" type="datetime-local" />
 
-            <label>Customer name</label>
-            <input id="customerName"
-                   type="text"
-                   placeholder="John Smith" />
+        <label>Customer name</label>
+        <input id="customerName" type="text" placeholder="John Smith" />
 
-            <label>Phone</label>
-            <input id="phone"
-                   type="tel"
-                   placeholder="813-555-1234" />
+        <label>Phone</label>
+        <input id="phone" type="tel" placeholder="813-555-1234" />
 
-            <label>Assigned By</label>
-            <select id="assignedByName"></select>
+        <label>Assigned By</label>
+        <select id="assignedByName"></select>
 
-            <label>Notes (optional)</label>
-            <textarea id="notes"
-                      rows="3"
-                      placeholder="Anything helpful..."></textarea>
+        <label>Notes (optional)</label>
+        <textarea id="notes" rows="3" placeholder="Anything helpful..."></textarea>
 
-            <button id="submitBtn"
-                    type="button"
-                    onclick="submit()">Create & Assign</button>
-
-            <div class="hint">This will auto-assign to the next eligible salesperson and advance the queue.</div>
+        <div
+            style="margin-top: 20px; margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; background-color: #f9f9f9;">
+            <label style="margin-top:0;">Need a Salesperson?</label>
+            <button id="getLeadBtn" type="button" onclick="getPhoneLead()"
+                style="margin-top: 5px; background-color: #2196F3; color: white;">Get Phone Lead</button>
+            <div id="phoneLeadResult"
+                style="margin-top: 8px; font-weight: bold; color: #d32f2f; text-align: center; min-height: 20px;"></div>
         </div>
 
-        <div id="success-container"
-             style="display:none; text-align: center; margin-top: 40px;">
-            <div style="font-size: 48px; color: #4CAF50;">&#10004;</div>
-            <h3 style="margin: 10px 0; color: #333;">Appointment Created</h3>
-            <div id="success-details"
-                 style="margin: 20px 0; font-size: 14px; color: #555; line-height: 1.5;"></div>
-            <button onclick="google.script.host.close()">Close</button>
-        </div>
+        <button id="submitBtn" type="button" onclick="submit()">Create & Assign</button>
 
-        <div id="status"></div>
+        <div class="hint">This will auto-assign to the next eligible salesperson and advance the queue.</div>
+    </div>
 
-        <script>
-            // Helper to get local ISO string for datetime-local
-            function getLocalIsoString() {
-                const now = new Date();
-                // Round minutes to nearest 15
-                const minutes = now.getMinutes();
-                const remainder = minutes % 15;
-                if (remainder >= 8) {
-                    now.setMinutes(minutes + (15 - remainder));
-                } else {
-                    now.setMinutes(minutes - remainder);
-                }
-                now.setSeconds(0);
-                now.setMilliseconds(0);
+    <div id="success-container" style="display:none; text-align: center; margin-top: 40px;">
+        <div style="font-size: 48px; color: #4CAF50;">&#10004;</div>
+        <h3 style="margin: 10px 0; color: #333;">Appointment Created</h3>
+        <div id="success-details" style="margin: 20px 0; font-size: 14px; color: #555; line-height: 1.5;"></div>
+        <button onclick="google.script.host.close()">Close</button>
+    </div>
 
-                // Adjustment for local time zone offset to fit datetime-local format (YYYY-MM-DDTHH:mm)
-                // datetime-local expects local time, but toISOString is UTC.
-                // We shift the date by the timezone offset.
-                const offsetMs = now.getTimezoneOffset() * 60 * 1000;
-                const localDate = new Date(now.getTime() - offsetMs);
-                return localDate.toISOString().slice(0, 16);
+    <div id="status"></div>
+
+    <script>
+        // Helper to get local ISO string for datetime-local
+        function getLocalIsoString() {
+            const now = new Date();
+            // Round minutes to nearest 15
+            const minutes = now.getMinutes();
+            const remainder = minutes % 15;
+            if (remainder >= 8) {
+                now.setMinutes(minutes + (15 - remainder));
+            } else {
+                now.setMinutes(minutes - remainder);
             }
+            now.setSeconds(0);
+            now.setMilliseconds(0);
 
-            function loadAssignedBy() {
-                // Set default date immediately
-                const isoStr = getLocalIsoString();
-                document.getElementById('apptIso').value = isoStr;
+            // Adjustment for local time zone offset to fit datetime-local format (YYYY-MM-DDTHH:mm)
+            // datetime-local expects local time, but toISOString is UTC.
+            // We shift the date by the timezone offset.
+            const offsetMs = now.getTimezoneOffset() * 60 * 1000;
+            const localDate = new Date(now.getTime() - offsetMs);
+            return localDate.toISOString().slice(0, 16);
+        }
 
-                google.script.run
-                    .withSuccessHandler((result) => {
-                        // Result is now { users: string[], lastSelected: string }
-                        const names = result.users || [];
-                        const lastSelected = result.lastSelected || '';
+        function loadAssignedBy() {
+            // Set default date immediately
+            const isoStr = getLocalIsoString();
+            document.getElementById('apptIso').value = isoStr;
 
-                        const sel = document.getElementById('assignedByName');
-                        sel.innerHTML = '';
+            google.script.run
+                .withSuccessHandler((result) => {
+                    // Result is now { users: string[], lastSelected: string }
+                    const names = result.users || [];
+                    const lastSelected = result.lastSelected || '';
 
-                        const placeholder = document.createElement('option');
-                        placeholder.value = '';
-                        placeholder.textContent = 'Select…';
-                        sel.appendChild(placeholder);
+                    const sel = document.getElementById('assignedByName');
+                    sel.innerHTML = '';
 
-                        names.forEach(n => {
-                            const opt = document.createElement('option');
-                            opt.value = n;
-                            opt.textContent = n;
-                            if (n === lastSelected) {
-                                opt.selected = true;
-                            }
-                            sel.appendChild(opt);
-                        });
-                    })
-                    .withFailureHandler((err) => {
-                        setStatus('Failed to load Assigned By list: ' + (err?.message || err), false);
-                    })
-                    .getAssignmentUsers();
-            }
+                    const placeholder = document.createElement('option');
+                    placeholder.value = '';
+                    placeholder.textContent = 'Select…';
+                    sel.appendChild(placeholder);
 
-            // Run when sidebar loads
-            window.onload = loadAssignedBy;
-
-            function setStatus(msg, ok) {
-                const el = document.getElementById('status');
-                el.className = 'status ' + (ok ? 'ok' : 'err');
-                el.textContent = msg;
-                el.style.display = 'block';
-            }
-
-            function disable(disabled) {
-                const btn = document.getElementById('submitBtn');
-                btn.disabled = disabled;
-                if (disabled) {
-                    btn.textContent = 'Submitting...';
-                } else {
-                    btn.textContent = 'Create & Assign';
-                }
-            }
-
-            function submit() {
-                const payload = {
-                    apptIso: document.getElementById('apptIso').value,
-                    customerName: document.getElementById('customerName').value,
-                    phone: document.getElementById('phone').value,
-                    notes: document.getElementById('notes').value,
-                    assignedByName: document.getElementById('assignedByName').value
-                };
-
-                if (!payload.apptIso || !payload.customerName || !payload.phone || !payload.assignedByName) {
-                    setStatus('Please fill appointment date/time, customer name, phone, and assigned by.', false);
-                    return;
-                }
-
-                setStatus('', true); // Clear status
-                document.getElementById('status').style.display = 'none';
-
-                disable(true);
-                google.script.run
-                    .withSuccessHandler((res) => {
-                        disable(false);
-                        if (res && res.ok) {
-                            // Hide form, show success
-                            document.getElementById('form-container').style.display = 'none';
-                            document.getElementById('status').style.display = 'none'; // hide any old status
-
-                            const details = `<strong>Assigned to:</strong> ${res.assignedTo}<br>` +
-                                `<strong>Next up:</strong> ${res.nextUp || '(none)'}`;
-
-                            const successDiv = document.getElementById('success-container');
-                            document.getElementById('success-details').innerHTML = details;
-                            successDiv.style.display = 'block';
-
-                        } else {
-                            setStatus(res.message || 'Unexpected response from server.', false);
+                    names.forEach(n => {
+                        const opt = document.createElement('option');
+                        opt.value = n;
+                        opt.textContent = n;
+                        if (n === lastSelected) {
+                            opt.selected = true;
                         }
-                    })
-                    .withFailureHandler((err) => {
-                        disable(false);
-                        setStatus(err && err.message ? err.message : String(err), false);
-                    })
-                    .createAppointmentFromSidebar(payload);
+                        sel.appendChild(opt);
+                    });
+                })
+                .withFailureHandler((err) => {
+                    setStatus('Failed to load Assigned By list: ' + (err?.message || err), false);
+                })
+                .getAssignmentUsers();
+        }
+
+        // Run when sidebar loads
+        window.onload = loadAssignedBy;
+
+        function setStatus(msg, ok) {
+            const el = document.getElementById('status');
+            el.className = 'status ' + (ok ? 'ok' : 'err');
+            el.textContent = msg;
+            el.style.display = 'block';
+        }
+
+        function disable(disabled) {
+            const btn = document.getElementById('submitBtn');
+            btn.disabled = disabled;
+            if (disabled) {
+                btn.textContent = 'Submitting...';
+            } else {
+                btn.textContent = 'Create & Assign';
             }
-        </script>
-    </body>
+        }
+
+        function submit() {
+            const payload = {
+                apptIso: document.getElementById('apptIso').value,
+                customerName: document.getElementById('customerName').value,
+                phone: document.getElementById('phone').value,
+                notes: document.getElementById('notes').value,
+                assignedByName: document.getElementById('assignedByName').value
+            };
+
+            if (!payload.apptIso || !payload.customerName || !payload.phone || !payload.assignedByName) {
+                setStatus('Please fill appointment date/time, customer name, phone, and assigned by.', false);
+                return;
+            }
+
+            setStatus('', true); // Clear status
+            document.getElementById('status').style.display = 'none';
+
+            disable(true);
+            google.script.run
+                .withSuccessHandler((res) => {
+                    disable(false);
+                    if (res && res.ok) {
+                        // Hide form, show success
+                        document.getElementById('form-container').style.display = 'none';
+                        document.getElementById('status').style.display = 'none'; // hide any old status
+
+                        const details = `<strong>Assigned to:</strong> ${res.assignedTo}<br>` +
+                            `<strong>Next up:</strong> ${res.nextUp || '(none)'}`;
+
+                        const successDiv = document.getElementById('success-container');
+                        document.getElementById('success-details').innerHTML = details;
+                        successDiv.style.display = 'block';
+
+                    } else {
+                        setStatus(res.message || 'Unexpected response from server.', false);
+                    }
+                })
+                .withFailureHandler((err) => {
+                    disable(false);
+                    setStatus(err && err.message ? err.message : String(err), false);
+                })
+                .createAppointmentFromSidebar(payload);
+        }
+
+        // New Phone Lead Handler
+        function getPhoneLead() {
+            const btn = document.getElementById('getLeadBtn');
+            const resultDiv = document.getElementById('phoneLeadResult');
+
+            btn.disabled = true;
+            btn.textContent = 'Assigning...';
+            resultDiv.textContent = '';
+
+            google.script.run
+                .withSuccessHandler((assignedName) => {
+                    btn.disabled = false;
+                    btn.textContent = 'Get Phone Lead';
+                    resultDiv.textContent = 'Assigned: ' + assignedName;
+
+                    // Auto-select in dropdown if it exists
+                    const sel = document.getElementById('assignedByName');
+                    // "assignedByName" is mostly for "Assigned By", but often the salesperson is the "Assigned To" target?
+                    // Wait, the sidebar has "Assigned By" input. 
+                    // The user request was just to "receive the name". 
+                    // I'll stick to showing it in the resultDiv as requested.
+                })
+                .withFailureHandler((err) => {
+                    btn.disabled = false;
+                    btn.textContent = 'Get Phone Lead';
+                    resultDiv.textContent = 'Error: ' + (err.message || err);
+                })
+                .assignPhoneLead();
+        }
+    </script>
+</body>
 
 </html>
