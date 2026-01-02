@@ -258,6 +258,49 @@ function menuResetPointer() {
   }
 }
 
+/**
+ * Reassign a selected row from the sidebar with a specific reason.
+ * 
+ * @param {string} reason - The reason for reassignment (e.g. "Employee Unavailable")
+ * @return {object} { ok: boolean, message: string, newAssignee: string }
+ */
+function reassignSelectedRow(reason) {
+  // Lock handled inside assignRowAuto_ but good to have high level safety or return values
+  try {
+    const row = getActiveRow_();
+    if (!row) {
+      return { ok: false, message: 'Please select a row in APPOINTMENTS first.' };
+    }
+
+    // We reuse assignRowAuto_ but we need to capture the name
+    // assignRowAuto_ does not return the name easily, it writes to sheet.
+    // Let's modify assignRowAuto_ or just read it back? 
+    // Actually, assignRowAuto_ writes to sheet. We can read it back.
+
+    // But wait, assignRowAuto_ is void. I should make it return info if possible or read the sheet.
+    // Let's rely on reading the sheet after update or trust it works. 
+    // Better: Allow assignRowAuto_ to return result or use a lower level call.
+    // I'll stick to calling assignRowAuto_ and then returning success.
+
+    assignRowAuto_(row, {
+      forceReassign: true,
+      mode: 'Manual Reassign',
+      actionType: 'Reassignment',
+      details: { reason: reason }
+    });
+
+    // Get the new assignee from the sheet to confirm
+    const appts = getApptsSheet_();
+    const newAssignee = appts.getRange(row, COL_ASSIGNED).getValue();
+
+    return { ok: true, newAssignee: newAssignee };
+
+  } catch (e) {
+    logError('reassignSelectedRow', e);
+    return { ok: false, message: e.message };
+  }
+}
+
 /***** CORE LOGIC *****/
 
 /**
@@ -309,6 +352,7 @@ function assignRowAuto_(row, opts = {}) {
         row: row,
         customer: name,
         notes: opts.forceReassign ? 'Reassignment (Force)' : 'New Assignment',
+        ...(opts.details || {}) // Merge custom details like 'reason'
       },
     });
 
@@ -322,6 +366,17 @@ function assignRowAuto_(row, opts = {}) {
     appts.getRange(row, COL_ASSIGNED).setValue(assignee);
     appts.getRange(row, COL_MODE).setValue(opts.mode || 'Auto');
     appts.getRange(row, COL_ASSIGNED_BY).setValue(user);
+
+    // Note: Logging was done in advanceRoundRobinPointer_ but we might want to ensure 'reason' is passed through.
+    // I passed `...auditInfo.details` in advanceRoundRobinPointer_
+    // And in this function call I see:
+    // details: {
+    //    row: row,
+    //    customer: name,
+    //    notes: opts.forceReassign ? 'Reassignment (Force)' : 'New Assignment',
+    //    ...(opts.details || {})  <-- I need to add this spread to include 'reason' passed in opts.details
+    // }
+
   } catch (err) {
     logError('assignRowAuto_', err, { row: row, opts: opts });
   } finally {

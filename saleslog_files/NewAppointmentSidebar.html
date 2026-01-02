@@ -65,6 +65,8 @@
             style="margin-top: 8px; font-weight: bold; color: #d32f2f; text-align: center; min-height: 20px;"></div>
     </div>
 
+
+
     <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
 
     <h3 style="margin-top: 0;">New Appointment</h3>
@@ -92,6 +94,27 @@
         <button id="submitBtn" type="button" onclick="submit()">Create & Assign</button>
 
         <div class="hint">This will auto-assign to the next eligible salesperson and advance the queue.</div>
+    </div>
+
+    <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+
+    <div id="reassign-container"
+        style="margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; background-color: #fff3e0;">
+        <h4 style="margin-top: 0; margin-bottom: 2px;">Reassign Appointment</h4>
+        <p style="margin-top: 0; margin-bottom: 10px; font-weight: normal; font-size: 13px;">Select the row to reassign
+            on the APPOINTMENTS sheet.</p>
+        <label style="margin-top:0; font-weight: normal; font-size: 13px;">Reason:</label>
+        <select id="reassignReason" style="margin-top: 4px;">
+            <option value="Employee Unavailable">Employee Unavailable</option>
+            <option value="Manager Override">Manager Override</option>
+            <option value="Customer Request">Customer Request</option>
+            <option value="Entry Error">Entry Error</option>
+            <option value="Fairness Adjustment">Fairness Adjustment</option>
+        </select>
+        <button id="reassignBtn" type="button" onclick="reassignRow()"
+            style="margin-top: 10px; background-color: #FF9800; color: white;">Reassign</button>
+        <div id="reassignResult" style="margin-top: 8px; font-weight: bold; text-align: center; min-height: 20px;">
+        </div>
     </div>
 
     <div id="success-container" style="display:none; text-align: center; margin-top: 40px;">
@@ -239,13 +262,6 @@
                     btn.disabled = false;
                     btn.textContent = 'Get Phone Lead';
                     resultDiv.textContent = 'Assigned: ' + assignedName;
-
-                    // Auto-select in dropdown if it exists
-                    const sel = document.getElementById('assignedByName');
-                    // "assignedByName" is mostly for "Assigned By", but often the salesperson is the "Assigned To" target?
-                    // Wait, the sidebar has "Assigned By" input. 
-                    // The user request was just to "receive the name". 
-                    // I'll stick to showing it in the resultDiv as requested.
                 })
                 .withFailureHandler((err) => {
                     btn.disabled = false;
@@ -253,6 +269,45 @@
                     resultDiv.textContent = 'Error: ' + (err.message || err);
                 })
                 .assignPhoneLead();
+        }
+
+        // Reassign Row Handler
+        function reassignRow() {
+            const reason = document.getElementById('reassignReason').value;
+            const btn = document.getElementById('reassignBtn');
+            const resultDiv = document.getElementById('reassignResult');
+
+            if (!reason) {
+                resultDiv.textContent = 'Please select a reason.';
+                resultDiv.style.color = 'red';
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = 'Reassigning...';
+            resultDiv.textContent = '';
+            resultDiv.style.color = 'black';
+
+            google.script.run
+                .withSuccessHandler((res) => {
+                    btn.disabled = false;
+                    btn.textContent = 'Reassign';
+
+                    if (res.ok) {
+                        resultDiv.textContent = 'New Assignee: ' + res.newAssignee;
+                        resultDiv.style.color = 'green';
+                    } else {
+                        resultDiv.textContent = 'Error: ' + res.message;
+                        resultDiv.style.color = 'red';
+                    }
+                })
+                .withFailureHandler((err) => {
+                    btn.disabled = false;
+                    btn.textContent = 'Reassign';
+                    resultDiv.textContent = 'Error: ' + (err.message || err);
+                    resultDiv.style.color = 'red';
+                })
+                .reassignSelectedRow(reason);
         }
     </script>
 </body>

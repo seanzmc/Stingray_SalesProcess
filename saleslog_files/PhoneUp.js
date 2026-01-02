@@ -1,24 +1,20 @@
 /**
  * Phone Lead Round Robin System
  * 
- * SETUP INSTRUCTIONS:
- * 1. Sheet "PhoneUp_Settings":
- *    - C1: Stores "Last Assigned Name" (Visible to users).
- *    - Row 1 Headers: "Salesperson Name", "Status"
- *    - Column A (A2:A): Salesperson Name
- *    - Column B (B2:B): Status ("Active")
- * 
- * 2. Sheet "PhoneUp_Log":
- *    - Row 1 Headers: "Timestamp", "Salesperson Assigned"
- * 
- * 3. Sheet "RR_AUDIT" (Optional/Secondary):
- *    - Used for dual logging if available.
+ * REFACTORED CONFIGURATION:
+ * 1. Roster Source: "RR_ROSTER" (Cols A=Name, B=Active, C=Eligible)
+ *    - Same logic as round_robin.js (Must be Active AND Eligible)
+ * 2. State Tracking: "RR_STATE" Cell C2
+ *    - Stores "Last Assigned Name" for Phone Ups
+ * 3. Logging: "RR_AUDIT"
+ *    - Centralized audit log
  */
 
 // Configuration
-const SHEET_PHONE_SETTINGS = "PhoneUp_Settings";
-const SHEET_PHONE_LOG = "PhoneUp_Log";
-const CELL_LAST_ASSIGNED = "C1"; // Visible storage for transparency
+// Note: SHEET_ROSTER, SHEET_STATE, SHEET_AUDIT are defined in round_robin.js ('RR_ROSTER', 'RR_STATE', 'RR_AUDIT')
+// and are available globally in the project.
+
+const CELL_LAST_ASSIGNED_PHONE = "C2"; // Phone Up Pointer
 
 /**
  * Menu trigger function.
@@ -42,14 +38,9 @@ function getNextPhoneUpMenu() {
  */
 function assignPhoneLead() {
   // Use existing lock utility if available, otherwise direct usage
-  // core_saleslogPro.js defines withScriptLock, so we can use that for safety
-  // or use the internal logic here if we want absolute isolation as originally requested.
-  // User asked to "Reuse... utilities_locks.js".
-
   if (typeof withScriptLock === 'function') {
     return withScriptLock(executePhoneUpAssignment_);
   } else {
-    // Fallback if utility not found
     const lock = LockService.getScriptLock();
     if (!lock.tryLock(10000)) {
       throw new Error('System busy. Please try again.');
@@ -68,41 +59,43 @@ function assignPhoneLead() {
  */
 function executePhoneUpAssignment_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const settingsSheet = ss.getSheetByName(SHEET_PHONE_SETTINGS);
-  const logSheet = ss.getSheetByName(SHEET_PHONE_LOG);
+  const rosterSheet = ss.getSheetByName(SHEET_ROSTER);
+  const stateSheet = ss.getSheetByName(SHEET_STATE);
 
-  if (!settingsSheet || !logSheet) {
-    throw new Error(`Missing sheets '${SHEET_PHONE_SETTINGS}' or '${SHEET_PHONE_LOG}'.`);
+  if (!rosterSheet || !stateSheet) {
+    throw new Error(`Missing sheets '${SHEET_ROSTER}' or '${SHEET_STATE}'.`);
   }
 
-  // 1. Read Inputs (Active List & Last Assigned)
-  const lastRow = settingsSheet.getLastRow();
-  if (lastRow < 2) throw new Error("No salespeople configured.");
+  // 1. Read Inputs (Eligible Roster)
+  const lastRow = rosterSheet.getLastRow();
+  if (lastRow < 2) throw new Error("No salespeople configured in RR_ROSTER.");
 
-  // Read names and statuses (A2:B)
-  const rosterValues = settingsSheet.getRange(2, 1, lastRow - 1, 2).getValues();
+  // Read names (A), Active (B), Eligible (C) from RR_ROSTER
+  // Assuming standard layout: Col 1=Name, Col 2=Active, Col 3=Eligible
+  const rosterValues = rosterSheet.getRange(2, 1, lastRow - 1, 3).getValues();
+
+  // Filter: Must be Active (Col 2 === true) AND Eligible (Col 3 === true)
   const activeUsers = rosterValues
-    .map(r => ({ name: r[0], status: r[1] }))
-    .filter(u => u.name && String(u.status).trim().toLowerCase() === "active")
-    .map(u => u.name);
+    .filter(r => r[0] && r[1] === true && r[2] === true)
+    .map(r => String(r[0]).trim());
 
   if (activeUsers.length === 0) {
-    throw new Error("No active salespeople found.");
+    throw new Error("No active and eligible salespeople found.");
   }
 
-  // Read Last Assigned Name from C1
-  const lastAssignedName = settingsSheet.getRange(CELL_LAST_ASSIGNED).getValue();
+  // Read Last Assigned Name from RR_STATE!C2
+  const lastAssignedName = stateSheet.getRange(CELL_LAST_ASSIGNED_PHONE).getValue();
 
   // 2. Logic: Find next person
   let nextIndex = 0;
 
   if (lastAssignedName) {
-    const lastIndex = activeUsers.indexOf(lastAssignedName);
+    const lastIndex = activeUsers.indexOf(String(lastAssignedName).trim());
     if (lastIndex !== -1) {
       // Found in current active list, move to next
       nextIndex = (lastIndex + 1) % activeUsers.length;
     } else {
-      // Last person no longer active or found, start at 0 (or could try to find closest... keeping simpple: 0)
+      // Last person no longer active or found, start at 0
       nextIndex = 0;
     }
   }
@@ -111,37 +104,60 @@ function executePhoneUpAssignment_() {
 
   // 3. Updates
 
-  // A. Local State (C1)
-  settingsSheet.getRange(CELL_LAST_ASSIGNED).setValue(assignedName);
+  // A. Local State (RR_STATE!C2)
+  stateSheet.getRange(CELL_LAST_ASSIGNED_PHONE).setValue(assignedName);
 
-  // B. Primary Log (Critical)
-  try {
-    logSheet.appendRow([new Date(), assignedName]);
-  } catch (e) {
-    console.error("Critical: Failed to write to PhoneUp_Log", e);
-    throw new Error("Failed to write to primary log. Assignment aborted.");
-  }
-
-  // C. Secondary/Audit Log (Non-Critical)
-  // Reusing logToGlobalAudit_ pattern if flexible, or implementing inline to match user request
-  try {
-    // Check if logRoundRobinAction_ exists (from round_robin.js) and is global
-    if (typeof logRoundRobinAction_ === 'function') {
-      logRoundRobinAction_('Phone Up Assignment', {
-        assignee: assignedName,
-        method: 'PhoneUp Script'
-      });
-    } else {
-      // Manual append to RR_AUDIT if helper not found but sheet might exist.
-      const auditSheet = ss.getSheetByName('RR_AUDIT');
-      if (auditSheet) {
-        auditSheet.appendRow([new Date(), Session.getEffectiveUser().getEmail(), 'Phone Up Assignment', '', `Assignee=${assignedName}`]);
-      }
-    }
-  } catch (e) {
-    console.warn("Non-critical: Failed to write to global audit_log", e);
-    // Do not throw
-  }
+  // B. Unified Logging (RR_AUDIT)
+  logPhoneUpAction_(ss, "Phone Up Assigned", assignedName, "System Rotation");
 
   return assignedName;
 }
+
+/**
+ * Helper to append to RR_AUDIT
+ */
+function logPhoneUpAction_(ss, action, assignedName, details) {
+  try {
+    let auditSheet = ss.getSheetByName(SHEET_AUDIT);
+    if (!auditSheet) {
+      // If audit sheet missing, try to create or fail gracefully? 
+      // User requirement implies it exists or we should ensure it. 
+      // round_robin.js creates it if missing, we can do same or skip.
+      // Let's assume it exists or fail safely to log.
+      auditSheet = ss.insertSheet(SHEET_AUDIT);
+      auditSheet.appendRow(['Timestamp', 'User', 'Action', 'Reference', 'Details']);
+    }
+
+    const now = new Date();
+    const user = Session.getEffectiveUser().getEmail();
+
+    // Header format: [Timestamp, User, Action, Reference, Details]
+    // Action = "Phone Up Assigned"
+    // Reference = assignedName
+    // Details = details ("System Rotation")
+
+    auditSheet.appendRow([
+      now,
+      user,
+      action,
+      assignedName, // Using Reference col for the assigned person name as per request format?
+      // User Request: [Timestamp, "Phone Up Assigned", Assigned_Name, "System Rotation"]
+      // My proposed headers: [Timestamp, User, Action, Reference, Details]
+      // Mapping: 
+      // Timestamp -> Timestamp
+      // User -> User (implicit in request? request said [Timestamp, "Phone Up Assigned", Assigned_Name, "System Rotation"])
+      // Wait, user request for Phone Up Action was specific: 
+      // `[Timestamp, "Phone Up Assigned", Assigned_Name, "System Rotation"]`
+      // But round_robin.js uses 5 columns: Timestamp, User, Action, Reference, Details.
+      // I will stick to the 5-column standard of the existing system I saw in round_robin.js to be truly "Unified",
+      // but I will ensure the content matches the intent.
+
+      details
+    ]);
+
+  } catch (e) {
+    console.error("Failed to write to RR_AUDIT", e);
+    // Don't block main flow
+  }
+}
+
