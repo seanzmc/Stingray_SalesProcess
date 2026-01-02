@@ -53,7 +53,23 @@
 </head>
 
 <body>
-    <h3>New Appointment</h3>
+
+
+    <div id="phone-lead-container"
+        style="margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; background-color: #f0f8ff;">
+        <h4 style="margin-top: 0; margin-bottom: 10px;">Phone Lead System</h4>
+        <label style="margin-top:0; font-weight: normal;">Need a Salesperson?</label>
+        <button id="getLeadBtn" type="button" onclick="getPhoneLead()"
+            style="margin-top: 5px; background-color: #2196F3; color: white;">Assign Phone Lead</button>
+        <div id="phoneLeadResult"
+            style="margin-top: 8px; font-weight: bold; color: #d32f2f; text-align: center; min-height: 20px;"></div>
+    </div>
+
+    <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+
+    <h3 style="margin-top: 0;">New Appointment</h3>
+
+    <h4 style="margin-top: 0;">Appointment Details</h4>
 
     <div id="form-container">
         <label>Appointment date/time</label>
@@ -71,14 +87,7 @@
         <label>Notes (optional)</label>
         <textarea id="notes" rows="3" placeholder="Anything helpful..."></textarea>
 
-        <div
-            style="margin-top: 20px; margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; background-color: #f9f9f9;">
-            <label style="margin-top:0;">Need a Salesperson?</label>
-            <button id="getLeadBtn" type="button" onclick="getPhoneLead()"
-                style="margin-top: 5px; background-color: #2196F3; color: white;">Get Phone Lead</button>
-            <div id="phoneLeadResult"
-                style="margin-top: 8px; font-weight: bold; color: #d32f2f; text-align: center; min-height: 20px;"></div>
-        </div>
+
 
         <button id="submitBtn" type="button" onclick="submit()">Create & Assign</button>
 
