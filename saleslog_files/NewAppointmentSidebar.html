@@ -61,6 +61,8 @@
         <label style="margin-top:0; font-weight: normal;">Need a Salesperson?</label>
         <button id="getLeadBtn" type="button" onclick="getPhoneLead()"
             style="margin-top: 5px; background-color: #2196F3; color: white;">Assign Phone Lead</button>
+        <button id="undoLeadBtn" type="button" onclick="undoPhoneLead()"
+            style="margin-top: 8px; background-color: #FF5252; color: white; padding: 6px; font-size: 13px;">↺ Recall / Undo Last Assignment</button>
         <div id="phoneLeadResult"
             style="margin-top: 8px; font-weight: bold; color: #d32f2f; text-align: center; min-height: 20px;"></div>
     </div>
@@ -265,6 +267,33 @@
                     resultDiv.textContent = 'Error: ' + (err.message || err);
                 })
                 .assignPhoneLead();
+        }
+
+        // Undo Phone Lead Handler
+        function undoPhoneLead() {
+            if (!confirm('Are you sure you want to rewind the rotation? This will set the pointer back to the previous person.')) return;
+
+            const btn = document.getElementById('undoLeadBtn');
+            const resultDiv = document.getElementById('phoneLeadResult');
+
+            btn.disabled = true;
+            btn.textContent = 'Rewinding...';
+            resultDiv.textContent = '';
+
+            google.script.run
+                .withSuccessHandler((msg) => {
+                    btn.disabled = false;
+                    btn.textContent = '↺ Recall / Undo Last Assignment';
+                    resultDiv.textContent = msg;
+                    resultDiv.style.color = '#388E3C'; // Green
+                })
+                .withFailureHandler((err) => {
+                    btn.disabled = false;
+                    btn.textContent = '↺ Recall / Undo Last Assignment';
+                    resultDiv.textContent = 'Error: ' + (err.message || err);
+                    resultDiv.style.color = '#d32f2f'; // Red
+                })
+                .undoLastPhoneUp();
         }
 
         // Reassign Row Handler

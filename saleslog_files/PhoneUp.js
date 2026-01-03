@@ -52,6 +52,78 @@ function assignPhoneLead() {
 }
 
 /**
+ * Undo the last Phone Up assignment (Rewind Rotation).
+ * Called by Sidebar.
+ */
+function undoLastPhoneUp() {
+  const lockResult = acquireScriptLockWithRetry();
+
+  if (!lockResult.success) {
+    throw new Error('System busy (Lock Timeout). Please try again.');
+  }
+
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const rosterSheet = ss.getSheetByName(SHEET_ROSTER);
+    const stateSheet = ss.getSheetByName(SHEET_STATE);
+
+    if (!rosterSheet || !stateSheet) {
+      throw new Error(`Missing sheets '${SHEET_ROSTER}' or '${SHEET_STATE}'.`);
+    }
+
+    // 1. Read Inputs (Eligible Roster)
+    const lastRow = rosterSheet.getLastRow();
+    if (lastRow < 2) throw new Error("No salespeople configured in RR_ROSTER.");
+
+    const rosterValues = rosterSheet.getRange(2, 1, lastRow - 1, 3).getValues();
+    const activeUsers = rosterValues
+      .filter(r => r[0] && r[1] === true && r[2] === true)
+      .map(r => String(r[0]).trim());
+
+    if (activeUsers.length === 0) {
+      throw new Error("No active and eligible salespeople found.");
+    }
+
+    // 2. Read Current State
+    const currentName = stateSheet.getRange(CELL_LAST_ASSIGNED_PHONE).getValue();
+    let currentIndex = 0;
+
+    // Find index of current assignee
+    if (currentName) {
+      const idx = activeUsers.indexOf(String(currentName).trim());
+      if (idx !== -1) {
+        currentIndex = idx;
+      }
+    }
+
+    // 3. Rewind Logic
+    // Use the shared helper from round_robin.js
+    const newIndex = calculateRewoundIndex_(currentIndex, activeUsers.length);
+    const newName = activeUsers[newIndex];
+
+    // 4. Update State
+    stateSheet.getRange(CELL_LAST_ASSIGNED_PHONE).setValue(newName);
+
+    // 5. Log
+    logRoundRobinEvent('Phone Up Undo', {
+      user: Session.getActiveUser().getEmail(),
+      assigneeBefore: currentName,
+      assigneeAfter: newName,
+      reason: 'User Sidebar Undo',
+      type: 'Rotation Correction'
+    });
+
+    return `Rotation rewound. Next Up is now ${newName}`;
+
+  } catch (e) {
+    logError('undoLastPhoneUp', e);
+    throw e;
+  } finally {
+    lockResult.lock.releaseLock();
+  }
+}
+
+/**
  * Internal worker function for assignment logic.
  * Assumes lock is already acquired.
  */
@@ -113,4 +185,3 @@ function executePhoneUpAssignment_() {
 
   return assignedName;
 }
-

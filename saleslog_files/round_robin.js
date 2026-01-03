@@ -322,11 +322,7 @@ function menuRewindPointer() {
     if (roster.length === 0) return;
 
     const current = getPointer_();
-    // Logic: (current - 1) but wrap around if negative
-    let newPointer = current - 1;
-    if (newPointer < 0) {
-      newPointer = roster.length - 1;
-    }
+    const newPointer = calculateRewoundIndex_(current, roster.length);
 
     setPointer_(newPointer);
 
@@ -345,6 +341,15 @@ function menuRewindPointer() {
   } finally {
     lockResult.lock.releaseLock();
   }
+}
+
+function calculateRewoundIndex_(currentIndex, totalCount) {
+  if (totalCount <= 0) return 0;
+  let newIndex = currentIndex - 1;
+  if (newIndex < 0) {
+    newIndex = totalCount - 1;
+  }
+  return newIndex;
 }
 
 function menuResetPointer() {
