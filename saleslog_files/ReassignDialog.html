@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top" />
+    <style>
+      body {
+        font-family: sans-serif;
+        padding: 10px;
+      }
+      select,
+      button {
+        width: 100%;
+        padding: 8px;
+        margin-top: 10px;
+        box-sizing: border-box;
+      }
+      button {
+        background-color: #4caf50;
+        color: white;
+        border: none;
+        cursor: pointer;
+      }
+      button:hover {
+        background-color: #45a049;
+      }
+      button.cancel {
+        background-color: #ccc;
+        color: black;
+        margin-top: 5px;
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      <label for="reason">Select Reason for Reassignment:</label>
+      <select id="reason">
+        <? for (var i = 0; i < reasons.length; i++) { ?>
+        <option value="<?= reasons[i] ?>"><?= reasons[i] ?></option>
+        <? } ?>
+      </select>
+      <button onclick="submit()">Confirm Reassign</button>
+      <button class="cancel" onclick="google.script.host.close()">
+        Cancel
+      </button>
+    </div>
+    <script>
+      function submit() {
+        var reason = document.getElementById('reason').value;
+        var btn = document.querySelector('button');
+        btn.disabled = true;
+        btn.textContent = 'Processing...';
+
+        google.script.run
+          .withSuccessHandler(function () {
+            google.script.host.close();
+          })
+          .withFailureHandler(function (err) {
+            alert('Error: ' + err.message);
+            btn.disabled = false;
+            btn.textContent = 'Confirm Reassign';
+          })
+          .processMenuReassignment(reason);
+      }
+    </script>
+  </body>
+</html>

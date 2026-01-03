@@ -1,6 +1,6 @@
 /**
  * Phone Lead Round Robin System
- * 
+ *
  * REFACTORED CONFIGURATION:
  * 1. Roster Source: "RR_ROSTER" (Cols A=Name, B=Active, C=Eligible)
  *    - Same logic as round_robin.js (Must be Active AND Eligible)
@@ -106,56 +106,11 @@ function executePhoneUpAssignment_() {
   stateSheet.getRange(CELL_LAST_ASSIGNED_PHONE).setValue(assignedName);
 
   // B. Unified Logging (RR_AUDIT)
-  logPhoneUpAction_(ss, "Phone Up Assigned", assignedName, "System Rotation");
+  logRoundRobinEvent("Phone Up Assigned", {
+    assignee: assignedName,
+    method: "System Rotation"
+  });
 
   return assignedName;
-}
-
-/**
- * Helper to append to RR_AUDIT
- */
-function logPhoneUpAction_(ss, action, assignedName, details) {
-  try {
-    let auditSheet = ss.getSheetByName(SHEET_AUDIT);
-    if (!auditSheet) {
-      // If audit sheet missing, try to create or fail gracefully? 
-      // User requirement implies it exists or we should ensure it. 
-      // round_robin.js creates it if missing, we can do same or skip.
-      // Let's assume it exists or fail safely to log.
-      auditSheet = ss.insertSheet(SHEET_AUDIT);
-      auditSheet.appendRow(['Timestamp', 'User', 'Action', 'Reference', 'Details']);
-    }
-
-    const now = new Date();
-    const user = Session.getEffectiveUser().getEmail();
-
-    // Header format: [Timestamp, User, Action, Reference, Details]
-    // Action = "Phone Up Assigned"
-    // Reference = assignedName
-    // Details = details ("System Rotation")
-
-    auditSheet.appendRow([
-      now,
-      user,
-      action,
-      assignedName, // Using Reference col for the assigned person name as per request format?
-      // User Request: [Timestamp, "Phone Up Assigned", Assigned_Name, "System Rotation"]
-      // My proposed headers: [Timestamp, User, Action, Reference, Details]
-      // Mapping: 
-      // Timestamp -> Timestamp
-      // User -> User (implicit in request? request said [Timestamp, "Phone Up Assigned", Assigned_Name, "System Rotation"])
-      // Wait, user request for Phone Up Action was specific: 
-      // `[Timestamp, "Phone Up Assigned", Assigned_Name, "System Rotation"]`
-      // But round_robin.js uses 5 columns: Timestamp, User, Action, Reference, Details.
-      // I will stick to the 5-column standard of the existing system I saw in round_robin.js to be truly "Unified",
-      // but I will ensure the content matches the intent.
-
-      details
-    ]);
-
-  } catch (e) {
-    console.error("Failed to write to RR_AUDIT", e);
-    // Don't block main flow
-  }
 }
 

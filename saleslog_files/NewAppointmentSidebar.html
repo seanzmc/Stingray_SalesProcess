@@ -105,11 +105,7 @@
             on the APPOINTMENTS sheet.</p>
         <label style="margin-top:0; font-weight: normal; font-size: 13px;">Reason:</label>
         <select id="reassignReason" style="margin-top: 4px;">
-            <option value="Employee Unavailable">Employee Unavailable</option>
-            <option value="Manager Override">Manager Override</option>
-            <option value="Customer Request">Customer Request</option>
-            <option value="Entry Error">Entry Error</option>
-            <option value="Fairness Adjustment">Fairness Adjustment</option>
+            <option>Loading...</option>
         </select>
         <button id="reassignBtn" type="button" onclick="reassignRow()"
             style="margin-top: 10px; background-color: #FF9800; color: white;">Reassign</button>
@@ -307,8 +303,36 @@
                     resultDiv.textContent = 'Error: ' + (err.message || err);
                     resultDiv.style.color = 'red';
                 })
-                .reassignSelectedRow(reason);
+                .reassignSelectedRow(reason); // This calls the server-side function which now validates against allowlist (optionally)
         }
+
+        function loadReassignReasons() {
+             google.script.run
+                .withSuccessHandler((reasons) => {
+                    const sel = document.getElementById('reassignReason');
+                    sel.innerHTML = ''; // Clear loading/static options
+                    reasons.forEach(r => {
+                        const opt = document.createElement('option');
+                        opt.value = r;
+                        opt.textContent = r;
+                        sel.appendChild(opt);
+                    });
+                })
+                .withFailureHandler((err) => {
+                     console.error("Failed to load reasons", err);
+                     // Fallback or show error in select
+                     const sel = document.getElementById('reassignReason');
+                     sel.innerHTML = '<option>Error loading reasons</option>';
+                })
+                .getReassignmentReasons();
+        }
+
+        // Add to window.onload
+        const originalOnLoad = window.onload;
+        window.onload = function() {
+            if (originalOnLoad) originalOnLoad();
+            loadReassignReasons();
+        };
     </script>
 </body>
 

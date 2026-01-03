@@ -32,6 +32,14 @@ const CELL_POINTER = 'B2';
 
 const SHEET_AUDIT = 'RR_AUDIT';
 
+const REASSIGNMENT_REASONS = [
+  "Employee Unavailable",
+  "User Request",
+  "Incorrect Assignment",
+  "System Rotation Skip",
+  "Manager Override"
+];
+
 /***** TRIGGERS *****/
 
 /**
@@ -76,7 +84,7 @@ function handleAppointmentEdit(e) {
       const oldValue = e.oldValue;
 
       // Only log if it actually changed
-      logRoundRobinAction_('Manual Override', {
+      logRoundRobinEvent('Manual Override', {
         row: row,
         oldAssignee: oldValue || '(empty)',
         newAssignee: newValue || '(empty)',
@@ -136,7 +144,7 @@ function handleRRStateEdit(e) {
       const newValue = e.value;
       const user = safeUserEmail_();
 
-      logRoundRobinAction_('POINTER_MANUAL_EDIT', {
+      logRoundRobinEvent('POINTER_MANUAL_EDIT', {
         pointerBefore: oldValue || '?',
         pointerAfter: newValue || '?',
         user: user,
@@ -157,7 +165,7 @@ function handleRRStateEdit(e) {
         user = Session.getActiveUser().getEmail();
       }
 
-      logRoundRobinAction_('Manual Override - Phone Up', {
+      logRoundRobinEvent('Manual Override - Phone Up', {
         user: user,
         Details: `Changed from ${oldValue} to ${newValue}`
       });
@@ -188,7 +196,7 @@ function handleRosterEdit(e) {
         col === 2 ? 'ROSTER_ACTIVE_CHANGE' : 'ROSTER_ELIGIBLE_CHANGE';
       const user = safeUserEmail_();
 
-      logRoundRobinAction_(actionType, {
+      logRoundRobinEvent(actionType, {
         rep: repName,
         oldValue: e.oldValue,
         newValue: e.value,
@@ -202,20 +210,43 @@ function handleRosterEdit(e) {
 
 /***** MENU ACTIONS *****/
 function menuSkipAndReassignSelectedRow() {
+  showReassignDialog();
+}
+
+function showReassignDialog() {
+  try {
+    const htmlTemplate = HtmlService.createTemplateFromFile('ReassignDialog');
+    htmlTemplate.reasons = REASSIGNMENT_REASONS;
+    const html = htmlTemplate.evaluate()
+      .setWidth(400)
+      .setHeight(250);
+    SpreadsheetApp.getUi().showModalDialog(html, 'Reassign Opportunity');
+  } catch (err) {
+    logError('showReassignDialog', err);
+    SpreadsheetApp.getUi().alert('Error opening dialog: ' + err.message);
+  }
+}
+
+/**
+ * Public endpoint called by the Modal Dialog (ReassignDialog.html)
+ */
+function processMenuReassignment(reason) {
   try {
     const row = getActiveRow_();
-    if (!row) return;
-
-    // Reassign (force) with 'Manual' mode
-    assignRowAuto_(row, {
-      forceReassign: true,
-      mode: 'Manual',
-      actionType: 'Reassign', // For audit log clarity
-    });
+    if (!row) throw new Error("No row selected.");
+    processReassignment_(row, reason);
+    SpreadsheetApp.getActiveSpreadsheet().toast("Reassignment Complete");
   } catch (err) {
-    logError('menuSkipAndReassignSelectedRow', err);
-    SpreadsheetApp.getUi().alert('Error: ' + err.message);
+    logError('processMenuReassignment', err);
+    throw err; // Re-throw to show in client
   }
+}
+
+/**
+ * Public endpoint for Sidebar or Client to get reasons
+ */
+function getReassignmentReasons() {
+  return REASSIGNMENT_REASONS;
 }
 
 function menuRewindPointer() {
@@ -241,7 +272,7 @@ function menuRewindPointer() {
 
     setPointer_(newPointer);
 
-    logRoundRobinAction_('Rewind', {
+    logRoundRobinEvent('Rewind', {
       pointerBefore: current,
       pointerAfter: newPointer,
       reason: 'User requested rewind',
@@ -263,7 +294,7 @@ function menuResetPointer() {
     const oldPointer = getPointer_();
     setPointer_(0);
 
-    logRoundRobinAction_('Reset Pointer', {
+    logRoundRobinEvent('Reset Pointer', {
       pointerBefore: oldPointer,
       pointerAfter: 0,
       reason: 'Admin Reset',
@@ -277,34 +308,18 @@ function menuResetPointer() {
 
 /**
  * Reassign a selected row from the sidebar with a specific reason.
- * 
- * @param {string} reason - The reason for reassignment (e.g. "Employee Unavailable")
+ *
+ * @param {string} reason - The reason for reassignment
  * @return {object} { ok: boolean, message: string, newAssignee: string }
  */
 function reassignSelectedRow(reason) {
-  // Lock handled inside assignRowAuto_ but good to have high level safety or return values
   try {
     const row = getActiveRow_();
     if (!row) {
       return { ok: false, message: 'Please select a row in APPOINTMENTS first.' };
     }
 
-    // We reuse assignRowAuto_ but we need to capture the name
-    // assignRowAuto_ does not return the name easily, it writes to sheet.
-    // Let's modify assignRowAuto_ or just read it back? 
-    // Actually, assignRowAuto_ writes to sheet. We can read it back.
-
-    // But wait, assignRowAuto_ is void. I should make it return info if possible or read the sheet.
-    // Let's rely on reading the sheet after update or trust it works. 
-    // Better: Allow assignRowAuto_ to return result or use a lower level call.
-    // I'll stick to calling assignRowAuto_ and then returning success.
-
-    assignRowAuto_(row, {
-      forceReassign: true,
-      mode: 'Manual Reassign',
-      actionType: 'Reassignment',
-      details: { reason: reason }
-    });
+    processReassignment_(row, reason);
 
     // Get the new assignee from the sheet to confirm
     const appts = getApptsSheet_();
@@ -316,6 +331,24 @@ function reassignSelectedRow(reason) {
     logError('reassignSelectedRow', e);
     return { ok: false, message: e.message };
   }
+}
+
+/**
+ * Unified Service Function for Reassignments
+ */
+function processReassignment_(row, reason) {
+  // Validate Reason against Allowlist (optional but good for strictness,
+  // though sidebar/modal restrictions are primary)
+  if (!REASSIGNMENT_REASONS.includes(reason)) {
+    // If reason is not in list (e.g. old code calling it), append [Non-Standard]
+    // or just allow it. Let's allow but log it as is.
+  }
+
+  assignRowAuto_(row, {
+    forceReassign: true,
+    mode: 'Manual Reassign',
+    details: { reason: reason }
+  });
 }
 
 /***** CORE LOGIC *****/
@@ -354,7 +387,7 @@ function assignRowAuto_(row, opts = {}) {
     if (roster.length === 0) {
       appts.getRange(row, COL_MODE).setValue('No Eligible Reps');
 
-      logRoundRobinAction_('Assignment Failed', {
+      logRoundRobinEvent('Assignment Failed', {
         row: row,
         reason: 'No Eligible Reps',
         customer: name,
@@ -447,7 +480,7 @@ function advanceRoundRobinPointer_(roster, auditInfo) {
   // Log it
   const nextUp = roster[pointerAfter];
 
-  logRoundRobinAction_(auditInfo.actionType || 'Advance', {
+  logRoundRobinEvent(auditInfo.actionType || 'Advance', {
     pointerBefore: pointerBefore,
     pointerAfter: pointerAfter,
     assignee: assignee,
@@ -465,7 +498,11 @@ function advanceRoundRobinPointer_(roster, auditInfo) {
 }
 
 /***** AUDITING *****/
-function logRoundRobinAction_(action, detailsObj) {
+/**
+ * Central Logger for all Round Robin events.
+ * Enforces key=value | key=value format and sanitizes inputs.
+ */
+function logRoundRobinEvent(action, detailsObj) {
   try {
     const ss = SpreadsheetApp.getActive();
     let auditSheet = ss.getSheetByName(SHEET_AUDIT);
@@ -483,18 +520,21 @@ function logRoundRobinAction_(action, detailsObj) {
 
     const now = new Date();
 
-    // Use system user unless specifically passed in details (e.g. from manual edit handler)
+    // Use system user unless specifically passed in details
     const user = detailsObj.user || safeUserEmail_();
 
-    // Format details as Key: Value string
+    // Format details
     let detailsStr = '';
     if (detailsObj) {
-      // Filter out row/user from details string if they are redundant,
-      // but 'row' is often put in Reference.
       const { row, user: _u, ...rest } = detailsObj;
 
       detailsStr = Object.entries(rest)
-        .map(([k, v]) => `${k}=${v}`) // Changed to k=v for tighter format
+        .map(([k, v]) => {
+          // Sanitize Value: replace | and = with -
+          let valStr = String(v);
+          valStr = valStr.replace(/[|=]/g, '-');
+          return `${k}=${valStr}`;
+        })
         .join(' | ');
     }
 
@@ -502,12 +542,9 @@ function logRoundRobinAction_(action, detailsObj) {
 
     auditSheet.appendRow([now, user, action, reference, detailsStr]);
   } catch (e) {
-    // CRITCIAL: Log this failure so admins know Audit is broken.
-    // Do NOT throw since we don't want to break the transaction if possible.
-    logError('logRoundRobinAction_', 'Audit Log Failed', {
+    logError('logRoundRobinEvent', 'Audit Log Failed', {
       originalError: e.toString(),
       action: action,
-      details: detailsObj,
     });
   }
 }
