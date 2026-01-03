@@ -71,6 +71,32 @@ function handleAppointmentEdit(e) {
 
     const row = e.range.getRow();
     const col = e.range.getColumn();
+    const a1 = e.range.getA1Notation();
+    const oldValue = e.oldValue;
+    const value = e.value;
+
+    // --- GENERIC LOGGING START ---
+    // Log EVERY edit to APPOINTMENTS, unless it's a phantom edit (no change)
+    // Phantom edit check: both undefined/empty, or exactly equal
+    const oldStr = oldValue === undefined ? "" : String(oldValue);
+    const newStr = value === undefined ? "" : String(value);
+
+    // If both are empty (phantom) or identical, skip generic log
+    // Note: OnEdit sometimes fires with undefined oldValue for new cells.
+    // If it's a real edit, we want to log it.
+    // If oldValue is undefined and value is "something", it's a new entry.
+    // If oldValue is "something" and value is undefined (cleared), it's a delete.
+    // Phantom is usually if user double clicks cell and hits enter without changing.
+    const isPhantom = (oldValue === undefined && value === undefined) || (oldValue === value);
+
+    if (!isPhantom) {
+      logRoundRobinEvent('Manual Edit', {
+        cell: a1,
+        old: oldValue,
+        new: value
+      });
+    }
+    // --- GENERIC LOGGING END ---
 
     // Only react when user edits the input columns B/C/D OR the Assigned column E
     if (![COL_APPT_DT, COL_CUST_NAME, COL_PHONE, COL_ASSIGNED].includes(col))
@@ -205,6 +231,38 @@ function handleRosterEdit(e) {
     }
   } catch (err) {
     logError('handleRosterEdit', err);
+  }
+}
+
+/**
+ * Handle structure changes (Insert/Delete Row) on APPOINTMENTS sheet.
+ * Must be bound to an installable "On change" trigger.
+ */
+function handleAppointmentStructureChange(e) {
+  try {
+    // e.changeType can be: INSERT_ROW, REMOVE_ROW, INSERT_COLUMN, REMOVE_COLUMN, GRID, FORMAT, etc.
+    // We only care about row structure changes on the APPOINTMENTS sheet.
+
+    // Check if the change happened on the APPOINTMENTS sheet
+    // e.source is the Spreadsheet. We need the active sheet.
+    const sheet = e.source.getActiveSheet();
+    if (sheet.getName() !== SHEET_APPTS) return;
+
+    if (e.changeType === 'REMOVE_ROW') {
+      logRoundRobinEvent('Row Deleted', {
+        type: 'Structure Change',
+        changeType: e.changeType,
+        user: Session.getActiveUser().getEmail()
+      });
+    } else if (e.changeType === 'INSERT_ROW') {
+      logRoundRobinEvent('Row Inserted', {
+        type: 'Structure Change',
+        changeType: e.changeType
+      });
+    }
+
+  } catch (err) {
+    logError('handleAppointmentStructureChange', err, { changeType: e ? e.changeType : 'unknown' });
   }
 }
 
