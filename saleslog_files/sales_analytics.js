@@ -192,62 +192,7 @@ function writeAnalyticsToMonthly(analyticsData, monthlySheet) {
  *
  * @returns {Object|null} Analytics object or null if no analytics exist
  */
-function getMonthlyAnalyticsSummary() {
-  try {
-    // Check cache first
-    const cached = CACHE.get(CACHE_KEY_ANALYTICS);
-    if (cached) {
-      try {
-        return JSON.parse(cached);
-      } catch (e) {
-        logWarning('getMonthlyAnalyticsSummary', 'Cache parse error', {
-          error: e.toString(),
-        });
-      }
-    }
 
-    // If no cache, read from sheet
-    const sheets = getSheets();
-    const monthlySheet = sheets.monthly;
-
-    // Read summary values from rows 3-5, column T (index 1 in our range)
-    const summaryRange = monthlySheet.getRange(
-      3,
-      ANALYTICS_START_COL + 1,
-      3,
-      1
-    );
-    const summaryValues = summaryRange.getValues();
-
-    // Check if analytics exist
-    if (!summaryValues[0][0] && !summaryValues[1][0] && !summaryValues[2][0]) {
-      return null; // No analytics data
-    }
-
-    // Read timestamp from row 6
-    const timestampValue = monthlySheet
-      .getRange(6, ANALYTICS_START_COL + 1, 1, 1)
-      .getValue();
-
-    // Build summary object from sheet data
-    return {
-      version: '1.0',
-      timestamp: timestampValue || new Date().toISOString(),
-      totals: {
-        delivered: summaryValues[0][0] || 0,
-        newDelivered: summaryValues[1][0] || 0,
-        usedDelivered: summaryValues[2][0] || 0,
-      },
-      dataQuality: {
-        unknownSalespeople: [],
-        errorCount: 0,
-      },
-    };
-  } catch (e) {
-    logError('getMonthlyAnalyticsSummary', e);
-    return null;
-  }
-}
 
 /**
  * Invalidates analytics cache
@@ -551,9 +496,8 @@ function formatAnalyticsForDisplay(processedData, displayCodeMap) {
  */
 function buildSummarySection(analyticsData) {
   const now = new Date();
-  const dateStr = `${
-    now.getMonth() + 1
-  }/${now.getDate()}/${now.getFullYear()} ${now.toLocaleTimeString()}`;
+  const dateStr = `${now.getMonth() + 1
+    }/${now.getDate()}/${now.getFullYear()} ${now.toLocaleTimeString()}`;
 
   const sellingDays = analyticsData.teamMetrics.sellingDays;
   const newPerDay =
@@ -852,10 +796,10 @@ function refreshAnalyticsManually() {
       ui.alert(
         'Analytics Updated',
         `Monthly analytics refreshed successfully!\n\n` +
-          `Total Delivered: ${analytics.totals.delivered || 0}\n` +
-          `New: ${analytics.totals.newDelivered || 0}\n` +
-          `Used: ${analytics.totals.usedDelivered || 0}\n\n` +
-          `Top Performer: ${topPerformer.displayCode} (${topPerformer.totalSales} units)`,
+        `Total Delivered: ${analytics.totals.delivered || 0}\n` +
+        `New: ${analytics.totals.newDelivered || 0}\n` +
+        `Used: ${analytics.totals.usedDelivered || 0}\n\n` +
+        `Top Performer: ${topPerformer.displayCode} (${topPerformer.totalSales} units)`,
         ui.ButtonSet.OK
       );
     } catch (e) {

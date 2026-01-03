@@ -37,19 +37,17 @@ function getNextPhoneUpMenu() {
  * Can be called by sidebar (google.script.run) or menu.
  */
 function assignPhoneLead() {
-  // Use existing lock utility if available, otherwise direct usage
-  if (typeof withScriptLock === 'function') {
-    return withScriptLock(executePhoneUpAssignment_);
-  } else {
-    const lock = LockService.getScriptLock();
-    if (!lock.tryLock(10000)) {
-      throw new Error('System busy. Please try again.');
-    }
-    try {
-      return executePhoneUpAssignment_();
-    } finally {
-      lock.releaseLock();
-    }
+  // Use robust lock acquisition
+  const lockResult = acquireScriptLockWithRetry();
+
+  if (!lockResult.success) {
+    throw new Error('System busy (Lock Timeout). Please try again.');
+  }
+
+  try {
+    return executePhoneUpAssignment_();
+  } finally {
+    lockResult.lock.releaseLock();
   }
 }
 

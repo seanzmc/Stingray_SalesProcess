@@ -536,9 +536,9 @@ function syncLeaderboardWithSalespeople(options = {}) {
     const availableRows = Math.max(0, todaySheet.getMaxRows() - 1);
     const rowsToRead = preserveMtd
       ? Math.min(
-          Math.max(rowCount, Math.min(availableRows, 200)),
-          availableRows
-        )
+        Math.max(rowCount, Math.min(availableRows, 200)),
+        availableRows
+      )
       : 0;
     const existingDataMap = {};
 
@@ -718,18 +718,7 @@ function formatDateOffset(offsetDays = 1) {
  * @param {GoogleAppsScript.Spreadsheet.ConditionalFormatRule[]} rules - Array of existing rules
  * @returns {GoogleAppsScript.Spreadsheet.ConditionalFormatRule[]} Filtered rules
  */
-function filterTrafficLightRules(rules) {
-  // This function is intended to filter out old script-managed custom formula rules
-  // so they can be replaced. It should NOT filter out non-custom-formula rules.
-  return rules.filter((r) => {
-    const bc = r.getBooleanCondition();
-    // Keep if it's not a boolean condition or if it is, it's not a custom formula.
-    return (
-      !bc ||
-      bc.getCriteriaType() !== SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA
-    );
-  });
-}
+
 
 /**
  * Applies conditional formatting rules to a sheet
@@ -775,8 +764,8 @@ function withScriptLock(fn) {
   try {
     Logger.log(
       'Script lock acquired on attempt ' +
-        lockResult.attempts +
-        ' for operation'
+      lockResult.attempts +
+      ' for operation'
     );
     return fn();
   } finally {
@@ -856,14 +845,14 @@ function summarizeRows(rows) {
     const newFi =
       row.length > 2
         ? String(row[2] || '')
-            .trim()
-            .toUpperCase()
+          .trim()
+          .toUpperCase()
         : '';
     const usedFi =
       row.length > 9
         ? String(row[9] || '')
-            .trim()
-            .toUpperCase()
+          .trim()
+          .toUpperCase()
         : '';
     const newHasContent =
       row.length > 1 &&
@@ -882,8 +871,8 @@ function summarizeRows(rows) {
       const tradeNew =
         row.length > 5
           ? String(row[5] || '')
-              .trim()
-              .toUpperCase()
+            .trim()
+            .toUpperCase()
           : '';
       if (tradeNew && tradeNew !== 'NT') tradeCount++;
     }
@@ -892,8 +881,8 @@ function summarizeRows(rows) {
       const tradeUsed =
         row.length > 12
           ? String(row[12] || '')
-              .trim()
-              .toUpperCase()
+            .trim()
+            .toUpperCase()
           : '';
       if (tradeUsed && tradeUsed !== 'NT') tradeCount++;
     }
@@ -938,8 +927,8 @@ function processCarSection(
   const fiFlag =
     rowData.length > fiIndex
       ? String(rowData[fiIndex] || '')
-          .trim()
-          .toUpperCase()
+        .trim()
+        .toUpperCase()
       : '';
   const salespersonInput =
     rowData.length > salespersonIndex
@@ -1795,9 +1784,8 @@ function processDaily() {
         `\n\nSALESPERSON CODE ERRORS (on delivered deals): ${errorSheetRows.length}`;
 
       if (errorSheetRows.length > 0) {
-        summaryMsg += `\n(Salesperson code errors for delivered deals are highlighted on 'MONTHLY' in rows ${dataInsertRow}-${
-          dataInsertRow + numRowsToInsert - 1
-        }.)`;
+        summaryMsg += `\n(Salesperson code errors for delivered deals are highlighted on 'MONTHLY' in rows ${dataInsertRow}-${dataInsertRow + numRowsToInsert - 1
+          }.)`;
       }
       if (unknownInputs.length > 0) {
         summaryMsg += `\n\nUNKNOWN SALESPEOPLE INPUTS: ${[
@@ -1894,7 +1882,7 @@ function reapplyCF() {
           // Check for "Blue" zero-sales rule
           if (
             currentFormulaNormalized ===
-              managedLeaderboardBlueRuleSignature.formula &&
+            managedLeaderboardBlueRuleSignature.formula &&
             ruleBg === managedLeaderboardBlueRuleSignature.background
           ) {
             shouldRemove = true;
@@ -2175,13 +2163,13 @@ function recalcMtdFromMonthly() {
       const analyticsResponse = ui.alert(
         'Update Monthly Analytics?',
         'MTD recalculation complete!\n\n' +
-          'Would you like to refresh the monthly analytics now?\n\n' +
-          'This will update the comprehensive sales metrics in columns S-X ' +
-          'of the MONTHLY sheet, including:\n' +
-          '• Total delivered units (new/used breakdown)\n' +
-          '• Per-salesperson sales counts\n' +
-          '• Team performance metrics\n\n' +
-          'This typically takes 5-10 seconds.',
+        'Would you like to refresh the monthly analytics now?\n\n' +
+        'This will update the comprehensive sales metrics in columns S-X ' +
+        'of the MONTHLY sheet, including:\n' +
+        '• Total delivered units (new/used breakdown)\n' +
+        '• Per-salesperson sales counts\n' +
+        '• Team performance metrics\n\n' +
+        'This typically takes 5-10 seconds.',
         ui.ButtonSet.YES_NO
       );
 
@@ -2203,15 +2191,15 @@ function recalcMtdFromMonthly() {
             ui.alert(
               'Update Complete',
               'MTD and Analytics have been updated successfully!\n\n' +
-                'MTD Recalculation:\n' +
-                `• Found ${totalSalespersonErrors} salesperson code errors in MONTHLY\n` +
-                '• Non-delivered deals highlighted\n' +
-                '• Leaderboard updated\n\n' +
-                'Monthly Analytics:\n' +
-                `• Total Delivered: ${analytics.totals.delivered || 0}\n` +
-                `• New: ${analytics.totals.newDelivered || 0}\n` +
-                `• Used: ${analytics.totals.usedDelivered || 0}\n` +
-                `• Top Performer: ${topPerformer.displayCode} (${topPerformer.totalSales} units)`,
+              'MTD Recalculation:\n' +
+              `• Found ${totalSalespersonErrors} salesperson code errors in MONTHLY\n` +
+              '• Non-delivered deals highlighted\n' +
+              '• Leaderboard updated\n\n' +
+              'Monthly Analytics:\n' +
+              `• Total Delivered: ${analytics.totals.delivered || 0}\n` +
+              `• New: ${analytics.totals.newDelivered || 0}\n` +
+              `• Used: ${analytics.totals.usedDelivered || 0}\n` +
+              `• Top Performer: ${topPerformer.displayCode} (${topPerformer.totalSales} units)`,
               ui.ButtonSet.OK
             );
 
@@ -2220,12 +2208,12 @@ function recalcMtdFromMonthly() {
             // Analytics failed but MTD succeeded
             alertError(
               'Analytics Update Failed\n\n' +
-                'MTD recalculation completed successfully, but analytics ' +
-                'update encountered an error:\n\n' +
-                (analyticsResult.error || 'Unknown error') +
-                '\n\n' +
-                'Your MTD and formatting updates have been saved.\n\n' +
-                'You can refresh analytics manually later via the menu.'
+              'MTD recalculation completed successfully, but analytics ' +
+              'update encountered an error:\n\n' +
+              (analyticsResult.error || 'Unknown error') +
+              '\n\n' +
+              'Your MTD and formatting updates have been saved.\n\n' +
+              'You can refresh analytics manually later via the menu.'
             );
             toastInfo('MTD complete. Analytics update failed.', 'Warning', 5);
           }
@@ -2234,9 +2222,9 @@ function recalcMtdFromMonthly() {
           Logger.log('Analytics refresh error after MTD: ' + analyticsError);
           alertError(
             'Analytics update failed: ' +
-              analyticsError.message +
-              '\n\n' +
-              'MTD recalculation was successful.'
+            analyticsError.message +
+            '\n\n' +
+            'MTD recalculation was successful.'
           );
           toastInfo('MTD complete. Analytics update failed.', 'Warning', 5);
         }
@@ -2265,12 +2253,12 @@ function rolloverMonth() {
     const response = ui.alert(
       'Confirm Month Rollover',
       'This will:\n' +
-        '1. Archive the current "MONTHLY" sheet (e.g., as "5/25").\n' +
-        '2. Copy the final leaderboard to the archive.\n' +
-        '3. Clear the "MONTHLY" sheet for the new month.\n' +
-        '4. Clear MTD sales (Column Q) on the "TODAY" sheet.\n' +
-        '5. Recalculate 3-Month Rolling Averages (Column R) on "TODAY".\n\n' +
-        'Are you sure you want to proceed?',
+      '1. Archive the current "MONTHLY" sheet (e.g., as "5/25").\n' +
+      '2. Copy the final leaderboard to the archive.\n' +
+      '3. Clear the "MONTHLY" sheet for the new month.\n' +
+      '4. Clear MTD sales (Column Q) on the "TODAY" sheet.\n' +
+      '5. Recalculate 3-Month Rolling Averages (Column R) on "TODAY".\n\n' +
+      'Are you sure you want to proceed?',
       ui.ButtonSet.YES_NO
     );
     if (response !== ui.Button.YES) {
@@ -2505,7 +2493,7 @@ function onOpen() {
     // Log error with full context for debugging
     try {
       logError('onOpen', e, { operation: 'create_menu' });
-    } catch (_) {}
+    } catch (_) { }
 
     // Notify user
     try {
@@ -2519,7 +2507,7 @@ function onOpen() {
         logWarning('onOpen', 'Could not display error toast', {
           error: toastError.toString(),
         });
-      } catch (_) {}
+      } catch (_) { }
     }
   } finally {
     Logger.log('[onOpen] Trigger execution completed');

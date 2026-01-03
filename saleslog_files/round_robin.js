@@ -375,14 +375,18 @@ function assignRowAuto_(row, opts = {}) {
 
     const assignee = result.assignee;
 
-    // Write assignment fields
+    // Write assignment fields (Batch Update)
     const now = new Date();
     const user = safeUserEmail_();
 
-    appts.getRange(row, COL_CREATED_TS).setValue(now);
-    appts.getRange(row, COL_ASSIGNED).setValue(assignee);
-    appts.getRange(row, COL_MODE).setValue(opts.mode || 'Auto');
-    appts.getRange(row, COL_ASSIGNED_BY).setValue(user);
+    // Update the values array in memory (0-based indices)
+    vals[COL_CREATED_TS - 1] = now;
+    vals[COL_ASSIGNED - 1] = assignee;
+    vals[COL_MODE - 1] = opts.mode || 'Auto';
+    vals[COL_ASSIGNED_BY - 1] = user;
+
+    // Write back entire row in one call
+    rowRange.setValues([vals]);
 
     // Note: Logging was done in advanceRoundRobinPointer_ but we might want to ensure 'reason' is passed through.
     // I passed `...auditInfo.details` in advanceRoundRobinPointer_

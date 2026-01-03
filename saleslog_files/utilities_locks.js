@@ -237,10 +237,10 @@ function acquireScriptLockWithRetry(
     if (attempt > 1) {
       Logger.log(
         '[Lock] Retry attempt ' +
-          attempt +
-          ' after ' +
-          currentDelay +
-          'ms delay'
+        attempt +
+        ' after ' +
+        currentDelay +
+        'ms delay'
       );
       Utilities.sleep(currentDelay);
       // Calculate next delay using exponential backoff
@@ -262,8 +262,8 @@ function acquireScriptLockWithRetry(
           attempt === 1
             ? 0
             : attempt === 2
-            ? initialDelayMs
-            : currentDelay / backoffMultiplier,
+              ? initialDelayMs
+              : currentDelay / backoffMultiplier,
         acquired: acquired,
         durationMs: attemptDuration,
       });
@@ -272,10 +272,10 @@ function acquireScriptLockWithRetry(
         const totalTime = Date.now() - startTime;
         Logger.log(
           '[Lock] ✓ Lock acquired on attempt ' +
-            attempt +
-            ' (' +
-            totalTime +
-            'ms total)'
+          attempt +
+          ' (' +
+          totalTime +
+          'ms total)'
         );
 
         return {
@@ -289,10 +289,10 @@ function acquireScriptLockWithRetry(
         // Lock not acquired on this attempt
         Logger.log(
           '[Lock] ✗ Lock not acquired on attempt ' +
-            attempt +
-            ' (waited ' +
-            attemptDuration +
-            'ms)'
+          attempt +
+          ' (waited ' +
+          attemptDuration +
+          'ms)'
         );
       }
     } catch (error) {
@@ -330,15 +330,15 @@ function acquireScriptLockWithRetry(
   Logger.log('[Lock] Error: ' + errorMessage);
   Logger.log(
     '[Lock] Retry configuration: maxRetries=' +
-      maxRetries +
-      ', initialDelay=' +
-      initialDelayMs +
-      'ms' +
-      ', multiplier=' +
-      backoffMultiplier +
-      ', timeout=' +
-      timeoutMs +
-      'ms'
+    maxRetries +
+    ', initialDelay=' +
+    initialDelayMs +
+    'ms' +
+    ', multiplier=' +
+    backoffMultiplier +
+    ', timeout=' +
+    timeoutMs +
+    'ms'
   );
   Logger.log('[Lock] Attempt history: ' + JSON.stringify(attemptDetails));
 
@@ -371,29 +371,7 @@ function acquireScriptLockWithRetry(
  *   return { success: false, error: validation.error };
  * }
  */
-function validateLockResult(lockResult, operation) {
-  if (!lockResult.success) {
-    const errorMsg =
-      'Could not acquire lock for ' +
-      operation +
-      '. ' +
-      'Attempted ' +
-      lockResult.attempts +
-      ' times over ' +
-      lockResult.totalTime +
-      'ms. ' +
-      'Please try again in a moment.';
-    return {
-      valid: false,
-      error: errorMsg,
-    };
-  }
 
-  return {
-    valid: true,
-    error: null,
-  };
-}
 
 /**
  * Gets a human-readable summary of lock acquisition result
@@ -407,25 +385,7 @@ function validateLockResult(lockResult, operation) {
  * Logger.log(getLockResultSummary(lockResult));
  * // Output: "Lock acquired on attempt 2 (305ms total)"
  */
-function getLockResultSummary(lockResult) {
-  if (lockResult.success) {
-    return (
-      'Lock acquired on attempt ' +
-      lockResult.attempts +
-      ' (' +
-      lockResult.totalTime +
-      'ms total)'
-    );
-  } else {
-    return (
-      'Lock acquisition failed after ' +
-      lockResult.attempts +
-      ' attempts (' +
-      lockResult.totalTime +
-      'ms total)'
-    );
-  }
-}
+
 
 // ============================================================================
 // MODULE EXPORTS (for documentation purposes)
