@@ -32,76 +32,67 @@ function getDashboardData() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
 
     // ---------------------------------------------------------
-    // STEP 1: DYNAMIC USER MAP & ROSTER INIT
+    // STEP 1: USER MAP (For Log "User" Column / Actors)
+    // Map: Email (Lower) -> Name
+    // Source: RR_USERS (Col A=Name, Col D=Email)
     // ---------------------------------------------------------
-    const userMap = {};  // Email (lowercase) -> Name
-    const repStats = {}; // Name -> Count (Initialized to 0)
+    const userMap = {};
+    const usersRange = ss.getRangeByName('RR_USERS');
+    if (usersRange) {
+      const values = usersRange.getValues();
+      // Expecting A=Name(0), ... D=Email(3)
+      for (let i = 0; i < values.length; i++) {
+        const name = String(values[i][0]).trim();
+        const email = String(values[i][3]).trim().toLowerCase();
+        if (email && name) {
+          userMap[email] = name;
+        }
+      }
+    }
 
-    try {
-      // Try to get the named range "RR_USERS"
-      // Expected Format: Col A = Name, Col D = Email (Indices 0 and 3)
-      const usersRange = ss.getRangeByName('RR_USERS');
-      if (usersRange) {
-        const usersData = usersRange.getValues();
-        usersData.forEach(row => {
-          const name = String(row[0]).trim();
-          const email = String(row[3]).trim().toLowerCase();
-
+    // ---------------------------------------------------------
+    // STEP 2: INITIALIZE LEADERBOARD (repStats)
+    // Source: RR_ROSTER (Col A=Name) - Initialize everyone to 0
+    // ---------------------------------------------------------
+    const repStats = {};
+    const rosterSheet = ss.getSheetByName('RR_ROSTER');
+    if (rosterSheet) {
+      const lastRow = rosterSheet.getLastRow();
+      if (lastRow > 1) { // Assuming Row 1 is header
+        const rosterData = rosterSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+        rosterData.forEach(r => {
+          const name = String(r[0]).trim();
           if (name) {
-            // Build Map
-            if (email) {
-              userMap[email] = name;
-            }
-            // Initialize Rep Stats (Leaderboard) for everyone in this list
             repStats[name] = 0;
           }
         });
-      } else {
-        // FALLBACK: If RR_USERS not defined, try RR_ROSTER for Reps at least
-        console.warn('Named range RR_USERS not found. Falling back to RR_ROSTER.');
-        const rosterSheet = ss.getSheetByName('RR_ROSTER');
-        if (rosterSheet && rosterSheet.getLastRow() > 1) {
-          const rosterData = rosterSheet.getRange(2, 1, rosterSheet.getLastRow()-1, 1).getValues();
-          rosterData.forEach(r => {
-             const name = String(r[0]).trim();
-             if(name) repStats[name] = 0;
-          });
-        }
       }
-    } catch (e) {
-      console.warn('Error building user map/roster: ' + e.message);
     }
 
     // ---------------------------------------------------------
-    // STEP 2: FETCH LOGS
+    // STEP 3: FETCH & PROCESS LOGS
     // ---------------------------------------------------------
     const auditSheet = ss.getSheetByName('RR_AUDIT');
     if (!auditSheet) {
-      // Return safe defaults if audit sheet is missing
       return { stats: { totalAssignments: 0, manualOverrides: 0, activeUsersCount: 0 }, feed: [], leaderboard: [] };
     }
 
-    const lastRow = auditSheet.getLastRow();
-    const headersRaw = auditSheet.getRange(1, 1, 1, 5).getValues()[0]; // Just to confirm structure if needed
-
-    // Optimization: Grab the last 500-1000 rows or filtering for Today
-    // If today is empty, we still likely want to scan to check.
+    const lastAuditRow = auditSheet.getLastRow();
+    // Optimization: Grab the last 1000 rows
     const MAX_ROWS = 1000;
     let startRow = 2;
-    if (lastRow > MAX_ROWS) {
-      startRow = lastRow - MAX_ROWS + 1;
+    if (lastAuditRow > MAX_ROWS) {
+      startRow = lastAuditRow - MAX_ROWS + 1;
     }
 
-    let data = [];
-    if (lastRow >= 2) {
-      const numRows = lastRow - startRow + 1;
+    let logData = [];
+    if (lastAuditRow >= 2) {
+      const numRows = lastAuditRow - startRow + 1;
       // Col A=Timestamp, B=User, C=Action, D=Reference, E=Details
-      data = auditSheet.getRange(startRow, 1, numRows, 5).getValues();
+      logData = auditSheet.getRange(startRow, 1, numRows, 5).getValues();
     }
 
-    // ---------------------------------------------------------
-    // STEP 3: PARSE & AGGREGATE
-    // ---------------------------------------------------------
+    // Setup for aggregation
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -112,52 +103,54 @@ function getDashboardData() {
     };
 
     const feed = [];
-    const activeActors = new Set(); // For "Active Users" count (users acting on the system)
+    const activeActors = new Set();
 
-    // Process loops in reverse to build feed naturally
-    for (let i = data.length - 1; i >= 0; i--) {
-      const row = data[i];
+    // Process logs in reverse (Newest First)
+    for (let i = logData.length - 1; i >= 0; i--) {
+      const row = logData[i];
       const ts = new Date(row[0]);
-      const userEmail = String(row[1]).toLowerCase();
+      const userEmail = String(row[1]).trim().toLowerCase();
       const action = String(row[2]);
       const reference = String(row[3]);
       const detailsRaw = String(row[4]);
 
       const isToday = ts >= today;
 
-      // Map Actor Name
+      // 1. Resolve Actor Name using USER_MAP
+      //    (Use map if found, else fallback/formatter)
       const actorName = userMap[userEmail] || mapEmailFallback_(userEmail);
 
-      // Parse Details
+      // 2. Parse Details
       const details = parseDetailsString_(detailsRaw);
 
-      // --- LOGIC FOR TODAY'S STATS ---
       if (isToday) {
-        // 1. Manual Overrides
+        // --- Today's Stats ---
+
+        // Manual Actions
         if (action.toLowerCase().includes('reassign') || action.toLowerCase().includes('override')) {
           stats.manualOverrides++;
         }
 
-        // 2. Assignments & Leaderboard
+        // Assignments & Leaderboard
         if (action === 'Assignment') {
           stats.totalAssignments++;
 
-          const assigneeRaw = details['assignee'];
-          if (assigneeRaw) {
-             // Only increment if we have a name.
-             // If this person wasn't in RR_USERS, add them now to stats
-             if (!repStats.hasOwnProperty(assigneeRaw)) {
-               repStats[assigneeRaw] = 0;
+          // Use assignee value directly from details
+          const assignee = details['assignee'];
+          if (assignee) {
+             // If not in roster (e.g. removed user), init them to 0 so we can increment
+             if (repStats[assignee] === undefined) {
+               repStats[assignee] = 0;
              }
-             repStats[assigneeRaw]++;
+             repStats[assignee]++;
           }
         }
 
-        // 3. Active Users (Actors)
-        activeActors.add(userEmail);
+        // Active Users (Actors)
+        if (userEmail) activeActors.add(userEmail);
       }
 
-      // --- FEED CONSTRUCTION (Last 50) ---
+      // --- Feed Construction (Limit 50) ---
       if (feed.length < 50) {
         feed.push({
           time: formatTime_(ts),
@@ -171,16 +164,14 @@ function getDashboardData() {
     }
 
     // ---------------------------------------------------------
-    // STEP 4: FINALIZE RETURN
+    // STEP 4: RESULT OBJECT
     // ---------------------------------------------------------
-
-    // Leaderboard Array
     const leaderboard = Object.keys(repStats).map(name => ({
       name: name,
       count: repStats[name]
     }));
 
-    // Sort: High to Low
+    // Sort High -> Low
     leaderboard.sort((a, b) => b.count - a.count);
 
     stats.activeUsersCount = activeActors.size;
@@ -193,7 +184,6 @@ function getDashboardData() {
     };
 
   } catch (err) {
-    // Error handling
     return { error: err.toString() };
   }
 }
