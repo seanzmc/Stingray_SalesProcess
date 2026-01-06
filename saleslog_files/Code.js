@@ -32,24 +32,32 @@ function getDashboardData() {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
 
     // ---------------------------------------------------------
-    // STEP 1: USER MAP (For Log "User" Column / Actors)
-    // Map: Email (Lower) -> Name
-    // Source: RR_USERS (Col A=Name, Col D=Email)
+    // ---------------------------------------------------------
+    // STEP 1: USER MAP (Strict Sheet Access)
+    // Source: Sheet 'RR_USERS' (Direct access, no named ranges)
     // ---------------------------------------------------------
     const userMap = {};
-    const usersRange = ss.getRangeByName('RR_USERS');
-    if (usersRange) {
-      const values = usersRange.getValues();
-      // Expecting A=Name(0), ... D=Email(3)
-      for (let i = 0; i < values.length; i++) {
-        const name = String(values[i][0]).trim();
-        const email = String(values[i][3]).trim().toLowerCase();
-        if (email && name) {
-          userMap[email] = name;
+    const usersSheet = ss.getSheetByName('RR_USERS'); // Access tab directly
+
+    if (usersSheet) {
+      // Grab all data on the sheet regardless of range definitions
+      const data = usersSheet.getDataRange().getValues();
+
+      // Loop through all rows (skipping header if necessary, usually safe to check all)
+      for (let i = 0; i < data.length; i++) {
+        const row = data[i];
+
+        // Safety: Ensure row has at least 4 columns (Indices 0-3)
+        if (row.length >= 4) {
+          const name = String(row[0]).trim();        // Column A (Index 0)
+          const email = String(row[3]).trim().toLowerCase(); // Column D (Index 3)
+
+          if (email && name && email.includes('@')) {
+            userMap[email] = name;
+          }
         }
       }
     }
-
     // ---------------------------------------------------------
     // STEP 2: INITIALIZE LEADERBOARD (repStats)
     // Source: RR_ROSTER (Col A=Name) - Initialize everyone to 0
