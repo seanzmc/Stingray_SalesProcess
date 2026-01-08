@@ -503,7 +503,7 @@ function buildSummarySection(analyticsData) {
 
   return [
     ['MONTHLY ANALYTICS', '', '', '', '', ''], // Row 1 (will merge S1:X1)
-    ['Performance', 'MTD', 'Daily Rate', 'Projected EOM', '', ''], // Row 2
+    ['Performance', 'MTD', 'Daily Rate', 'Pacing EOM', '', ''], // Row 2
     [
       'New Sales',
       analyticsData.totals.newDelivered,
@@ -602,7 +602,7 @@ function formatSummarySection(sheet) {
       .getRange(3, ANALYTICS_START_COL + 2, 3, 1) // Column U is Start + 2
       .setNumberFormat('0.00');
 
-    // Number formatting for Projected EOM (V3:V5) - Whole number
+    // Number formatting for Pacing EOM (V3:V5) - Whole number
     sheet
       .getRange(3, ANALYTICS_START_COL + 3, 3, 1) // Column V is Start + 3
       .setNumberFormat('0');
@@ -613,8 +613,8 @@ function formatSummarySection(sheet) {
       .getRange(6, ANALYTICS_START_COL, 1, 4)
       .setBorder(
         true, null, null, null, null, null, // top, left, bottom, right, vertical, horizontal
-        '#D3D3D3', // light gray (approximation)
-        SpreadsheetApp.BorderStyle.DOTTED
+        '#6D9EEB', // cornflower blue
+        SpreadsheetApp.BorderStyle.SOLID_MEDIUM
       );
 
     // Format salesperson header row (row 8)
