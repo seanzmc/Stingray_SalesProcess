@@ -500,40 +500,43 @@ function buildSummarySection(analyticsData) {
     }/${now.getDate()}/${now.getFullYear()} ${now.toLocaleTimeString()}`;
 
   const sellingDays = analyticsData.teamMetrics.sellingDays;
-  const newPerDay =
-    sellingDays > 0 ? analyticsData.teamMetrics.newPerDay : 'N/A';
-  const usedPerDay =
-    sellingDays > 0 ? analyticsData.teamMetrics.usedPerDay : 'N/A';
 
   return [
     ['MONTHLY ANALYTICS', '', '', '', '', ''], // Row 1 (will merge S1:X1)
-    ['Metric', 'Value', 'Metric', 'Value', '', ''], // Row 2
+    ['Performance', 'MTD', 'Daily Rate', 'Projected EOM', '', ''], // Row 2
     [
-      'Total Delivered',
-      analyticsData.totals.delivered,
-      'Selling Days',
-      sellingDays,
+      'New Sales',
+      analyticsData.totals.newDelivered,
+      '=IF(T6=0, "", T3/T6)',
+      '=IF(T6=0, "", U3*V6)',
       '',
       '',
     ], // Row 3
     [
-      'New Delivered',
-      analyticsData.totals.newDelivered,
-      'New Sold per Day',
-      newPerDay,
+      'Used Sales',
+      analyticsData.totals.usedDelivered,
+      '=IF(T6=0, "", T4/T6)',
+      '=IF(T6=0, "", U4*V6)',
       '',
       '',
     ], // Row 4
     [
-      'Used Delivered',
-      analyticsData.totals.usedDelivered,
-      'Used Sold per Day',
-      usedPerDay,
+      'Total Sales',
+      analyticsData.totals.delivered,
+      '=IF(T6=0, "", T5/T6)',
+      '=IF(T6=0, "", U5*V6)',
       '',
       '',
     ], // Row 5
-    ['Last Updated', dateStr, '', '', '', ''], // Row 6
-    ['', '', '', '', '', ''], // Row 7 (separator)
+    [
+      'Selling Days Passed',
+      sellingDays,
+      'Total Selling Days',
+      '=NETWORKDAYS.INTL(EOMONTH(A2, -1) + 1, EOMONTH(A2, 0), 11)',
+      '',
+      '',
+    ], // Row 6
+    ['Last Updated', dateStr, '', '', '', ''], // Row 7
     ['Salesperson', 'New', 'Used', 'Total', '% of Team', 'Rank'], // Row 8
   ];
 }
@@ -586,13 +589,33 @@ function formatSummarySection(sheet) {
       .setFontFamily('Calibri')
       .setFontSize(10);
 
-    // Format data rows (3-6)
+    // Format data rows (3-7)
     sheet
-      .getRange(3, ANALYTICS_START_COL, 4, ANALYTICS_COL_COUNT)
+      .getRange(3, ANALYTICS_START_COL, 5, ANALYTICS_COL_COUNT)
       .setFontFamily('Calibri')
       .setFontSize(10)
       .setHorizontalAlignment('center')
       .setFontWeight('bold');
+
+    // Number formatting for Daily Rate (U3:U5) - 2 decimals
+    sheet
+      .getRange(3, ANALYTICS_START_COL + 2, 3, 1) // Column U is Start + 2
+      .setNumberFormat('0.00');
+
+    // Number formatting for Projected EOM (V3:V5) - Whole number
+    sheet
+      .getRange(3, ANALYTICS_START_COL + 3, 3, 1) // Column V is Start + 3
+      .setNumberFormat('0');
+
+    // Border for Row 6 (Selling Days context)
+    // S6:V6 (Start, Row 6, 4 columns)
+    sheet
+      .getRange(6, ANALYTICS_START_COL, 1, 4)
+      .setBorder(
+        true, null, null, null, null, null, // top, left, bottom, right, vertical, horizontal
+        '#D3D3D3', // light gray (approximation)
+        SpreadsheetApp.BorderStyle.DOTTED
+      );
 
     // Format salesperson header row (row 8)
     sheet
