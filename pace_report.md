@@ -14,7 +14,7 @@ S2:V6 Team Stats
 
 New Layout:
 *Changed* S2:V7 Team Stats
-  S2: Performance	[Header] T2: MTD [Header] U2: Daily Rate [Header] V2: Projected EOM [Header]
+  S2: Performance [Header] T2: MTD [Header] U2: Daily Rate [Header] V2: Projected EOM [Header]
   S3: New Sales [Static Label] T3: 28 [Value] U3: 9.33 [Value] V3: 243 [Value]
   S4: Used Sales [Static Label] T4: 19 [Value] U4: 6.33 [Value] V4: 165 [Value]
   S5: Total Sales [Static Label] T5: 47 [Value] U5: 15.66 [Value] V5: 407 [Value]
@@ -30,12 +30,14 @@ Prompt 1:
 You are modifying an existing Google Apps Script project that builds a Monthly Analytics table area in a Google Sheet.
 
 Hard rules:
+
 - DO NOT change any existing calculation logic, query logic, data pull logic, or business rules.
 - DO NOT rename any existing functions unless strictly required for compilation.
 - DO NOT alter how the underlying metric values are computed.
 - Only modify: (1) where outputs are placed (cell locations/merged ranges/formatting), and (2) add the new “pacing” formulas (or their scripted equivalent) to populate the new layout.
 
 Task:
+
 1) Find the function(s) responsible for building/rendering the KPI table area (header row, labels, values, merges, formatting).
 2) Identify the current output map: which metrics are written where (A1 notation or row/col indices).
 3) Propose a minimal diff plan: a new output map that matches the new 4-column layout:
