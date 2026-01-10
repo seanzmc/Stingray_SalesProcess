@@ -26,174 +26,385 @@ function doGet(e) {
 /**
  * Main API called by the frontend to get fresh dashboard data.
  * Returns { stats: {}, feed: [], leaderboard: [] }
+ *
+ * Caching Strategy (Cache-Aside):
+ * 1) Attempt to read a previously computed payload from CacheService.
+ * 2) On cache miss (or cache read/parse error), compute from Spreadsheet data.
+ * 3) Store the computed payload back into cache with a configurable TTL.
+ *
+ * Notes on "async":
+ * - Google Apps Script executes server-side code synchronously.
+ * - Multiple executions can run concurrently (e.g., multiple viewers refreshing).
+ *   We use LockService on cache-miss to reduce duplicate recomputation.
  */
 function getDashboardData() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const cache = CacheService.getScriptCache();
+    const cacheKey = getDashboardCacheKey_(ss);
+    const ttlSeconds = getDashboardCacheTtlSeconds_();
 
-    // ---------------------------------------------------------
-    // ---------------------------------------------------------
-    // STEP 1: USER MAP (Strict Sheet Access)
-    // Source: Sheet 'RR_USERS' (Direct access, no named ranges)
-    // ---------------------------------------------------------
-    const userMap = {};
-    const usersSheet = ss.getSheetByName('RR_USERS'); // Access tab directly
-
-    if (usersSheet) {
-      // Grab all data on the sheet regardless of range definitions
-      const data = usersSheet.getDataRange().getValues();
-
-      // Loop through all rows (skipping header if necessary, usually safe to check all)
-      for (let i = 0; i < data.length; i++) {
-        const row = data[i];
-
-        // Safety: Ensure row has at least 4 columns (Indices 0-3)
-        if (row.length >= 4) {
-          const name = String(row[0]).trim();        // Column A (Index 0)
-          const email = String(row[3]).trim().toLowerCase(); // Column D (Index 3)
-
-          if (email && name && email.includes('@')) {
-            userMap[email] = name;
-          }
-        }
-      }
-    }
-    // ---------------------------------------------------------
-    // STEP 2: INITIALIZE LEADERBOARD (repStats)
-    // Source: RR_ROSTER (Col A=Name) - Initialize everyone to 0
-    // ---------------------------------------------------------
-    const repStats = {};
-    const rosterSheet = ss.getSheetByName('RR_ROSTER');
-    if (rosterSheet) {
-      const lastRow = rosterSheet.getLastRow();
-      if (lastRow > 1) { // Assuming Row 1 is header
-        const rosterData = rosterSheet.getRange(2, 1, lastRow - 1, 1).getValues();
-        rosterData.forEach(r => {
-          const name = String(r[0]).trim();
-          if (name) {
-            repStats[name] = 0;
-          }
-        });
-      }
+    // 1) Cache read (best-effort). Any cache error should fall back to sheet reads.
+    const cachedPayload = getCachedDashboardData_(cache, cacheKey);
+    if (cachedPayload) {
+      return cachedPayload;
     }
 
-    // ---------------------------------------------------------
-    // STEP 3: FETCH & PROCESS LOGS
-    // ---------------------------------------------------------
-    const auditSheet = ss.getSheetByName('RR_AUDIT');
-    if (!auditSheet) {
-      return { stats: { totalAssignments: 0, manualOverrides: 0, activeUsersCount: 0 }, feed: [], leaderboard: [] };
-    }
+    // 2) Cache miss: use a lock to reduce duplicate recomputation across concurrent executions.
+    //    This is especially useful when multiple users have the dashboard open.
+    const lock = LockService.getScriptLock();
+    const lockAcquired = tryAcquireDashboardLock_(lock);
 
-    const lastAuditRow = auditSheet.getLastRow();
-    // Optimization: Grab the last 1000 rows
-    const MAX_ROWS = 1000;
-    let startRow = 2;
-    if (lastAuditRow > MAX_ROWS) {
-      startRow = lastAuditRow - MAX_ROWS + 1;
-    }
-
-    let logData = [];
-    if (lastAuditRow >= 2) {
-      const numRows = lastAuditRow - startRow + 1;
-      // Col A=Timestamp, B=User, C=Action, D=Reference, E=Details
-      logData = auditSheet.getRange(startRow, 1, numRows, 5).getValues();
-    }
-
-    // Setup for aggregation
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    const stats = {
-      totalAssignments: 0,
-      manualOverrides: 0,
-      activeUsersCount: 0
-    };
-
-    const feed = [];
-    const activeActors = new Set();
-
-    // Process logs in reverse (Newest First)
-    for (let i = logData.length - 1; i >= 0; i--) {
-      const row = logData[i];
-      const ts = new Date(row[0]);
-      const userEmail = String(row[1]).trim().toLowerCase();
-      const action = String(row[2]);
-      const reference = String(row[3]);
-      const detailsRaw = String(row[4]);
-
-      const isToday = ts >= today;
-
-      // 1. Resolve Actor Name using USER_MAP
-      //    (Use map if found, else fallback/formatter)
-      const actorName = userMap[userEmail] || mapEmailFallback_(userEmail);
-
-      // 2. Parse Details
-      const details = parseDetailsString_(detailsRaw);
-
-      if (isToday) {
-        // --- Today's Stats ---
-
-        // Manual Actions
-        if (action.toLowerCase().includes('reassign') || action.toLowerCase().includes('override')) {
-          stats.manualOverrides++;
+    if (lockAcquired) {
+      try {
+        // Double-check cache after acquiring lock (another execution may have populated it).
+        const cachedAfterLock = getCachedDashboardData_(cache, cacheKey);
+        if (cachedAfterLock) {
+          return cachedAfterLock;
         }
 
-        // Assignments & Leaderboard
-        if (action === 'Assignment') {
-          stats.totalAssignments++;
-
-          // Use assignee value directly from details
-          const assignee = details['assignee'];
-          if (assignee) {
-             // If not in roster (e.g. removed user), init them to 0 so we can increment
-             if (repStats[assignee] === undefined) {
-               repStats[assignee] = 0;
-             }
-             repStats[assignee]++;
-          }
-        }
-
-        // Active Users (Actors)
-        if (userEmail) activeActors.add(userEmail);
-      }
-
-      // --- Feed Construction (Limit 50) ---
-      if (feed.length < 50) {
-        feed.push({
-          time: formatTime_(ts),
-          actor: actorName,
-          action: action,
-          details: details,
-          message: buildFeedMessage_(actorName, action, details, reference),
-          isToday: isToday
-        });
+        const fresh = computeDashboardDataFromSpreadsheet_(ss);
+        setCachedDashboardData_(cache, cacheKey, fresh, ttlSeconds);
+        return fresh;
+      } finally {
+        releaseDashboardLock_(lock);
       }
     }
 
-    // ---------------------------------------------------------
-    // STEP 4: RESULT OBJECT
-    // ---------------------------------------------------------
-    const leaderboard = Object.keys(repStats).map(name => ({
-      name: name,
-      count: repStats[name]
-    }));
+    // 3) If lock is busy, another execution is likely computing. Do a short wait and re-check.
+    //    If still missing, compute without lock so we can still respond quickly.
+    Utilities.sleep(150);
+    const cachedAfterWait = getCachedDashboardData_(cache, cacheKey);
+    if (cachedAfterWait) {
+      return cachedAfterWait;
+    }
 
-    // Sort High -> Low
-    leaderboard.sort((a, b) => b.count - a.count);
-
-    stats.activeUsersCount = activeActors.size;
-
-    return {
-      stats: stats,
-      feed: feed,
-      leaderboard: leaderboard,
-      lastUpdated: new Date().toLocaleTimeString()
-    };
-
+    const fresh = computeDashboardDataFromSpreadsheet_(ss);
+    setCachedDashboardData_(cache, cacheKey, fresh, ttlSeconds);
+    return fresh;
   } catch (err) {
     return { error: err.toString() };
   }
+}
+
+/** Returns a stable cache key for the current spreadsheet context. */
+function getDashboardCacheKey_(ss) {
+  // Include Spreadsheet ID for safety in case this code is reused in multiple containers.
+  const spreadsheetId = ss && typeof ss.getId === 'function' ? ss.getId() : 'unknown';
+  return `rr_dashboard_data::${spreadsheetId}::v1`;
+}
+
+/** Returns the cache TTL in seconds (configurable via Script Properties). */
+function getDashboardCacheTtlSeconds_() {
+  // Script Property name: RR_DASHBOARD_CACHE_TTL_SECONDS
+  // Default: 30 seconds (aligned with frontend refresh interval)
+  // Clamp: 5s..600s to avoid extreme values.
+  const DEFAULT_TTL = 30;
+  const MIN_TTL = 5;
+  const MAX_TTL = 600;
+
+  try {
+    const raw = PropertiesService.getScriptProperties().getProperty(
+      'RR_DASHBOARD_CACHE_TTL_SECONDS'
+    );
+    if (!raw) return DEFAULT_TTL;
+
+    const parsed = Number(raw);
+    if (!isFinite(parsed)) return DEFAULT_TTL;
+    return Math.min(MAX_TTL, Math.max(MIN_TTL, Math.floor(parsed)));
+  } catch (e) {
+    // If Script Properties isn't available for any reason, fall back safely.
+    try {
+      logWarning('getDashboardCacheTtlSeconds_', 'Failed to read TTL property', {
+        error: e.toString(),
+      });
+    } catch (_) {
+      Logger.log('getDashboardCacheTtlSeconds_ warning: ' + e);
+    }
+    return DEFAULT_TTL;
+  }
+}
+
+/** Best-effort cache read + parse + validation. Returns null on miss/error. */
+function getCachedDashboardData_(cache, cacheKey) {
+  let cachedStr = null;
+  try {
+    cachedStr = cache.get(cacheKey);
+  } catch (e) {
+    // Cache read errors must NOT fail the request.
+    try {
+      logWarning('getDashboardData', 'Cache get failed; falling back to sheets', {
+        cacheKey,
+        error: e.toString(),
+      });
+    } catch (_) {
+      Logger.log('Dashboard cache get failed: ' + e);
+    }
+    return null;
+  }
+
+  if (!cachedStr) return null;
+
+  const parsed = safeJsonParse_(cachedStr);
+  if (!isValidDashboardData_(parsed)) {
+    // Treat as miss if shape is wrong.
+    return null;
+  }
+
+  return parsed;
+}
+
+/** Best-effort cache write. Never throws. */
+function setCachedDashboardData_(cache, cacheKey, payload, ttlSeconds) {
+  try {
+    const json = JSON.stringify(payload);
+
+    // Script cache values have size limits. If too large, skip caching (non-fatal).
+    // Keep conservative headroom to avoid errors.
+    const MAX_CHARS = 90000;
+    if (json.length > MAX_CHARS) {
+      try {
+        logWarning('getDashboardData', 'Dashboard payload too large for cache; skipping cache put', {
+          cacheKey,
+          sizeChars: json.length,
+          maxChars: MAX_CHARS,
+        });
+      } catch (_) {
+        Logger.log('Dashboard payload too large for cache: ' + json.length);
+      }
+      return;
+    }
+
+    cache.put(cacheKey, json, ttlSeconds);
+  } catch (e) {
+    // Cache write errors are non-fatal.
+    try {
+      logWarning('getDashboardData', 'Cache put failed; continuing without cache', {
+        cacheKey,
+        ttlSeconds,
+        error: e.toString(),
+      });
+    } catch (_) {
+      Logger.log('Dashboard cache put failed: ' + e);
+    }
+  }
+}
+
+/** Returns true if the lock is acquired; false if busy/error. */
+function tryAcquireDashboardLock_(lock) {
+  try {
+    // Keep lock wait short so UI stays responsive.
+    return lock.tryLock(2000);
+  } catch (e) {
+    try {
+      logWarning('getDashboardData', 'Lock acquisition failed; proceeding without lock', {
+        error: e.toString(),
+      });
+    } catch (_) {
+      Logger.log('Dashboard lock acquisition failed: ' + e);
+    }
+    return false;
+  }
+}
+
+/** Releases lock best-effort; never throws. */
+function releaseDashboardLock_(lock) {
+  try {
+    lock.releaseLock();
+  } catch (e) {
+    try {
+      logWarning('getDashboardData', 'Lock release failed', { error: e.toString() });
+    } catch (_) {
+      Logger.log('Dashboard lock release failed: ' + e);
+    }
+  }
+}
+
+/** Safe JSON.parse that never throws. */
+function safeJsonParse_(str) {
+  try {
+    return JSON.parse(str);
+  } catch (e) {
+    try {
+      logWarning('getDashboardData', 'Cache JSON parse failed; treating as miss', {
+        error: e.toString(),
+      });
+    } catch (_) {
+      Logger.log('Dashboard cache JSON parse failed: ' + e);
+    }
+    return null;
+  }
+}
+
+/** Shape validation to avoid returning corrupted/partial cache entries. */
+function isValidDashboardData_(obj) {
+  if (!obj || typeof obj !== 'object') return false;
+  if (!obj.stats || typeof obj.stats !== 'object') return false;
+  if (!Array.isArray(obj.feed)) return false;
+  if (!Array.isArray(obj.leaderboard)) return false;
+  return true;
+}
+
+/**
+ * Primary data source read/compute for dashboard.
+ * Kept separate from caching for clarity and testability.
+ */
+function computeDashboardDataFromSpreadsheet_(ss) {
+  // ---------------------------------------------------------
+  // STEP 1: USER MAP (Strict Sheet Access)
+  // Source: Sheet 'RR_USERS' (Direct access, no named ranges)
+  // ---------------------------------------------------------
+  const userMap = {};
+  const usersSheet = ss.getSheetByName('RR_USERS');
+
+  if (usersSheet) {
+    const data = usersSheet.getDataRange().getValues();
+
+    // Loop through all rows (safe to check all; sheet is expected to be small).
+    for (let i = 0; i < data.length; i++) {
+      const row = data[i];
+
+      // Safety: Ensure row has at least 4 columns (Indices 0-3)
+      if (row.length >= 4) {
+        const name = String(row[0]).trim(); // Column A (Index 0)
+        const email = String(row[3]).trim().toLowerCase(); // Column D (Index 3)
+
+        if (email && name && email.includes('@')) {
+          userMap[email] = name;
+        }
+      }
+    }
+  }
+
+  // ---------------------------------------------------------
+  // STEP 2: INITIALIZE LEADERBOARD (repStats)
+  // Source: RR_ROSTER (Col A=Name) - Initialize everyone to 0
+  // ---------------------------------------------------------
+  const repStats = {};
+  const rosterSheet = ss.getSheetByName('RR_ROSTER');
+  if (rosterSheet) {
+    const lastRow = rosterSheet.getLastRow();
+    if (lastRow > 1) {
+      const rosterData = rosterSheet.getRange(2, 1, lastRow - 1, 1).getValues();
+      rosterData.forEach((r) => {
+        const name = String(r[0]).trim();
+        if (name) {
+          repStats[name] = 0;
+        }
+      });
+    }
+  }
+
+  // ---------------------------------------------------------
+  // STEP 3: FETCH & PROCESS LOGS
+  // ---------------------------------------------------------
+  const auditSheet = ss.getSheetByName('RR_AUDIT');
+  if (!auditSheet) {
+    return {
+      stats: { totalAssignments: 0, manualOverrides: 0, activeUsersCount: 0 },
+      feed: [],
+      leaderboard: [],
+      lastUpdated: new Date().toLocaleTimeString(),
+    };
+  }
+
+  const lastAuditRow = auditSheet.getLastRow();
+  const MAX_ROWS = 1000;
+  let startRow = 2;
+  if (lastAuditRow > MAX_ROWS) {
+    startRow = lastAuditRow - MAX_ROWS + 1;
+  }
+
+  let logData = [];
+  if (lastAuditRow >= 2) {
+    const numRows = lastAuditRow - startRow + 1;
+    // Col A=Timestamp, B=User, C=Action, D=Reference, E=Details
+    logData = auditSheet.getRange(startRow, 1, numRows, 5).getValues();
+  }
+
+  // Setup for aggregation
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const stats = {
+    totalAssignments: 0,
+    manualOverrides: 0,
+    activeUsersCount: 0,
+  };
+
+  const feed = [];
+  const activeActors = new Set();
+
+  // Process logs in reverse (Newest First)
+  for (let i = logData.length - 1; i >= 0; i--) {
+    const row = logData[i];
+    const ts = new Date(row[0]);
+    const userEmail = String(row[1]).trim().toLowerCase();
+    const action = String(row[2]);
+    const reference = String(row[3]);
+    const detailsRaw = String(row[4]);
+
+    const isToday = ts >= today;
+
+    // 1) Resolve Actor Name using USER_MAP (fallback if unknown)
+    const actorName = userMap[userEmail] || mapEmailFallback_(userEmail);
+
+    // 2) Parse Details
+    const details = parseDetailsString_(detailsRaw);
+
+    if (isToday) {
+      // Manual Actions
+      const lowerAction = action.toLowerCase();
+      if (lowerAction.includes('reassign') || lowerAction.includes('override')) {
+        stats.manualOverrides++;
+      }
+
+      // Assignments & Leaderboard
+      if (action === 'Assignment') {
+        stats.totalAssignments++;
+        const assignee = details['assignee'];
+        if (assignee) {
+          if (repStats[assignee] === undefined) {
+            repStats[assignee] = 0;
+          }
+          repStats[assignee]++;
+        }
+      }
+
+      // Active Users (Actors)
+      if (userEmail) activeActors.add(userEmail);
+    }
+
+    // Feed Construction (Limit 50)
+    if (feed.length < 50) {
+      feed.push({
+        time: formatTime_(ts),
+        actor: actorName,
+        action: action,
+        details: details,
+        message: buildFeedMessage_(actorName, action, details, reference),
+        isToday: isToday,
+      });
+    }
+  }
+
+  // ---------------------------------------------------------
+  // STEP 4: RESULT OBJECT
+  // ---------------------------------------------------------
+  const leaderboard = Object.keys(repStats).map((name) => ({
+    name: name,
+    count: repStats[name],
+  }));
+
+  leaderboard.sort((a, b) => b.count - a.count);
+  stats.activeUsersCount = activeActors.size;
+
+  return {
+    stats: stats,
+    feed: feed,
+    leaderboard: leaderboard,
+    lastUpdated: new Date().toLocaleTimeString(),
+  };
 }
 
 // -----------------------------------------------------------------------------
