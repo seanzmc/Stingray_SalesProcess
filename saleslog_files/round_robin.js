@@ -58,6 +58,10 @@ const AUDIT_ACTIONS = {
   ADVANCE: 'Advance',
 };
 
+const AUDIT_LOG_NAME_CACHE_TTL_MS = 5 * 60 * 1000;
+let auditLogNameCache_ = null;
+let auditLogNameCacheTs_ = 0;
+
 /***** UTIL: SHEET ACCESS + SANITIZATION *****/
 /** Returns required sheet or throws a descriptive error. */
 function getSheetOrThrow_(name) {
@@ -77,6 +81,72 @@ function getSheetOrThrow_(name) {
 function getSheetOrNull_(name) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   return ss.getSheetByName(name);
+}
+
+function getAuditLogNameMap_() {
+  const nowMs = new Date().getTime();
+  if (auditLogNameCache_ && nowMs - auditLogNameCacheTs_ < AUDIT_LOG_NAME_CACHE_TTL_MS) {
+    return auditLogNameCache_;
+  }
+
+  const sheet = getSheetOrNull_('RR_USERS');
+  if (!sheet) {
+    auditLogNameCache_ = {};
+    auditLogNameCacheTs_ = nowMs;
+    return auditLogNameCache_;
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    auditLogNameCache_ = {};
+    auditLogNameCacheTs_ = nowMs;
+    return auditLogNameCache_;
+  }
+
+  const data = sheet.getRange(2, 4, lastRow - 1, 2).getValues(); // D=Email, E=Audit Log Name
+  const map = {};
+  for (let i = 0; i < data.length; i++) {
+    const email = String(data[i][0] || '').trim().toLowerCase();
+    const logName = String(data[i][1] || '').trim();
+    if (email && logName) {
+      map[email] = logName;
+    }
+  }
+
+  auditLogNameCache_ = map;
+  auditLogNameCacheTs_ = nowMs;
+  return map;
+}
+
+function toTitleCase_(value) {
+  const lower = String(value || '').trim().toLowerCase();
+  if (!lower) return '';
+  return lower.replace(/(^|[\s\-_'.])([a-z])/g, function (match, sep, ch) {
+    return sep + ch.toUpperCase();
+  });
+}
+
+function normalizeAuditLogName_(name) {
+  const raw = String(name || '').trim();
+  if (!raw) return '';
+
+  const hasUpper = /[A-Z]/.test(raw);
+  const hasLower = /[a-z]/.test(raw);
+  if (hasUpper && hasLower) return raw;
+
+  return toTitleCase_(raw);
+}
+
+function getAuditLogNameFromEmail_(email) {
+  const rawEmail = String(email || '').trim();
+  if (!rawEmail) return '';
+
+  const lowerEmail = rawEmail.toLowerCase();
+  if (!lowerEmail.includes('@')) return normalizeAuditLogName_(rawEmail);
+
+  const map = getAuditLogNameMap_();
+  if (map[lowerEmail]) return normalizeAuditLogName_(map[lowerEmail]);
+  return normalizeAuditLogName_(rawEmail.split('@')[0]);
 }
 
 /** Sanitizes a value before writing to a sheet cell to prevent formula injection. */
@@ -601,7 +671,8 @@ function assignRowAuto_(row, opts = {}) {
 
     // Write assignment fields (Batch Update)
     const now = new Date();
-    const user = safeUserEmail_();
+    const userEmail = opts.auditUser ? opts.auditUser : safeUserEmail_();
+    const user = getAuditLogNameFromEmail_(userEmail);
 
     // Update the values array in memory (0-based indices)
     if (!vals[COL_CREATED_TS - 1]) {
@@ -731,7 +802,8 @@ function logRoundRobinEvent(action, detailsObj) {
     const now = new Date();
 
     // Use system user unless specifically passed in details
-    const user = detailsObj && detailsObj.user ? detailsObj.user : safeUserEmail_();
+    const userEmail = detailsObj && detailsObj.user ? detailsObj.user : safeUserEmail_();
+    const user = getAuditLogNameFromEmail_(userEmail);
 
     // Format details
     let detailsStr = '';
@@ -773,6 +845,94 @@ function logRoundRobinEvent(action, detailsObj) {
       action: action,
     });
   }
+}
+
+function normalizeAuditAction_(action) {
+  const raw = String(action || '').trim();
+  if (!raw) return '';
+
+  const values = Object.values(AUDIT_ACTIONS);
+  if (values.indexOf(raw) !== -1) return raw;
+
+  const lower = raw.toLowerCase();
+  const map = {
+    'assignment': AUDIT_ACTIONS.NEW_APPOINTMENT,
+    'assigned': AUDIT_ACTIONS.NEW_APPOINTMENT,
+    'auto-assigned': AUDIT_ACTIONS.NEW_APPOINTMENT,
+    'new appointment': AUDIT_ACTIONS.NEW_APPOINTMENT,
+    'sidebar appointment': AUDIT_ACTIONS.NEW_APPOINTMENT,
+    'reassigned': AUDIT_ACTIONS.REASSIGNMENT,
+    'reassignment': AUDIT_ACTIONS.REASSIGNMENT,
+    'undo assignment': AUDIT_ACTIONS.UNDO,
+    'rewind': AUDIT_ACTIONS.UNDO,
+    'phoneup': AUDIT_ACTIONS.PHONE_LEAD,
+    'phone up': AUDIT_ACTIONS.PHONE_LEAD,
+    'phone up assigned': AUDIT_ACTIONS.PHONE_LEAD,
+    'phone lead': AUDIT_ACTIONS.PHONE_LEAD,
+    'phone up undo': AUDIT_ACTIONS.UNDO,
+    'pointer manual edit': AUDIT_ACTIONS.POINTER_MANUAL_EDIT,
+    'pointer_manual_edit': AUDIT_ACTIONS.POINTER_MANUAL_EDIT,
+    'reset pointer': AUDIT_ACTIONS.POINTER_RESET,
+    'pointer reset': AUDIT_ACTIONS.POINTER_RESET,
+    'manual override - phone up': AUDIT_ACTIONS.MANUAL_OVERRIDE,
+    'manual override': AUDIT_ACTIONS.MANUAL_OVERRIDE,
+    'manual edit': AUDIT_ACTIONS.MANUAL_EDIT,
+    'roster active change': AUDIT_ACTIONS.ROSTER_ACTIVE_CHANGE,
+    'roster_active_change': AUDIT_ACTIONS.ROSTER_ACTIVE_CHANGE,
+    'roster eligible change': AUDIT_ACTIONS.ROSTER_ELIGIBLE_CHANGE,
+    'roster_eligible_change': AUDIT_ACTIONS.ROSTER_ELIGIBLE_CHANGE,
+    'row inserted': AUDIT_ACTIONS.ROW_INSERTED,
+    'row deleted': AUDIT_ACTIONS.ROW_DELETED,
+    'assignment failed': AUDIT_ACTIONS.ASSIGNMENT_FAILED,
+    'skip': AUDIT_ACTIONS.SKIP,
+    'advance': AUDIT_ACTIONS.ADVANCE,
+  };
+
+  return map[lower] || raw;
+}
+
+function normalizeAuditLogEntries() {
+  const sheet = getSheetOrThrow_(SHEET_AUDIT);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    Logger.log('normalizeAuditLogEntries: no audit rows to normalize.');
+    return { updatedRows: 0, totalRows: 0 };
+  }
+
+  const batchSize = 500;
+  let updatedRows = 0;
+  let totalRows = 0;
+
+  for (let startRow = 2; startRow <= lastRow; startRow += batchSize) {
+    const numRows = Math.min(batchSize, lastRow - startRow + 1);
+    const range = sheet.getRange(startRow, 1, numRows, 5);
+    const values = range.getValues();
+
+    let hasChanges = false;
+    const userActionValues = values.map((row) => {
+      totalRows++;
+      const currentUser = row[1];
+      const currentAction = row[2];
+      const normalizedUser = currentUser ? getAuditLogNameFromEmail_(currentUser) : '';
+      const normalizedAction = normalizeAuditAction_(currentAction);
+
+      if (normalizedUser !== currentUser || normalizedAction !== currentAction) {
+        hasChanges = true;
+        updatedRows++;
+      }
+
+      return [normalizedUser, normalizedAction];
+    });
+
+    if (hasChanges) {
+      sheet.getRange(startRow, 2, numRows, 2).setValues(userActionValues);
+    }
+  }
+
+  Logger.log(
+    `normalizeAuditLogEntries: updated ${updatedRows} of ${totalRows} audit rows.`
+  );
+  return { updatedRows: updatedRows, totalRows: totalRows };
 }
 
 /***** DATA ACCESS *****/
