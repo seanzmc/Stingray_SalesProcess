@@ -2446,6 +2446,27 @@ function onOpen() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
 
+    // Round Robin: protect pointer cell (RR_STATE!B2) - idempotent
+    try {
+      ensureRRStatePointerProtection_();
+    } catch (protErr) {
+      // Fail gracefully; user may need to authorize protections.
+      try {
+        if (typeof logWarning === 'function') {
+          logWarning('onOpen', 'RR_STATE protection not applied', {
+            error: protErr && protErr.message ? protErr.message : String(protErr),
+          });
+        } else {
+          Logger.log(
+            '[onOpen] RR_STATE protection not applied: ' +
+            (protErr && protErr.message ? protErr.message : String(protErr))
+          );
+        }
+      } catch (_) {
+        // ignore
+      }
+    }
+
     // Check required sheets (keep your existing logic if you use it elsewhere)
     const hasAllSheets =
       ss.getSheetByName('TODAY') &&

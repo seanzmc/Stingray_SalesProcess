@@ -40,6 +40,73 @@ const REASSIGNMENT_REASONS = [
   "Manager Override"
 ];
 
+/***** UTIL: SHEET ACCESS + SANITIZATION *****/
+/** Returns required sheet or throws a descriptive error. */
+function getSheetOrThrow_(name) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName(name);
+  if (!sheet) {
+    const ssId = ss && typeof ss.getId === 'function' ? ss.getId() : 'unknown';
+    const ssName = ss && typeof ss.getName === 'function' ? ss.getName() : 'unknown';
+    throw new Error(
+      `Required sheet "${name}" not found in spreadsheet "${ssName}" (${ssId}). Please restore it.`
+    );
+  }
+  return sheet;
+}
+
+/** Returns sheet or null (for optional sheets). */
+function getSheetOrNull_(name) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  return ss.getSheetByName(name);
+}
+
+/** Sanitizes a value before writing to a sheet cell to prevent formula injection. */
+function sanitizeForSheetCell_(value) {
+  if (value === null || value === undefined) return '';
+  if (value instanceof Date) return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+
+  const str = String(value);
+  const leftTrimmed = str.replace(/^\s+/, '');
+  if (leftTrimmed && /^[=+\-@]/.test(leftTrimmed)) {
+    return str.startsWith("'") ? str : "'" + str;
+  }
+  return str;
+}
+
+/** Lock-protected, non-racey append (uses lastRow+setValues under DocumentLock). */
+function appendAuditRowSafely_(auditSheet, rowValues) {
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(10000)) return false;
+  try {
+    const targetRow = Math.max(2, auditSheet.getLastRow() + 1);
+    auditSheet
+      .getRange(targetRow, 1, 1, rowValues.length)
+      .setValues([rowValues]);
+    return true;
+  } finally {
+    try {
+      lock.releaseLock();
+    } catch (_) {
+      // ignore
+    }
+  }
+}
+
+/** Compatibility wrapper used by sidebar flows; must never throw. */
+function logRoundRobinAction_(action, detailsObj) {
+  try {
+    logRoundRobinEvent(action, detailsObj || {});
+  } catch (e) {
+    try {
+      logError('logRoundRobinAction_', e, { action: action });
+    } catch (_) {
+      Logger.log('logRoundRobinAction_ failed: ' + e);
+    }
+  }
+}
+
 /***** TRIGGERS *****/
 
 /**
@@ -321,10 +388,13 @@ function menuRewindPointer() {
     const roster = getEligibleRoster_();
     if (roster.length === 0) return;
 
-    const current = getPointer_();
-    const newPointer = calculateRewoundIndex_(current, roster.length);
-
-    setPointer_(newPointer);
+    let current = 0;
+    let newPointer = 0;
+    withDocumentLock_(() => {
+      current = getPointer_();
+      newPointer = calculateRewoundIndex_(current, roster.length);
+      setPointer_(newPointer);
+    });
 
     logRoundRobinEvent('Rewind', {
       pointerBefore: current,
@@ -354,8 +424,11 @@ function calculateRewoundIndex_(currentIndex, totalCount) {
 
 function menuResetPointer() {
   try {
-    const oldPointer = getPointer_();
-    setPointer_(0);
+    let oldPointer = 0;
+    withDocumentLock_(() => {
+      oldPointer = getPointer_();
+      setPointer_(0);
+    });
 
     logRoundRobinEvent('Reset Pointer', {
       pointerBefore: oldPointer,
@@ -524,6 +597,23 @@ function skipPointer_() {
   }
 }
 
+/** Runs a function with DocumentLock protection (bounded wait). */
+function withDocumentLock_(fn) {
+  const lock = LockService.getDocumentLock();
+  if (!lock.tryLock(10000)) {
+    throw new Error('System busy. Please try again.');
+  }
+  try {
+    return fn();
+  } finally {
+    try {
+      lock.releaseLock();
+    } catch (_) {
+      // ignore
+    }
+  }
+}
+
 /**
  * Centralized function to get pointer, determine assignee, advance pointer, and log audit.
  * returns { assignee, pointerBefore, pointerAfter, nextUp }
@@ -531,14 +621,16 @@ function skipPointer_() {
 function advanceRoundRobinPointer_(roster, auditInfo) {
   if (!roster || roster.length === 0) throw new Error('Roster empty');
 
-  const pointerBefore = normalizePointer_(getPointer_(), roster.length);
+  // Concurrency-safe pointer mutation (RR_STATE!B2)
+  let pointerBefore = 0;
+  let pointerAfter = 0;
+  withDocumentLock_(() => {
+    pointerBefore = normalizePointer_(getPointer_(), roster.length);
+    pointerAfter = (pointerBefore + 1) % roster.length;
+    setPointer_(pointerAfter);
+  });
+
   const assignee = roster[pointerBefore];
-
-  // Calc new pointer
-  const pointerAfter = (pointerBefore + 1) % roster.length;
-
-  // Update state
-  setPointer_(pointerAfter);
 
   // Log it
   const nextUp = roster[pointerAfter];
@@ -571,20 +663,18 @@ function logRoundRobinEvent(action, detailsObj) {
     let auditSheet = ss.getSheetByName(SHEET_AUDIT);
     if (!auditSheet) {
       auditSheet = ss.insertSheet(SHEET_AUDIT);
-      auditSheet.appendRow([
-        'Timestamp',
-        'User',
-        'Action',
-        'Reference',
-        'Details',
-      ]);
+      auditSheet
+        .getRange(1, 1, 1, 5)
+        .setValues([
+          ['Timestamp', 'User', 'Action', 'Reference', 'Details'],
+        ]);
       auditSheet.setFrozenRows(1);
     }
 
     const now = new Date();
 
     // Use system user unless specifically passed in details
-    const user = detailsObj.user || safeUserEmail_();
+    const user = detailsObj && detailsObj.user ? detailsObj.user : safeUserEmail_();
 
     // Format details
     let detailsStr = '';
@@ -596,14 +686,30 @@ function logRoundRobinEvent(action, detailsObj) {
           // Sanitize Value: replace | and = with -
           let valStr = String(v);
           valStr = valStr.replace(/[|=]/g, '-');
+          // Prevent formula injection within the details cell (belt & suspenders)
+          valStr = String(sanitizeForSheetCell_(valStr));
           return `${k}=${valStr}`;
         })
         .join(' | ');
     }
 
-    const reference = detailsObj.row ? `Row ${detailsObj.row}` : '';
+    const reference = detailsObj && detailsObj.row ? `Row ${detailsObj.row}` : '';
 
-    auditSheet.appendRow([now, user, action, reference, detailsStr]);
+    const rowValues = [
+      sanitizeForSheetCell_(now),
+      sanitizeForSheetCell_(user),
+      sanitizeForSheetCell_(action),
+      sanitizeForSheetCell_(reference),
+      sanitizeForSheetCell_(detailsStr),
+    ];
+
+    const ok = appendAuditRowSafely_(auditSheet, rowValues);
+    if (!ok) {
+      // If we can't safely log, do not throw.
+      logError('logRoundRobinEvent', 'Audit lock timeout - log skipped', {
+        action: action,
+      });
+    }
   } catch (e) {
     logError('logRoundRobinEvent', 'Audit Log Failed', {
       originalError: e.toString(),
@@ -614,15 +720,15 @@ function logRoundRobinEvent(action, detailsObj) {
 
 /***** DATA ACCESS *****/
 function getApptsSheet_() {
-  return SpreadsheetApp.getActive().getSheetByName(SHEET_APPTS);
+  return getSheetOrThrow_(SHEET_APPTS);
 }
 
 function getStateSheet_() {
-  return SpreadsheetApp.getActive().getSheetByName(SHEET_STATE);
+  return getSheetOrThrow_(SHEET_STATE);
 }
 
 function getEligibleRoster_() {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_ROSTER);
+  const sheet = getSheetOrThrow_(SHEET_ROSTER);
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
 
@@ -644,6 +750,90 @@ function getPointer_() {
 function setPointer_(n) {
   const state = getStateSheet_();
   state.getRange(CELL_POINTER).setValue(n);
+}
+
+/***** PROTECTION *****/
+/**
+ * Idempotently applies protection to RR_STATE!B2 to prevent manual pointer edits.
+ * Default is warning-only (least disruptive). Set Script Property
+ * RR_STATE_POINTER_EDITORS to a comma-separated list of emails to enforce strict protection.
+ */
+function ensureRRStatePointerProtection_() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sheet = getSheetOrThrow_(SHEET_STATE);
+    const range = sheet.getRange(CELL_POINTER);
+
+    const protections = sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE);
+    let protection = protections.find((p) => {
+      try {
+        const r = p.getRange();
+        return (
+          r.getSheet().getName() === sheet.getName() &&
+          r.getRow() === range.getRow() &&
+          r.getColumn() === range.getColumn() &&
+          r.getNumRows() === 1 &&
+          r.getNumColumns() === 1
+        );
+      } catch (_) {
+        return false;
+      }
+    });
+
+    if (!protection) {
+      protection = range.protect();
+    }
+
+    protection.setDescription('Round Robin Pointer (RR_STATE!B2) - Do Not Edit');
+    try {
+      protection.setDomainEdit(false);
+    } catch (_) {
+      // ignore for consumer accounts
+    }
+
+    const raw =
+      PropertiesService.getScriptProperties().getProperty(
+        'RR_STATE_POINTER_EDITORS'
+      ) || '';
+    const configuredEditors = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s && s.includes('@'));
+
+    if (configuredEditors.length > 0) {
+      // Strict mode: only configured editors (+ owner) can edit.
+      protection.setWarningOnly(false);
+      const editorSet = new Set(configuredEditors);
+      try {
+        const ownerEmail = ss.getOwner && ss.getOwner() ? ss.getOwner().getEmail() : '';
+        if (ownerEmail) editorSet.add(ownerEmail);
+      } catch (_) {
+        // ignore
+      }
+
+      try {
+        const current = protection.getEditors();
+        if (current && current.length) {
+          protection.removeEditors(current);
+        }
+      } catch (_) {
+        // ignore
+      }
+
+      protection.addEditors(Array.from(editorSet));
+    } else {
+      // Least-disruptive default: warn on edits, but do not block script/user flows.
+      protection.setWarningOnly(true);
+    }
+
+    return true;
+  } catch (e) {
+    // Clear error for insufficient authorization or missing permissions.
+    throw new Error(
+      'RR_STATE pointer protection setup failed (authorization may be required): ' +
+      (e && e.message ? e.message : String(e))
+    );
+  }
 }
 
 function normalizePointer_(pointer, len) {

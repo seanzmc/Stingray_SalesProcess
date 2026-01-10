@@ -63,13 +63,8 @@ function undoLastPhoneUp() {
   }
 
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
-    const rosterSheet = ss.getSheetByName(SHEET_ROSTER);
-    const stateSheet = ss.getSheetByName(SHEET_STATE);
-
-    if (!rosterSheet || !stateSheet) {
-      throw new Error(`Missing sheets '${SHEET_ROSTER}' or '${SHEET_STATE}'.`);
-    }
+    const rosterSheet = getSheetOrThrow_(SHEET_ROSTER);
+    const stateSheet = getSheetOrThrow_(SHEET_STATE);
 
     // 1. Read Inputs (Eligible Roster)
     const lastRow = rosterSheet.getLastRow();
@@ -128,13 +123,8 @@ function undoLastPhoneUp() {
  * Assumes lock is already acquired.
  */
 function executePhoneUpAssignment_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const rosterSheet = ss.getSheetByName(SHEET_ROSTER);
-  const stateSheet = ss.getSheetByName(SHEET_STATE);
-
-  if (!rosterSheet || !stateSheet) {
-    throw new Error(`Missing sheets '${SHEET_ROSTER}' or '${SHEET_STATE}'.`);
-  }
+  const rosterSheet = getSheetOrThrow_(SHEET_ROSTER);
+  const stateSheet = getSheetOrThrow_(SHEET_STATE);
 
   // 1. Read Inputs (Eligible Roster)
   const lastRow = rosterSheet.getLastRow();

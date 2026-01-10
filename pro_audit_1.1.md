@@ -1,82 +1,3 @@
-# Pro Audit Report: Sales Log & Round Robin System
-
-## 1. Front-End Operation & UI Design
-
-### **Evaluation**
-
-- **Dashboard (`dashboard.html`):**
-  - **Strengths:** Excellent visual design using Tailwind CSS ("Dark Mode"). Good use of visual badges for status. Responsive layout works well on different screen sizes.
-  - **Weaknesses:**
-    - **Polling:** The 30-second auto-refresh interval creates a lag in real-time monitoring.
-    - **Performance:** Fetches full datasets repeatedly, potentially hitting quota limits with multiple active users.
-- **Sidebar (`NewAppointmentSidebar.html`):**
-  - **Strengths:** Functional status indicators (green/red) provide immediate feedback.
-  - **Weaknesses:**
-    - **Workflow Clutter:** "Phone Lead" and "New Appointment" workflows are stacked vertically, making the UI busy.
-    - **Risk:** The "Reassign" section lacks context. It operates on the "currently selected row" in the sheet, but the sidebar doesn't display *which* row is selected, leading to potential user error.
-    - **Resilience:** The "Assigned By" dropdown has no retry mechanism if the initial load fails.
-- **Dialog (`ReassignDialog.html`):**
-  - **Critical Issue:** The modal lacks confirmation of *who* is being reassigned. It simply asks for a reason. If the user selects the wrong row in the background, they won't know until after the action completes.
-
-### **Recommendations**
-
-1. **Dashboard:** Add a manual "Refresh Now" button for immediate updates. Implement the Page Visibility API to pause polling when the tab is inactive to save resources.
-2. **Sidebar:** Use tabs to separate "New Appointment," "Phone Lead," and "Reassign" workflows. Add a "Refresh" button next to the "Assigned By" dropdown.
-3. **Dialog:** Update `ReassignDialog.html` to accept context (Customer Name, Row #) and display it prominently: *"Reassigning [Customer Name] (Row 15)"*.
-
----
-
-## 2. User Experience (UX) & Ease of Use
-
-### **Evaluation**
-
-- **Friction Points:**
-  - **Blind Reassignment:** As noted, reassigning without seeing the customer name is the biggest friction point and error risk.
-  - **Latency:** Dashboard users may wait up to 30 seconds to see if an action reflected correctly.
-- **Feedback Mechanisms:**
-  - **Good:** Use of `withSuccessHandler` and `withFailureHandler` in sidebars ensures users aren't left hanging.
-  - **Good:** Toast notifications in Google Sheets provide native feedback for menu actions.
-
-### **Recommendations**
-
-1. **Contextual Awareness:** Modify server-side functions to return the "Current Selection" details to the sidebar immediately upon opening, so the UI can say *"Selected: John Doe"*.
-2. **Loading States:** Ensure all buttons (especially "Assign Phone Lead") enter a disabled/loading state immediately upon click to prevent double-submissions (partially implemented, but inconsistent).
-
----
-
-## 3. Implementation Efficiency
-
-### **Evaluation**
-
-- **Client-Server Communication (`google.script.run`):**
-  - **Inefficiency:** `getDashboardData()` in `Code.js` is heavy. It reads `RR_USERS`, `RR_ROSTER`, and 1000 rows of `RR_AUDIT` on *every single request*. For 5 users polling every 30s, this is ~10 calls/minute, each triggering 3+ sheet reads.
-- **State Management:**
-  - **Strengths:** `PropertiesService` is correctly used for user persistence. `RR_STATE` (Cell B2) provides a transparent "Database" for the Round Robin pointer.
-  - **Missed Opportunity:** `CacheService` is effectively unused in the Dashboard data path.
-- **Locking & Safety:**
-  - **Excellent:** `utilities_locks.js` implements a robust exponential backoff strategy.
-  - **Verified:** Critical paths (`assignRowAuto_`, `createAppointmentFromSidebar`, `assignPhoneLead`) are all correctly protected by locks.
-
-### **Recommendations**
-
-1. **Implement Caching:** Wrap `getDashboardData` logic with `CacheService`. Cache the result for 20 seconds. This ensures that 10 concurrent users hitting the dashboard will mostly read from RAM, not the Sheet.
-2. **Optimize Roster Reads:** Cache `RR_ROSTER` parsing for 60 seconds. Roster eligibility rarely changes minute-to-minute.
-3. **Reduce Payload:** The dashboard doesn't always need the full 1000-row history. Consider an `incremental` flag or separate endpoints for "Stats" vs "Full Feed".
-
----
-
-## 4. Technical Summary & Next Steps
-
-The system is backend-robust but frontend-naive regarding performance and context. The locking mechanisms are production-grade, preventing the most common "race condition" bugs in Apps Script.
-
-**Immediate Actions:**
-
-1. **Refactor `getDashboardData`** to use `CacheService` (High Impact, Low Effort).
-2. **Update `ReassignDialog`** to pass and display customer context (High Impact, Medium Effort).
-3. **Implement Tabs** in `NewAppointmentSidebar` to clean up the UI (Medium Impact, Medium Effort).
-
----
-
 # Addendum: Second Opinion Code Review & Usability Audit
 
 ## 1. Front-End Operation & UI Design
@@ -87,6 +8,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** [`NewAppointmentSidebar.html`](saleslog_files/NewAppointmentSidebar.html:1) stacks multiple primary CTAs ("New Appointment," "Assign Phone Lead," "Reassign," "Undo") vertically without clear visual hierarchy.
   - **Impact:** Users may accidentally click the wrong action under time pressure.
   - **Fix:** Implement a tabbed interface using simple CSS/JS (no external libraries). Example structure:
+
     ```html
     <div class="tabs">
       <button class="tab-btn active" onclick="showTab('new')">New Appointment</button>
@@ -102,6 +24,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** The reassign workflow in [`NewAppointmentSidebar.html`](saleslog_files/NewAppointmentSidebar.html:1) operates on the "current selection" but never displays which customer/row is selected.
   - **Impact:** High risk of reassigning the wrong customer, especially if the user changes selection after opening the sidebar.
   - **Fix:** Add a server-side function `getCurrentSelectionInfo()` that returns `{row: number, customer: string, status: string}`. Display this prominently above the reassign controls:
+
     ```javascript
     // In Code.js or utilities
     function getCurrentSelectionInfo() {
@@ -112,15 +35,18 @@ The system is backend-robust but frontend-naive regarding performance and contex
       return {row, customer, status};
     }
     ```
+
     Call this on sidebar load and display: `"Currently selected: [Customer Name] (Row #, Status: X)"`.
 
 - **Modal Dialog Failures Use `alert()`:**
   - **Issue:** [`ReassignDialog.html`](saleslog_files/ReassignDialog.html:1) falls back to `alert()` for error messages, which blocks the UI thread and provides poor UX.
   - **Impact:** Users cannot copy error messages, and the dialog closes unexpectedly on success without confirmation.
   - **Fix:** Replace `alert()` with inline error display:
+
     ```html
     <div id="error-msg" class="hidden error-box"></div>
     ```
+
     ```javascript
     function showError(msg) {
       const el = document.getElementById('error-msg');
@@ -128,6 +54,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
       el.classList.remove('hidden');
     }
     ```
+
     On success, show a 2-second confirmation message before closing: `"Successfully reassigned [Name] to [User]. Closing..."`
 
 - **Accessibility & Form Usability:**
@@ -161,6 +88,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** The "Undo Last Assignment" button in [`rr_sidebar.js`](saleslog_files/rr_sidebar.js:1) provides no preview of *what* will be undone (customer name, timestamp, or target user).
   - **Impact:** Users may accidentally undo the wrong assignment, especially if multiple people are working simultaneously.
   - **Fix:** Add a server-side function `getLastAssignmentDetails()`:
+
     ```javascript
     function getLastAssignmentDetails() {
       const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('RR_AUDIT');
@@ -174,12 +102,14 @@ The system is backend-robust but frontend-naive regarding performance and contex
       };
     }
     ```
+
     Display this in a confirmation dialog: `"Undo assignment of [Customer] to [User] at [Time]? This cannot be undone."`
 
 - **Per-Field Validation Missing:**
   - **Issue:** Forms submit without real-time validation. Errors are only caught server-side, requiring a full round-trip.
   - **Impact:** Slow feedback loop frustrates users and wastes API quota.
   - **Fix:** Add client-side validation before calling `google.script.run`:
+
     ```javascript
     function validateForm() {
       const errors = [];
@@ -188,7 +118,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
       // ... more checks
       return errors;
     }
-    
+
     function onSubmit() {
       const errors = validateForm();
       if (errors.length) {
@@ -206,6 +136,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
     1. First click: Show preview: `"This will reassign [Customer] from [Old User] to [New User] for reason: [X]. Confirm?"`
     2. Second click: Execute the reassignment.
     Implement with a state variable:
+
     ```javascript
     let reassignState = 'preview'; // or 'confirmed'
     function handleReassign() {
@@ -235,6 +166,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** [`dashboard.html`](saleslog_files/dashboard.html:1) polls every 30 seconds regardless of whether the tab is visible.
   - **Impact:** Wastes quota and server resources when users have the dashboard open in background tabs.
   - **Fix:** Use the Page Visibility API:
+
     ```javascript
     let pollInterval;
     function startPolling() {
@@ -253,6 +185,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** If `refreshData()` encounters a fatal error, the interval continues to fire, logging errors repeatedly.
   - **Impact:** Console spam and wasted quota.
   - **Fix:** Add error count tracking and stop polling after 3 consecutive failures:
+
     ```javascript
     let errorCount = 0;
     function refreshData() {
@@ -274,6 +207,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** If a `getDashboardData()` request takes >30 seconds (due to heavy load), a second request fires before the first completes.
   - **Impact:** Concurrency spikes and potential data race in UI rendering.
   - **Fix:** Add a flag to prevent overlapping requests:
+
     ```javascript
     let isLoading = false;
     function refreshData() {
@@ -290,6 +224,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** If the Apps Script client API fails to load (rare, but happens on slow connections), the loading spinner remains indefinitely.
   - **Impact:** Users see a frozen UI with no error message.
   - **Fix:** Add a timeout fallback:
+
     ```javascript
     setTimeout(() => {
       if (typeof google === 'undefined' || !google.script) {
@@ -302,6 +237,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** The activity feed renders items using array index as the key (implicit or explicit).
   - **Impact:** If the audit log is sorted or filtered, React/DOM reconciliation may incorrectly reuse elements, showing stale data.
   - **Fix:** Use a unique, stable key such as `timestamp + customer + action`:
+
     ```javascript
     data.feed.forEach(item => {
       const key = `${item.timestamp}_${item.customer}_${item.action}`.replace(/[^a-z0-9]/gi, '_');
@@ -315,6 +251,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** `getDashboardData()` returns the full 1000-row audit log with all columns, but the UI only displays 5 columns.
   - **Impact:** Bandwidth waste and slower parsing.
   - **Fix:** Filter the payload server-side:
+
     ```javascript
     function getDashboardData() {
       // ... existing logic
@@ -335,6 +272,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** If `CacheService` is implemented with a 30-second TTL and polling is also 30 seconds, all 10 users will miss the cache at the same moment every 30 seconds.
   - **Impact:** Defeats the purpose of caching; creates "thundering herd" load spikes.
   - **Fix:** Set cache TTL to 20-25 seconds (shorter than poll interval) or use a jittered poll interval:
+
     ```javascript
     const jitter = Math.random() * 5000; // 0-5 seconds
     setInterval(refreshData, 30000 + jitter);
@@ -346,6 +284,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** [`NewAppointmentSidebar.html`](saleslog_files/NewAppointmentSidebar.html:1) calls `getUsersForDropdown()` and `getCurrentRosterStatus()` sequentially on load.
   - **Impact:** 2× latency and 2× quota usage. If the first call fails, the second still fires.
   - **Fix:** Combine into a single `getSidebarInitData()` function:
+
     ```javascript
     function getSidebarInitData() {
       return {
@@ -355,12 +294,14 @@ The system is backend-robust but frontend-naive regarding performance and contex
       };
     }
     ```
+
     Call once from the sidebar and destructure the result.
 
 - **No Request Coalescing:**
   - **Issue:** If a user opens the sidebar, closes it, and reopens within 10 seconds, the same data is fetched again.
   - **Impact:** Minor quota waste.
   - **Fix:** Use `sessionStorage` to cache init data for 60 seconds:
+
     ```javascript
     const cached = sessionStorage.getItem('sidebarInitData');
     if (cached && (Date.now() - JSON.parse(cached).timestamp < 60000)) {
@@ -379,6 +320,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** Success messages like `"Assigned to John Doe"` are injected via `innerHTML`.
   - **Impact:** Minor XSS risk if customer names contain special characters (unlikely but possible).
   - **Fix:** Use `textContent` instead:
+
     ```javascript
     successDiv.textContent = `Assigned to ${assignedUser}`;
     ```
@@ -400,6 +342,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** Functions in [`round_robin.js`](saleslog_files/round_robin.js:1) and [`PhoneUp.js`](saleslog_files/PhoneUp.js:1) call `getSheetByName()` without null checks.
   - **Impact:** If "RR_ROSTER" or "RR_USERS" is renamed or deleted, scripts crash with cryptic `Cannot read property 'getRange' of null` errors.
   - **Fix:** Add a universal sheet getter:
+
     ```javascript
     function getSheetOrThrow_(name) {
       const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
@@ -407,6 +350,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
       return sheet;
     }
     ```
+
     Use this in all sheet access: `const roster = getSheetOrThrow_('RR_ROSTER');`
 
 - **Audit Logging is Noisy & Quota-Heavy:**
@@ -415,6 +359,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Fix:** Implement rolling audit log:
     - Keep only last 1000 rows (delete older).
     - Or, archive to a separate "Archive" sheet monthly via a time-driven trigger.
+
     ```javascript
     function archiveOldAuditLogs_() {
       const auditSheet = getSheetOrThrow_('RR_AUDIT');
@@ -432,6 +377,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** The phantom edit check compares `currentStatus === 'Assigned'` but doesn't account for trailing spaces, case differences, or formula-driven values.
   - **Impact:** False positives may block legitimate assignments.
   - **Fix:** Normalize before comparison:
+
     ```javascript
     function isPhantomEdit_(oldStatus, newStatus) {
       const normalize = (s) => String(s).trim().toLowerCase();
@@ -443,6 +389,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** Some functions use `Session.getActiveUser().getEmail()`, others use a parameter `assignedByName`, and some default to `"System Auto"`. No single source of truth.
   - **Impact:** Audit logs mix email addresses, display names, and system identifiers, making reporting difficult.
   - **Fix:** Centralize identity resolution:
+
     ```javascript
     function getAssignedByIdentity_(customName) {
       if (customName) {
@@ -462,6 +409,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** [`rr_sidebar.js`](saleslog_files/rr_sidebar.js:53) references `logRoundRobinAction_()` but this function does not exist in the codebase.
   - **Impact:** Script crashes on certain actions (likely undo or reassign from sidebar).
   - **Fix:** Define the function in [`utilities_locks.js`](saleslog_files/utilities_locks.js:1) or [`round_robin.js`](saleslog_files/round_robin.js:1):
+
     ```javascript
     function logRoundRobinAction_(action, details) {
       const auditSheet = getSheetOrThrow_('RR_AUDIT');
@@ -479,6 +427,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** If two admins try to reset the RR pointer simultaneously, the last write wins without any concurrency control.
   - **Impact:** Potential desync in pointer state.
   - **Fix:** Wrap pointer reset in `LockService`:
+
     ```javascript
     function resetRoundRobinPointer() {
       const lock = LockService.getScriptLock();
@@ -497,6 +446,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** Cell B2 (RR_STATE) is editable by anyone with write access to the sheet.
   - **Impact:** Manual edits will break round robin sequencing.
   - **Fix:** Protect the range in the `onOpen` trigger:
+
     ```javascript
     function onOpen() {
       // ... existing menu logic
@@ -511,6 +461,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** When reassigning in [`round_robin.js`](saleslog_files/round_robin.js:1), the "Created" timestamp column is updated to `new Date()`, losing the original creation time.
   - **Impact:** Reporting on "lead age" becomes inaccurate.
   - **Fix:** Only update the "Assigned" timestamp column, not "Created":
+
     ```javascript
     function reassignCustomer(row, newUser, reason) {
       const sheet = getSheetOrThrow_('RR_ROSTER');
@@ -524,6 +475,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** If `LockService.tryLock()` fails, functions return `null` or throw errors, but the UI shows a generic failure message.
   - **Impact:** Users don't know if they should retry or wait.
   - **Fix:** Return specific error objects:
+
     ```javascript
     function assignPhoneLead(data) {
       const lock = LockService.getScriptLock();
@@ -540,7 +492,9 @@ The system is backend-robust but frontend-naive regarding performance and contex
       }
     }
     ```
+
     Handle in the client:
+
     ```javascript
     .withSuccessHandler(result => {
       if (result.success) showSuccess(result.assignedTo);
@@ -558,6 +512,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** The success message for undo says `"Undone. Next assignment will go to [User]"`, but if the roster has changed, the prediction may be wrong.
   - **Impact:** Misleads users.
   - **Fix:** Either remove the prediction or fetch the actual next user after undoing:
+
     ```javascript
     function undoLastAssignment() {
       // ... undo logic
@@ -575,6 +530,7 @@ The system is backend-robust but frontend-naive regarding performance and contex
   - **Issue:** Audit logs use "Assigned", "Auto-Assigned", "Reassigned", "Undo Assignment", "PhoneUp", etc. without a controlled vocabulary.
   - **Impact:** Dashboard filters and reporting logic must hardcode multiple variants.
   - **Fix:** Define an enum-like object:
+
     ```javascript
     const AUDIT_ACTIONS = {
       NEW_APPOINTMENT: 'New Appointment',
@@ -584,11 +540,13 @@ The system is backend-robust but frontend-naive regarding performance and contex
       POINTER_RESET: 'Pointer Reset'
     };
     ```
+
     Use these constants everywhere: `logRoundRobinAction_(AUDIT_ACTIONS.REASSIGN, details);`
 
 ### **Prioritized Fix Plan**
 
 #### **Now (Critical – Security & Data Integrity)**
+
 1. Fix undefined `logRoundRobinAction_()` in [`rr_sidebar.js`](saleslog_files/rr_sidebar.js:53) – *causes crashes*.
 2. Add `getSheetOrThrow_()` and replace all `getSheetByName()` calls – *prevents null reference errors*.
 3. Wrap pointer reset in `LockService` – *prevents race conditions*.
@@ -596,24 +554,22 @@ The system is backend-robust but frontend-naive regarding performance and contex
 5. Protect `RR_STATE` cell (B2) from manual edits – *prevents broken round robin sequencing*.
 
 #### **Next (High Impact – UX & Efficiency)**
-6. Implement Page Visibility API for dashboard polling – *saves ~40% quota on average*.
-7. Add in-flight request guard to [`dashboard.html`](saleslog_files/dashboard.html:1) – *prevents concurrency spikes*.
-8. Combine sidebar init RPCs into a single call – *reduces latency by 50%*.
-9. Add `getCurrentSelectionInfo()` and display context in reassign UI – *eliminates highest user error risk*.
-10. Replace `alert()` with inline error messages in [`ReassignDialog.html`](saleslog_files/ReassignDialog.html:1) – *improves error handling UX*.
-11. Implement "preview → confirm" for reassignment – *adds safety net for destructive actions*.
-12. Add client-side form validation – *reduces unnecessary server round-trips*.
+
+1. Implement Page Visibility API for dashboard polling – *saves ~40% quota on average*.
+2. Add in-flight request guard to [`dashboard.html`](saleslog_files/dashboard.html:1) – *prevents concurrency spikes*.
+3. Combine sidebar init RPCs into a single call – *reduces latency by 50%*.
+4. Add `getCurrentSelectionInfo()` and display context in reassign UI – *eliminates highest user error risk*.
+5. Replace `alert()` with inline error messages in [`ReassignDialog.html`](saleslog_files/ReassignDialog.html:1) – *improves error handling UX*.
+6. Implement "preview → confirm" for reassignment – *adds safety net for destructive actions*.
+7. Add client-side form validation – *reduces unnecessary server round-trips*.
 
 #### **Later (Polish – Maintainability & Scalability)**
-13. Implement rolling audit log archival – *prevents unbounded growth*.
-14. Normalize phantom edit detection – *reduces false positives*.
-15. Centralize identity resolution with `getAssignedByIdentity_()` – *improves audit data quality*.
-16. Add tabbed UI to [`NewAppointmentSidebar.html`](saleslog_files/NewAppointmentSidebar.html:1) – *reduces clutter*.
-17. Define `AUDIT_ACTIONS` constant and refactor all logging calls – *improves reporting accuracy*.
-18. Add structured error handling with retry logic for lock failures – *improves user experience during contention*.
-19. Filter unused fields in `getDashboardData()` payload – *reduces bandwidth by ~30%*.
-20. Add accessibility improvements (labels, aria-live, default dropdown options) – *meets WCAG standards*.
 
----
-
-**End of Addendum**
+1. Implement rolling audit log archival – *prevents unbounded growth*.
+2. Normalize phantom edit detection – *reduces false positives*.
+3. Centralize identity resolution with `getAssignedByIdentity_()` – *improves audit data quality*.
+4. Add tabbed UI to [`NewAppointmentSidebar.html`](saleslog_files/NewAppointmentSidebar.html:1) – *reduces clutter*.
+5. Define `AUDIT_ACTIONS` constant and refactor all logging calls – *improves reporting accuracy*.
+6. Add structured error handling with retry logic for lock failures – *improves user experience during contention*.
+7. Filter unused fields in `getDashboardData()` payload – *reduces bandwidth by ~30%*.
+8. Add accessibility improvements (labels, aria-live, default dropdown options) – *meets WCAG standards*.

@@ -28,19 +28,28 @@ function createAppointmentFromSidebar(payload) {
     const customerName = (payload.customerName || '').trim();
     const phone = (payload.phone || '').trim().replace(/\s+/g, '');
     const notes = (payload.notes || '').trim();
-    const assignedByName = (payload.assignedByName || '').trim();
+    const assignedByNameRaw = (payload.assignedByName || '').trim();
 
-    if (!assignedByName) {
+    if (!assignedByNameRaw) {
       throw new Error('Please select "Assigned By".');
+    }
+
+    // Strict allowlist validation (RR_USERS, Active == true)
+    const allowedUsers = getAssignmentUsers_();
+    const allowedMap = allowedUsers.reduce((acc, name) => {
+      acc[String(name).trim().toLowerCase()] = String(name).trim();
+      return acc;
+    }, {});
+    const assignedByName = allowedMap[assignedByNameRaw.toLowerCase()];
+    if (!assignedByName) {
+      throw new Error('Invalid "Assigned By". Please select a valid user from the list.');
     }
 
     if (!apptIso || !customerName || !phone) {
       throw new Error('Missing required fields (Date, Name, or Phone).');
     }
 
-    const ss = SpreadsheetApp.getActive();
-    const appts = ss.getSheetByName('APPOINTMENTS');
-    if (!appts) throw new Error('Sheet "APPOINTMENTS" not found.');
+    const appts = getSheetOrThrow_('APPOINTMENTS');
 
     // Parse appt date/time from ISO-ish input (from datetime-local)
     const apptDt = new Date(apptIso);
@@ -143,8 +152,7 @@ function getAssignmentUsers() {
 }
 
 function getAssignmentUsers_() {
-  const ss = SpreadsheetApp.getActive();
-  const sheet = ss.getSheetByName('RR_USERS');
+  const sheet = getSheetOrNull_('RR_USERS');
   if (!sheet) return [];
 
   const lastRow = sheet.getLastRow();
