@@ -245,11 +245,25 @@ function isValidDashboardData_(obj) {
   return true;
 }
 
+function getAuditActions_() {
+  if (typeof AUDIT_ACTIONS !== 'undefined') return AUDIT_ACTIONS;
+  return {
+    NEW_APPOINTMENT: 'Assignment',
+    REASSIGNMENT: 'Reassignment',
+    MANUAL_OVERRIDE: 'Manual Override',
+    PHONE_LEAD: 'Phone Lead',
+    UNDO: 'Undo',
+    POINTER_RESET: 'Pointer Reset',
+  };
+}
+
 /**
  * Primary data source read/compute for dashboard.
  * Kept separate from caching for clarity and testability.
  */
 function computeDashboardDataFromSpreadsheet_(ss) {
+  const actions = getAuditActions_();
+
   // ---------------------------------------------------------
   // STEP 1: USER MAP (Strict Sheet Access)
   // Source: Sheet 'RR_USERS' (Direct access, no named ranges)
@@ -355,12 +369,17 @@ function computeDashboardDataFromSpreadsheet_(ss) {
     if (isToday) {
       // Manual Actions
       const lowerAction = action.toLowerCase();
-      if (lowerAction.includes('reassign') || lowerAction.includes('override')) {
+      if (
+        action === actions.REASSIGNMENT ||
+        action === actions.MANUAL_OVERRIDE ||
+        lowerAction.includes('reassign') ||
+        lowerAction.includes('override')
+      ) {
         stats.manualOverrides++;
       }
 
       // Assignments & Leaderboard
-      if (action === 'Assignment') {
+      if (action === actions.NEW_APPOINTMENT || action === 'Assignment') {
         stats.totalAssignments++;
         const assignee = details['assignee'];
         if (assignee) {
@@ -452,10 +471,23 @@ function formatTime_(dateObj) {
 }
 
 function buildFeedMessage_(actor, action, details, reference) {
-  if (action === 'Assignment') {
+  const actions = getAuditActions_();
+  if (action === actions.NEW_APPOINTMENT || action === 'Assignment') {
     return `${details.assignee || 'Someone'} received a lead.`;
   }
-  if (action.includes('Override') || action.includes('Reassign')) {
+  if (action === actions.PHONE_LEAD) {
+    return `${details.assignee || 'Someone'} received a phone lead.`;
+  }
+  if (action === actions.UNDO) {
+    const target = details.target || details.type || 'action';
+    return `Undo performed on ${target}.`;
+  }
+  if (
+    action === actions.REASSIGNMENT ||
+    action === actions.MANUAL_OVERRIDE ||
+    action.includes('Override') ||
+    action.includes('Reassign')
+  ) {
     const target = details.newAssignee || details.assignee || 'someone';
     return `Manual action affecting ${target}.`;
   }

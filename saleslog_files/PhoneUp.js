@@ -100,12 +100,12 @@ function undoLastPhoneUp() {
     stateSheet.getRange(CELL_LAST_ASSIGNED_PHONE).setValue(newName);
 
     // 5. Log
-    logRoundRobinEvent('Phone Up Undo', {
+    logRoundRobinEvent(AUDIT_ACTIONS.UNDO, {
       user: Session.getActiveUser().getEmail(),
       assigneeBefore: currentName,
       assigneeAfter: newName,
       reason: 'User Sidebar Undo',
-      type: 'Rotation Correction'
+      target: AUDIT_ACTIONS.PHONE_LEAD
     });
 
     return `Rotation rewound. Next Up is now ${newName}`;
@@ -168,7 +168,7 @@ function executePhoneUpAssignment_() {
   stateSheet.getRange(CELL_LAST_ASSIGNED_PHONE).setValue(assignedName);
 
   // B. Unified Logging (RR_AUDIT)
-  logRoundRobinEvent("Phone Up Assigned", {
+  logRoundRobinEvent(AUDIT_ACTIONS.PHONE_LEAD, {
     assignee: assignedName,
     method: "System Rotation"
   });

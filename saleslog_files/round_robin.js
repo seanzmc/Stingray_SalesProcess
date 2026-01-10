@@ -40,6 +40,24 @@ const REASSIGNMENT_REASONS = [
   "Manager Override"
 ];
 
+const AUDIT_ACTIONS = {
+  NEW_APPOINTMENT: 'New Appointment',
+  PHONE_LEAD: 'Phone Lead',
+  REASSIGNMENT: 'Reassignment',
+  UNDO: 'Undo',
+  POINTER_RESET: 'Pointer Reset',
+  POINTER_MANUAL_EDIT: 'Pointer Manual Edit',
+  MANUAL_OVERRIDE: 'Manual Override',
+  MANUAL_EDIT: 'Manual Edit',
+  ROSTER_ACTIVE_CHANGE: 'Roster Active Change',
+  ROSTER_ELIGIBLE_CHANGE: 'Roster Eligible Change',
+  ROW_INSERTED: 'Row Inserted',
+  ROW_DELETED: 'Row Deleted',
+  ASSIGNMENT_FAILED: 'Assignment Failed',
+  SKIP: 'Skip',
+  ADVANCE: 'Advance',
+};
+
 /***** UTIL: SHEET ACCESS + SANITIZATION *****/
 /** Returns required sheet or throws a descriptive error. */
 function getSheetOrThrow_(name) {
@@ -136,82 +154,119 @@ function handleAppointmentEdit(e) {
     const sheet = e.range.getSheet();
     if (sheet.getName() !== SHEET_APPTS) return;
 
-    const row = e.range.getRow();
-    const col = e.range.getColumn();
-    const a1 = e.range.getA1Notation();
-    const oldValue = e.oldValue;
-    const value = e.value;
+    const range = e.range;
+    const startRow = range.getRow();
+    const startCol = range.getColumn();
+    const numRows = range.getNumRows();
+    const numCols = range.getNumColumns();
+    const endRow = startRow + numRows - 1;
+    const endCol = startCol + numCols - 1;
+
+    if (endRow < 2) return; // Skip header row edits.
+
+    const user = getEventUserEmail_(e);
 
     // --- GENERIC LOGGING START ---
     // Log EVERY edit to APPOINTMENTS, unless it's a phantom edit (no change)
     // Phantom edit check: both undefined/empty, or exactly equal
-    const oldStr = oldValue === undefined ? "" : String(oldValue);
-    const newStr = value === undefined ? "" : String(value);
+    if (numRows === 1 && numCols === 1) {
+      const a1 = range.getA1Notation();
+      const oldValue = e.oldValue;
+      const value = e.value;
 
-    // If both are empty (phantom) or identical, skip generic log
-    // Note: OnEdit sometimes fires with undefined oldValue for new cells.
-    // If it's a real edit, we want to log it.
-    // If oldValue is undefined and value is "something", it's a new entry.
-    // If oldValue is "something" and value is undefined (cleared), it's a delete.
-    // Phantom is usually if user double clicks cell and hits enter without changing.
-    const isPhantom = (oldValue === undefined && value === undefined) || (oldValue === value);
+      // If both are empty (phantom) or identical, skip generic log
+      // Note: OnEdit sometimes fires with undefined oldValue for new cells.
+      // If it's a real edit, we want to log it.
+      // If oldValue is undefined and value is "something", it's a new entry.
+      // If oldValue is "something" and value is undefined (cleared), it's a delete.
+      // Phantom is usually if user double clicks cell and hits enter without changing.
+      const isPhantom =
+        (oldValue === undefined && value === undefined) || oldValue === value;
 
-    if (!isPhantom) {
-      logRoundRobinEvent('Manual Edit', {
-        cell: a1,
-        old: oldValue,
-        new: value
+      if (!isPhantom) {
+        logRoundRobinEvent(AUDIT_ACTIONS.MANUAL_EDIT, {
+          cell: a1,
+          old: oldValue,
+          new: value,
+          user: user,
+        });
+      }
+    } else {
+      logRoundRobinEvent(AUDIT_ACTIONS.MANUAL_EDIT, {
+        range: range.getA1Notation(),
+        rows: numRows,
+        cols: numCols,
+        user: user,
       });
     }
     // --- GENERIC LOGGING END ---
 
     // Only react when user edits the input columns B/C/D OR the Assigned column E
-    if (![COL_APPT_DT, COL_CUST_NAME, COL_PHONE, COL_ASSIGNED].includes(col))
-      return;
+    const touchesRelevantColumn = [COL_APPT_DT, COL_CUST_NAME, COL_PHONE, COL_ASSIGNED].some(
+      (c) => c >= startCol && c <= endCol
+    );
+    if (!touchesRelevantColumn) return;
 
     const appts = getApptsSheet_();
 
+    const dataRowStart = Math.max(startRow, 2);
+    const dataRowEnd = endRow;
+    const rowCount = dataRowEnd - dataRowStart + 1;
+    if (rowCount <= 0) return;
+
+    const values = appts.getRange(dataRowStart, 1, rowCount, COL_ASSIGNED_BY).getValues();
+    const includesAssignedCol = COL_ASSIGNED >= startCol && COL_ASSIGNED <= endCol;
+    const isSingleAssignedCell =
+      numRows === 1 && numCols === 1 && startCol === COL_ASSIGNED;
+
     // CASE 1: MANUAL OVERRIDE (Column E changed)
-    if (col === COL_ASSIGNED) {
-      const newValue = e.value;
-      const oldValue = e.oldValue;
+    if (includesAssignedCol) {
+      for (let i = 0; i < rowCount; i++) {
+        const row = dataRowStart + i;
+        const rowValues = values[i];
+        const newAssignee = isSingleAssignedCell
+          ? e.value
+          : rowValues[COL_ASSIGNED - 1];
+        const oldAssignee = isSingleAssignedCell ? e.oldValue : '(unknown)';
 
-      // Only log if it actually changed
-      logRoundRobinEvent('Manual Override', {
-        row: row,
-        oldAssignee: oldValue || '(empty)',
-        newAssignee: newValue || '(empty)',
-        reason: 'User manual edit in sheet',
-      });
+        logRoundRobinEvent(AUDIT_ACTIONS.MANUAL_OVERRIDE, {
+          row: row,
+          oldAssignee: oldAssignee || '(empty)',
+          newAssignee: newAssignee || '(empty)',
+          reason: numRows > 1 || numCols > 1 ? 'Bulk edit in sheet' : 'User manual edit in sheet',
+          user: user,
+        });
 
-      // Update Mode to "Manual" if not already (idempotent, side-effect only)
-      try {
-        const modeRange = sheet.getRange(row, COL_MODE);
-        if (modeRange.getValue() !== 'Manual') {
-          modeRange.setValue('Manual');
+        // Update Mode to "Manual" if not already (idempotent, side-effect only)
+        try {
+          const modeRange = sheet.getRange(row, COL_MODE);
+          if (modeRange.getValue() !== 'Manual') {
+            modeRange.setValue('Manual');
+          }
+        } catch (modeErr) {
+          // Log error but do not fail the function; this is a secondary action
+          logError('handleAppointmentEdit_SetMode', modeErr, { row: row });
         }
-      } catch (modeErr) {
-        // Log error but do not fail the function; this is a secondary action
-        logError('handleAppointmentEdit_SetMode', modeErr, { row: row });
       }
-
       return;
     }
 
     // CASE 2: NEW INPUT (Check B/C/D for auto-assign trigger)
-    const values = appts.getRange(row, 1, 1, COL_ASSIGNED_BY).getValues()[0];
+    for (let i = 0; i < rowCount; i++) {
+      const row = dataRowStart + i;
+      const rowValues = values[i];
+      const apptDt = rowValues[COL_APPT_DT - 1];
+      const name = rowValues[COL_CUST_NAME - 1];
+      const phone = rowValues[COL_PHONE - 1];
+      const assigned = rowValues[COL_ASSIGNED - 1];
 
-    const apptDt = values[COL_APPT_DT - 1];
-    const name = values[COL_CUST_NAME - 1];
-    const phone = values[COL_PHONE - 1];
-    const assigned = values[COL_ASSIGNED - 1];
+      // If already assigned, do nothing (allows manual override)
+      if (assigned) continue;
 
-    // If already assigned, do nothing (allows manual override)
-    if (assigned) return;
-
-    // If required fields present, auto-assign
-    if (apptDt && name && phone) {
-      assignRowAuto_(row);
+      // If required fields present, auto-assign
+      if (apptDt && name && phone) {
+        assignRowAuto_(row, { auditUser: user });
+      }
     }
   } catch (err) {
     logError('handleAppointmentEdit', err, { user: safeUserEmail_() });
@@ -235,9 +290,9 @@ function handleRRStateEdit(e) {
     if (row === 2 && col === 2) {
       const oldValue = e.oldValue;
       const newValue = e.value;
-      const user = safeUserEmail_();
+      const user = getEventUserEmail_(e);
 
-      logRoundRobinEvent('POINTER_MANUAL_EDIT', {
+      logRoundRobinEvent(AUDIT_ACTIONS.POINTER_MANUAL_EDIT, {
         pointerBefore: oldValue || '?',
         pointerAfter: newValue || '?',
         user: user,
@@ -249,18 +304,12 @@ function handleRRStateEdit(e) {
     if (row === 2 && col === 3) {
       const oldValue = e.oldValue === undefined ? '(blank)' : e.oldValue;
       const newValue = e.value === undefined ? '(blank)' : e.value;
+      const user = getEventUserEmail_(e);
 
-      // Determine user: try e.user.email first, then ActiveUser
-      let user = '';
-      if (e.user && e.user.email) {
-        user = e.user.email;
-      } else {
-        user = Session.getActiveUser().getEmail();
-      }
-
-      logRoundRobinEvent('Manual Override - Phone Up', {
+      logRoundRobinEvent(AUDIT_ACTIONS.MANUAL_OVERRIDE, {
         user: user,
-        Details: `Changed from ${oldValue} to ${newValue}`
+        target: AUDIT_ACTIONS.PHONE_LEAD,
+        details: `Changed from ${oldValue} to ${newValue}`,
       });
     }
   } catch (err) {
@@ -286,8 +335,8 @@ function handleRosterEdit(e) {
     if (col === 2 || col === 3) {
       const repName = sheet.getRange(row, 1).getValue();
       const actionType =
-        col === 2 ? 'ROSTER_ACTIVE_CHANGE' : 'ROSTER_ELIGIBLE_CHANGE';
-      const user = safeUserEmail_();
+        col === 2 ? AUDIT_ACTIONS.ROSTER_ACTIVE_CHANGE : AUDIT_ACTIONS.ROSTER_ELIGIBLE_CHANGE;
+      const user = getEventUserEmail_(e);
 
       logRoundRobinEvent(actionType, {
         rep: repName,
@@ -316,13 +365,13 @@ function handleAppointmentStructureChange(e) {
     if (sheet.getName() !== SHEET_APPTS) return;
 
     if (e.changeType === 'REMOVE_ROW') {
-      logRoundRobinEvent('Row Deleted', {
+      logRoundRobinEvent(AUDIT_ACTIONS.ROW_DELETED, {
         type: 'Structure Change',
         changeType: e.changeType,
         user: Session.getActiveUser().getEmail()
       });
     } else if (e.changeType === 'INSERT_ROW') {
-      logRoundRobinEvent('Row Inserted', {
+      logRoundRobinEvent(AUDIT_ACTIONS.ROW_INSERTED, {
         type: 'Structure Change',
         changeType: e.changeType
       });
@@ -396,9 +445,10 @@ function menuRewindPointer() {
       setPointer_(newPointer);
     });
 
-    logRoundRobinEvent('Rewind', {
+    logRoundRobinEvent(AUDIT_ACTIONS.UNDO, {
       pointerBefore: current,
       pointerAfter: newPointer,
+      target: 'Pointer',
       reason: 'User requested rewind',
     });
 
@@ -430,7 +480,7 @@ function menuResetPointer() {
       setPointer_(0);
     });
 
-    logRoundRobinEvent('Reset Pointer', {
+    logRoundRobinEvent(AUDIT_ACTIONS.POINTER_RESET, {
       pointerBefore: oldPointer,
       pointerAfter: 0,
       reason: 'Admin Reset',
@@ -523,22 +573,27 @@ function assignRowAuto_(row, opts = {}) {
     if (roster.length === 0) {
       appts.getRange(row, COL_MODE).setValue('No Eligible Reps');
 
-      logRoundRobinEvent('Assignment Failed', {
+      logRoundRobinEvent(AUDIT_ACTIONS.ASSIGNMENT_FAILED, {
         row: row,
         reason: 'No Eligible Reps',
         customer: name,
+        ...(opts.auditUser ? { user: opts.auditUser } : {}),
       });
       return;
     }
 
     // --- CENTRALIZED LOGIC CALL ---
+    const actionType = opts.forceReassign
+      ? AUDIT_ACTIONS.REASSIGNMENT
+      : AUDIT_ACTIONS.NEW_APPOINTMENT;
     const result = advanceRoundRobinPointer_(roster, {
-      actionType: 'Assignment',
+      actionType: actionType,
       details: {
         row: row,
         customer: name,
         notes: opts.forceReassign ? 'Reassignment (Force)' : 'New Assignment',
-        ...(opts.details || {}) // Merge custom details like 'reason'
+        ...(opts.details || {}), // Merge custom details like 'reason'
+        ...(opts.auditUser ? { user: opts.auditUser } : {})
       },
     });
 
@@ -549,7 +604,9 @@ function assignRowAuto_(row, opts = {}) {
     const user = safeUserEmail_();
 
     // Update the values array in memory (0-based indices)
-    vals[COL_CREATED_TS - 1] = now;
+    if (!vals[COL_CREATED_TS - 1]) {
+      vals[COL_CREATED_TS - 1] = now;
+    }
     vals[COL_ASSIGNED - 1] = assignee;
     vals[COL_MODE - 1] = opts.mode || 'Auto';
     vals[COL_ASSIGNED_BY - 1] = user;
@@ -587,7 +644,7 @@ function skipPointer_() {
 
     // Advance without assigning
     advanceRoundRobinPointer_(roster, {
-      actionType: 'Skip',
+      actionType: AUDIT_ACTIONS.SKIP,
       details: { reason: 'User requested skip' },
     });
   } catch (err) {
@@ -635,7 +692,7 @@ function advanceRoundRobinPointer_(roster, auditInfo) {
   // Log it
   const nextUp = roster[pointerAfter];
 
-  logRoundRobinEvent(auditInfo.actionType || 'Advance', {
+  logRoundRobinEvent(auditInfo.actionType || AUDIT_ACTIONS.ADVANCE, {
     pointerBefore: pointerBefore,
     pointerAfter: pointerAfter,
     assignee: assignee,
@@ -861,4 +918,15 @@ function safeUserEmail_() {
   } catch (err) {
     return '';
   }
+}
+
+function getEventUserEmail_(e) {
+  if (e && e.user && e.user.email) return e.user.email;
+  try {
+    const active = Session.getActiveUser().getEmail();
+    if (active) return active;
+  } catch (_) {
+    // ignore
+  }
+  return safeUserEmail_();
 }

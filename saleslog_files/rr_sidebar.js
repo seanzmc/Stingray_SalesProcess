@@ -59,7 +59,7 @@ function createAppointmentFromSidebar(payload) {
     // Check for eligible roster (function from round_robin.js)
     const roster = getEligibleRoster_();
     if (roster.length === 0) {
-      logRoundRobinAction_('Assignment Failed', {
+      logRoundRobinAction_(AUDIT_ACTIONS.ASSIGNMENT_FAILED, {
         reason: 'No Eligible Reps',
         customer: customerName,
         creator: assignedByName,
@@ -70,11 +70,12 @@ function createAppointmentFromSidebar(payload) {
     // --- CENTRALIZED LOGIC CALL ---
     // This handles finding the assignee, advancing variable, and LOGGING TO AUDIT
     const result = advanceRoundRobinPointer_(roster, {
-      actionType: 'Sidebar Appointment',
+      actionType: AUDIT_ACTIONS.NEW_APPOINTMENT,
       details: {
         appt: apptIso,
         customer: customerName,
         creator: assignedByName,
+        source: 'Sidebar',
       },
     });
 
