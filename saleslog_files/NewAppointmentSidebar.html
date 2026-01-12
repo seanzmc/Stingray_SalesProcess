@@ -1,8 +1,9 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 
 <head>
     <base target="_top">
+    <title>New Appointment</title>
     <style>
         body {
             font-family: Calibri, sans-serif;
@@ -49,80 +50,250 @@
         .err {
             background: #ffebee;
         }
+
+        /* Tabs */
+        .tab-bar {
+            display: flex;
+            gap: 6px;
+            margin: 0 0 12px 0;
+        }
+
+        .tab-btn {
+            flex: 1 1 0;
+            width: auto;
+            margin-top: 0;
+            padding: 8px 6px;
+            background: #f5f5f5;
+            border: 1px solid #d0d0d0;
+            border-bottom: 3px solid transparent;
+            border-radius: 6px;
+            font-size: 13px;
+            color: #333;
+            cursor: pointer;
+        }
+
+        .tab-btn.active {
+            background: #fff;
+            border-color: #bdbdbd;
+            border-bottom-color: #4CAF50;
+            font-weight: 700;
+        }
+
+        .tab-btn:focus {
+            outline: 2px solid #90caf9;
+            outline-offset: 1px;
+        }
+
+        .tab-sub {
+            display: block;
+            margin-top: 2px;
+            font-size: 11px;
+            font-weight: 600;
+            opacity: 0.75;
+        }
+
+        .tab-panel {
+            display: none;
+        }
+
+        /* Default visible tab (JS will take over after load) */
+        #tab-appointment {
+            display: block;
+        }
+
+        /* Panel headings */
+        #tab-appointment > h3 {
+            margin: 0 0 6px 0;
+            color: #333;
+        }
+
+        #tab-appointment > h4 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+
+        /* Phone Lead + Reassign containers */
+        #phone-lead-container,
+        #reassign-container {
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+
+        #phone-lead-container {
+            background-color: #f0f8ff;
+        }
+
+        #reassign-container {
+            background-color: #fff3e0;
+        }
+
+        /* Phone Lead styling */
+        #phone-lead-container h4 {
+            margin: 0 0 10px 0;
+        }
+
+        #phone-lead-container label {
+            margin-top: 0;
+            font-weight: 400;
+        }
+
+        #getLeadBtn {
+            margin-top: 5px;
+            background-color: #2196F3;
+            color: white;
+        }
+
+        #undoLeadBtn {
+            margin-top: 8px;
+            background-color: #FF5252;
+            color: white;
+            padding: 6px;
+            font-size: 13px;
+        }
+
+        #phoneLeadResult {
+            margin-top: 8px;
+            font-weight: bold;
+            color: #d32f2f;
+            text-align: center;
+            min-height: 20px;
+        }
+
+        /* Reassign styling */
+        #reassign-container h4 {
+            margin: 0 0 2px 0;
+        }
+
+        #reassign-container p {
+            margin: 0 0 10px 0;
+            font-weight: 400;
+            font-size: 13px;
+        }
+
+        #reassign-container label {
+            margin-top: 0;
+            font-weight: 400;
+            font-size: 13px;
+        }
+
+        #reassignReason {
+            margin-top: 4px;
+        }
+
+        #reassignBtn {
+            margin-top: 10px;
+            background-color: #FF9800;
+            color: white;
+        }
+
+        #reassignResult {
+            margin-top: 8px;
+            font-weight: bold;
+            text-align: center;
+            min-height: 20px;
+        }
+
+        /* Success UI */
+        #success-container {
+            display: none;
+            text-align: center;
+            margin-top: 40px;
+        }
+
+        .success-check {
+            font-size: 48px;
+            color: #4CAF50;
+        }
+
+        #success-container h3 {
+            margin: 10px 0;
+            color: #333;
+        }
+
+        #success-details {
+            margin: 20px 0;
+            font-size: 14px;
+            color: #555;
+            line-height: 1.5;
+        }
     </style>
 </head>
 
 <body>
 
-
-    <div id="phone-lead-container"
-        style="margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; background-color: #f0f8ff;">
-        <h4 style="margin-top: 0; margin-bottom: 10px;">Phone Lead System</h4>
-        <label style="margin-top:0; font-weight: normal;">Need a Salesperson?</label>
-        <button id="getLeadBtn" type="button" onclick="getPhoneLead()"
-            style="margin-top: 5px; background-color: #2196F3; color: white;">Assign Phone Lead</button>
-        <button id="undoLeadBtn" type="button" onclick="undoPhoneLead()"
-            style="margin-top: 8px; background-color: #FF5252; color: white; padding: 6px; font-size: 13px;">↺ Recall / Undo Last Assignment</button>
-        <div id="phoneLeadResult"
-            style="margin-top: 8px; font-weight: bold; color: #d32f2f; text-align: center; min-height: 20px;"></div>
+    <div class="tab-bar" role="tablist" aria-label="Sidebar Sections">
+        <button type="button" class="tab-btn active" data-tab="tab-appointment" aria-controls="tab-appointment"
+            aria-selected="true" onclick="setActiveTab('tab-appointment')">Appointment</button>
+        <button type="button" class="tab-btn" data-tab="tab-phone-lead" aria-controls="tab-phone-lead"
+            aria-selected="false" onclick="setActiveTab('tab-phone-lead')">Phone Lead</button>
+        <button type="button" class="tab-btn" data-tab="tab-manage" aria-controls="tab-manage" aria-selected="false"
+            onclick="setActiveTab('tab-manage')">Manage<span class="tab-sub">Reassign workflows</span></button>
     </div>
 
+    <div id="tab-appointment" class="tab-panel" role="tabpanel">
+        <h3>New Appointment</h3>
 
+        <h4>Appointment Details</h4>
 
-    <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
+        <div id="form-container">
+            <label>Appointment date/time</label>
+            <input id="apptIso" type="datetime-local">
 
-    <h3 style="margin-top: 0;">New Appointment</h3>
+            <label>Customer name</label>
+            <input id="customerName" type="text" placeholder="John Smith">
 
-    <h4 style="margin-top: 0;">Appointment Details</h4>
+            <label>Phone</label>
+            <input id="phone" type="tel" placeholder="813-555-1234">
 
-    <div id="form-container">
-        <label>Appointment date/time</label>
-        <input id="apptIso" type="datetime-local" />
+            <label>Assigned By</label>
+            <select id="assignedByName"></select>
 
-        <label>Customer name</label>
-        <input id="customerName" type="text" placeholder="John Smith" />
-
-        <label>Phone</label>
-        <input id="phone" type="tel" placeholder="813-555-1234" />
-
-        <label>Assigned By</label>
-        <select id="assignedByName"></select>
-
-        <label>Notes (optional)</label>
-        <textarea id="notes" rows="3" placeholder="Anything helpful..."></textarea>
+            <label>Notes (optional)</label>
+            <textarea id="notes" rows="3" placeholder="Anything helpful..."></textarea>
 
 
 
-        <button id="submitBtn" type="button" onclick="submit()">Create & Assign</button>
+            <button id="submitBtn" type="button" onclick="submit()">Create &amp; Assign</button>
 
-        <div class="hint">This will auto-assign to the next eligible salesperson and advance the queue.</div>
+            <div class="hint">This will auto-assign to the next eligible salesperson and advance the queue.</div>
+        </div>
+
+        <div id="success-container">
+            <div class="success-check">&#10004;</div>
+            <h3>Appointment Created</h3>
+            <div id="success-details"></div>
+            <button type="button" onclick="google.script.host.close()">Close</button>
+        </div>
+
+        <div id="status"></div>
     </div>
 
-    <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;">
-
-    <div id="reassign-container"
-        style="margin-bottom: 20px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; background-color: #fff3e0;">
-        <h4 style="margin-top: 0; margin-bottom: 2px;">Reassign Appointment</h4>
-        <p style="margin-top: 0; margin-bottom: 10px; font-weight: normal; font-size: 13px;">Select the row to reassign
-            on the APPOINTMENTS sheet.</p>
-        <label style="margin-top:0; font-weight: normal; font-size: 13px;">Reason:</label>
-        <select id="reassignReason" style="margin-top: 4px;">
-            <option>Loading...</option>
-        </select>
-        <button id="reassignBtn" type="button" onclick="reassignRow()"
-            style="margin-top: 10px; background-color: #FF9800; color: white;">Reassign</button>
-        <div id="reassignResult" style="margin-top: 8px; font-weight: bold; text-align: center; min-height: 20px;">
+    <div id="tab-phone-lead" class="tab-panel" role="tabpanel">
+        <div id="phone-lead-container">
+            <h4>Phone Lead System</h4>
+            <label>Need a Salesperson?</label>
+            <button id="getLeadBtn" type="button" onclick="getPhoneLead()">Assign Phone Lead</button>
+            <button id="undoLeadBtn" type="button" onclick="undoPhoneLead()">↺ Recall / Undo Last Assignment</button>
+            <div id="phoneLeadResult"></div>
         </div>
     </div>
 
-    <div id="success-container" style="display:none; text-align: center; margin-top: 40px;">
-        <div style="font-size: 48px; color: #4CAF50;">&#10004;</div>
-        <h3 style="margin: 10px 0; color: #333;">Appointment Created</h3>
-        <div id="success-details" style="margin: 20px 0; font-size: 14px; color: #555; line-height: 1.5;"></div>
-        <button onclick="google.script.host.close()">Close</button>
+    <div id="tab-manage" class="tab-panel" role="tabpanel">
+        <div id="reassign-container">
+            <h4>Reassign Appointment</h4>
+            <p>Select the row to reassign
+                on the APPOINTMENTS sheet.</p>
+            <label>Reason:</label>
+            <select id="reassignReason">
+                <option>Loading...</option>
+            </select>
+            <button id="reassignBtn" type="button" onclick="reassignRow()">Reassign</button>
+            <div id="reassignResult">
+            </div>
+        </div>
     </div>
-
-    <div id="status"></div>
 
     <script>
         // Helper to get local ISO string for datetime-local
@@ -362,6 +533,24 @@
             if (originalOnLoad) originalOnLoad();
             loadReassignReasons();
         };
+
+        // Tab switching
+        function setActiveTab(tabId) {
+            const panels = document.querySelectorAll('.tab-panel');
+            panels.forEach((p) => {
+                p.style.display = (p.id === tabId) ? 'block' : 'none';
+            });
+
+            const buttons = document.querySelectorAll('.tab-btn');
+            buttons.forEach((b) => {
+                const isActive = b.getAttribute('data-tab') === tabId;
+                b.classList.toggle('active', isActive);
+                b.setAttribute('aria-selected', String(isActive));
+            });
+        }
+
+        // Default tab
+        setActiveTab('tab-appointment');
     </script>
 </body>
 
