@@ -4,10 +4,11 @@
 
 ### **Critical Issues Identified**
 
-- **Sidebar UI Clutter:**
-  - **Issue:** [`NewAppointmentSidebar.html`](saleslog_files/NewAppointmentSidebar.html:1) stacks multiple primary CTAs ("New Appointment," "Assign Phone Lead," "Reassign," "Undo") vertically without clear visual hierarchy.
-  - **Impact:** Users may accidentally click the wrong action under time pressure.
-  - **Fix:** Implement a tabbed interface using simple CSS/JS (no external libraries). Example structure:
+#### **Sidebar UI Clutter:**
+
+- **Issue:** [`NewAppointmentSidebar.html`](saleslog_files/NewAppointmentSidebar.html:1) stacks multiple primary CTAs ("New Appointment," "Assign Phone Lead," "Reassign," "Undo") vertically without clear visual hierarchy.
+- **Impact:** Users may accidentally click the wrong action under time pressure.
+- **Fix:** Implement a tabbed interface using simple CSS/JS (no external libraries). Example structure:
 
     ```html
     <div class="tabs">
@@ -20,10 +21,11 @@
     <div id="tab-manage" class="tab-content hidden"><!-- Reassign/Undo --></div>
     ```
 
-- **Reassignment Lacks Row Context:**
-  - **Issue:** The reassign workflow in [`NewAppointmentSidebar.html`](saleslog_files/NewAppointmentSidebar.html:1) operates on the "current selection" but never displays which customer/row is selected.
-  - **Impact:** High risk of reassigning the wrong customer, especially if the user changes selection after opening the sidebar.
-  - **Fix:** Add a server-side function `getCurrentSelectionInfo()` that returns `{row: number, customer: string, status: string}`. Display this prominently above the reassign controls:
+#### **Reassignment Lacks Row Context:**
+
+- **Issue:** The reassign workflow in [`NewAppointmentSidebar.html`](saleslog_files/NewAppointmentSidebar.html:1) operates on the "current selection" but never displays which customer/row is selected.
+- **Impact:** High risk of reassigning the wrong customer, especially if the user changes selection after opening the sidebar.
+- **Fix:** Add a server-side function `getCurrentSelectionInfo()` that returns `{row: number, customer: string, status: string}`. Display this prominently above the reassign controls:
 
     ```javascript
     // In Code.js or utilities
@@ -38,10 +40,11 @@
 
     Call this on sidebar load and display: `"Currently selected: [Customer Name] (Row #, Status: X)"`.
 
-- **Modal Dialog Failures Use `alert()`:**
-  - **Issue:** [`ReassignDialog.html`](saleslog_files/ReassignDialog.html:1) falls back to `alert()` for error messages, which blocks the UI thread and provides poor UX.
-  - **Impact:** Users cannot copy error messages, and the dialog closes unexpectedly on success without confirmation.
-  - **Fix:** Replace `alert()` with inline error display:
+#### **Modal Dialog Failures Use `alert()`:**
+
+- **Issue:** [`ReassignDialog.html`](saleslog_files/ReassignDialog.html:1) falls back to `alert()` for error messages, which blocks the UI thread and provides poor UX.
+- **Impact:** Users cannot copy error messages, and the dialog closes unexpectedly on success without confirmation.
+- **Fix:** Replace `alert()` with inline error display:
 
     ```html
     <div id="error-msg" class="hidden error-box"></div>
@@ -57,19 +60,21 @@
 
     On success, show a 2-second confirmation message before closing: `"Successfully reassigned [Name] to [User]. Closing..."`
 
-- **Accessibility & Form Usability:**
-  - **Issue:** Form inputs lack proper `<label for="...">` attributes; reason dropdowns don't enforce intentional selection (allow default empty value); inconsistent labels/colors for status indicators.
-  - **Impact:** Screen readers cannot associate labels with inputs; users can submit forms without selecting a reason; color-blind users may misinterpret status.
-  - **Fix:**
-    - Wrap all inputs with explicit labels: `<label for="reason-select">Reason:</label><select id="reason-select">...</select>`
-    - Add a disabled default option: `<option value="" disabled selected>-- Select a reason --</option>`
-    - Validate on form submit: `if (!reasonSelect.value) { showError('Please select a reason'); return; }`
-    - Add `aria-live="polite"` to status banners so changes are announced to screen readers.
+#### **Accessibility & Form Usability:**
 
-- **Time Rounding Microcopy:**
-  - **Issue:** The appointment form rounds times to the nearest 15 minutes but doesn't explain this to users.
-  - **Impact:** Users may be confused when their input (e.g., "10:23 AM") is changed to "10:30 AM" without notification.
-  - **Fix:** Add helper text below the time input: `<small class="text-gray-500">Times will be rounded to the nearest 15 minutes.</small>`
+- **Issue:** Form inputs lack proper `<label for="...">` attributes; reason dropdowns don't enforce intentional selection (allow default empty value); inconsistent labels/colors for status indicators.
+- **Impact:** Screen readers cannot associate labels with inputs; users can submit forms without selecting a reason; color-blind users may misinterpret status.
+- **Fix:**
+- Wrap all inputs with explicit labels: `<label for="reason-select">Reason:</label><select id="reason-select">...</select>`
+- Add a disabled default option: `<option value="" disabled selected>-- Select a reason --</option>`
+- Validate on form submit: `if (!reasonSelect.value) { showError('Please select a reason'); return; }`
+- Add `aria-live="polite"` to status banners so changes are announced to screen readers.
+
+#### **Time Rounding Microcopy:**
+
+- **Issue:** The appointment form rounds times to the nearest 15 minutes but doesn't explain this to users.
+- **Impact:** Users may be confused when their input (e.g., "10:23 AM") is changed to "10:30 AM" without notification.
+- **Fix:** Add helper text below the time input: `<small class="text-gray-500">Times will be rounded to the nearest 15 minutes.</small>`
 
 ### **Recommendations**
 
@@ -84,10 +89,11 @@
 
 ### **Workflow & Validation Issues**
 
-- **High-Risk Undo Flow Without Context:**
-  - **Issue:** The "Undo Last Assignment" button in [`rr_sidebar.js`](saleslog_files/rr_sidebar.js:1) provides no preview of *what* will be undone (customer name, timestamp, or target user).
-  - **Impact:** Users may accidentally undo the wrong assignment, especially if multiple people are working simultaneously.
-  - **Fix:** Add a server-side function `getLastAssignmentDetails()`:
+#### **High-Risk Undo Flow Without Context:**
+
+- **Issue:** The "Undo Last Assignment" button in [`rr_sidebar.js`](saleslog_files/rr_sidebar.js:1) provides no preview of *what* will be undone (customer name, timestamp, or target user).
+- **Impact:** Users may accidentally undo the wrong assignment, especially if multiple people are working simultaneously.
+- **Fix:** Add a server-side function `getLastAssignmentDetails()`:
 
     ```javascript
     function getLastAssignmentDetails() {
@@ -105,10 +111,11 @@
 
     Display this in a confirmation dialog: `"Undo assignment of [Customer] to [User] at [Time]? This cannot be undone."`
 
-- **Per-Field Validation Missing:**
-  - **Issue:** Forms submit without real-time validation. Errors are only caught server-side, requiring a full round-trip.
-  - **Impact:** Slow feedback loop frustrates users and wastes API quota.
-  - **Fix:** Add client-side validation before calling `google.script.run`:
+#### **Per-Field Validation Missing:**
+
+- **Issue:** Forms submit without real-time validation. Errors are only caught server-side, requiring a full round-trip.
+- **Impact:** Slow feedback loop frustrates users and wastes API quota.
+- **Fix:** Add client-side validation before calling `google.script.run`:
 
     ```javascript
     function validateForm() {
@@ -129,10 +136,11 @@
     }
     ```
 
-- **Preview → Confirm Pattern Missing for Reassignment:**
-  - **Issue:** Reassignment is immediate upon clicking "Submit" with no confirmation step.
-  - **Impact:** Accidental reassignments cannot be prevented at the UI level.
-  - **Fix:** Add a two-step flow:
+#### **Preview → Confirm Pattern Missing for Reassignment:**
+
+- **Issue:** Reassignment is immediate upon clicking "Submit" with no confirmation step.
+- **Impact:** Accidental reassignments cannot be prevented at the UI level.
+- **Fix:** Add a two-step flow:
     1. First click: Show preview: `"This will reassign [Customer] from [Old User] to [New User] for reason: [X]. Confirm?"`
     2. Second click: Execute the reassignment.
     Implement with a state variable:
@@ -162,10 +170,11 @@
 
 ### **Dashboard Polling Performance**
 
-- **No Pause When Tab Hidden:**
-  - **Issue:** [`dashboard.html`](saleslog_files/dashboard.html:1) polls every 30 seconds regardless of whether the tab is visible.
-  - **Impact:** Wastes quota and server resources when users have the dashboard open in background tabs.
-  - **Fix:** Use the Page Visibility API:
+#### **No Pause When Tab Hidden:**
+
+- **Issue:** [`dashboard.html`](saleslog_files/dashboard.html:1) polls every 30 seconds regardless of whether the tab is visible.
+- **Impact:** Wastes quota and server resources when users have the dashboard open in background tabs.
+- **Fix:** Use the Page Visibility API:
 
     ```javascript
     let pollInterval;
@@ -181,10 +190,11 @@
     });
     ```
 
-- **No `clearInterval` on Errors:**
-  - **Issue:** If `refreshData()` encounters a fatal error, the interval continues to fire, logging errors repeatedly.
-  - **Impact:** Console spam and wasted quota.
-  - **Fix:** Add error count tracking and stop polling after 3 consecutive failures:
+#### **No `clearInterval` on Errors:**
+
+- **Issue:** If `refreshData()` encounters a fatal error, the interval continues to fire, logging errors repeatedly.
+- **Impact:** Console spam and wasted quota.
+- **Fix:** Add error count tracking and stop polling after 3 consecutive failures:
 
     ```javascript
     let errorCount = 0;
@@ -203,10 +213,11 @@
     }
     ```
 
-- **No In-Flight Request Guard:**
-  - **Issue:** If a `getDashboardData()` request takes >30 seconds (due to heavy load), a second request fires before the first completes.
-  - **Impact:** Concurrency spikes and potential data race in UI rendering.
-  - **Fix:** Add a flag to prevent overlapping requests:
+#### **No In-Flight Request Guard:**
+
+- **Issue:** If a `getDashboardData()` request takes >30 seconds (due to heavy load), a second request fires before the first completes.
+- **Impact:** Concurrency spikes and potential data race in UI rendering.
+- **Fix:** Add a flag to prevent overlapping requests:
 
     ```javascript
     let isLoading = false;
@@ -220,10 +231,11 @@
     }
     ```
 
-- **`loading` State Can Stuck if `google` Undefined:**
-  - **Issue:** If the Apps Script client API fails to load (rare, but happens on slow connections), the loading spinner remains indefinitely.
-  - **Impact:** Users see a frozen UI with no error message.
-  - **Fix:** Add a timeout fallback:
+#### **`loading` State Can Stuck if `google` Undefined:**
+
+- **Issue:** If the Apps Script client API fails to load (rare, but happens on slow connections), the loading spinner remains indefinitely.
+- **Impact:** Users see a frozen UI with no error message.
+- **Fix:** Add a timeout fallback:
 
     ```javascript
     setTimeout(() => {
@@ -233,10 +245,11 @@
     }, 5000);
     ```
 
-- **Feed Uses Array Index as Key:**
-  - **Issue:** The activity feed renders items using array index as the key (implicit or explicit).
-  - **Impact:** If the audit log is sorted or filtered, React/DOM reconciliation may incorrectly reuse elements, showing stale data.
-  - **Fix:** Use a unique, stable key such as `timestamp + customer + action`:
+#### **Feed Uses Array Index as Key:**
+
+- **Issue:** The activity feed renders items using array index as the key (implicit or explicit).
+- **Impact:** If the audit log is sorted or filtered, React/DOM reconciliation may incorrectly reuse elements, showing stale data.
+- **Fix:** Use a unique, stable key such as `timestamp + customer + action`:
 
     ```javascript
     data.feed.forEach(item => {
@@ -247,10 +260,11 @@
     });
     ```
 
-- **Payload Includes Unused Fields:**
-  - **Issue:** `getDashboardData()` returns the full 1000-row audit log with all columns, but the UI only displays 5 columns.
-  - **Impact:** Bandwidth waste and slower parsing.
-  - **Fix:** Filter the payload server-side:
+#### **Payload Includes Unused Fields:**
+
+- **Issue:** `getDashboardData()` returns the full 1000-row audit log with all columns, but the UI only displays 5 columns.
+- **Impact:** Bandwidth waste and slower parsing.
+- **Fix:** Filter the payload server-side:
 
     ```javascript
     function getDashboardData() {
@@ -268,10 +282,11 @@
     }
     ```
 
-- **Cache TTL Equals Poll Interval (Concurrency Spikes):**
-  - **Issue:** If `CacheService` is implemented with a 30-second TTL and polling is also 30 seconds, all 10 users will miss the cache at the same moment every 30 seconds.
-  - **Impact:** Defeats the purpose of caching; creates "thundering herd" load spikes.
-  - **Fix:** Set cache TTL to 20-25 seconds (shorter than poll interval) or use a jittered poll interval:
+#### **Cache TTL Equals Poll Interval (Concurrency Spikes):**
+
+- **Issue:** If `CacheService` is implemented with a 30-second TTL and polling is also 30 seconds, all 10 users will miss the cache at the same moment every 30 seconds.
+- **Impact:** Defeats the purpose of caching; creates "thundering herd" load spikes.
+- **Fix:** Set cache TTL to 20-25 seconds (shorter than poll interval) or use a jittered poll interval:
 
     ```javascript
     const jitter = Math.random() * 5000; // 0-5 seconds
@@ -280,10 +295,11 @@
 
 ### **Sidebar Initialization**
 
-- **Two Init RPCs on Load:**
-  - **Issue:** [`NewAppointmentSidebar.html`](saleslog_files/NewAppointmentSidebar.html:1) calls `getUsersForDropdown()` and `getCurrentRosterStatus()` sequentially on load.
-  - **Impact:** 2× latency and 2× quota usage. If the first call fails, the second still fires.
-  - **Fix:** Combine into a single `getSidebarInitData()` function:
+#### **Two Init RPCs on Load:**
+
+- **Issue:** [`NewAppointmentSidebar.html`](saleslog_files/NewAppointmentSidebar.html:1) calls `getUsersForDropdown()` and `getCurrentRosterStatus()` sequentially on load.
+- **Impact:** 2× latency and 2× quota usage. If the first call fails, the second still fires.
+- **Fix:** Combine into a single `getSidebarInitData()` function:
 
     ```javascript
     function getSidebarInitData() {
@@ -295,12 +311,13 @@
     }
     ```
 
-    Call once from the sidebar and destructure the result.
+- **Call once from the sidebar and destructure the result.**
 
-- **No Request Coalescing:**
-  - **Issue:** If a user opens the sidebar, closes it, and reopens within 10 seconds, the same data is fetched again.
-  - **Impact:** Minor quota waste.
-  - **Fix:** Use `sessionStorage` to cache init data for 60 seconds:
+#### **No Request Coalescing:**
+
+- **Issue:** If a user opens the sidebar, closes it, and reopens within 10 seconds, the same data is fetched again.
+- **Impact:** Minor quota waste.
+- **Fix:** Use `sessionStorage` to cache init data for 60 seconds:
 
     ```javascript
     const cached = sessionStorage.getItem('sidebarInitData');
@@ -316,10 +333,11 @@
     }
     ```
 
-- **Uses `innerHTML` for Success Details:**
-  - **Issue:** Success messages like `"Assigned to John Doe"` are injected via `innerHTML`.
-  - **Impact:** Minor XSS risk if customer names contain special characters (unlikely but possible).
-  - **Fix:** Use `textContent` instead:
+#### **Uses `innerHTML` for Success Details:**
+
+- **Issue:** Success messages like `"Assigned to John Doe"` are injected via `innerHTML`.
+- **Impact:** Minor XSS risk if customer names contain special characters (unlikely but possible).
+- **Fix:** Use `textContent` instead:
 
     ```javascript
     successDiv.textContent = `Assigned to ${assignedUser}`;
@@ -338,10 +356,11 @@
 
 ### **Backend, Round Robin, & PhoneUp Issues**
 
-- **Missing Sheet Validation:**
-  - **Issue:** Functions in [`round_robin.js`](saleslog_files/round_robin.js:1) and [`PhoneUp.js`](saleslog_files/PhoneUp.js:1) call `getSheetByName()` without null checks.
-  - **Impact:** If "RR_ROSTER" or "RR_USERS" is renamed or deleted, scripts crash with cryptic `Cannot read property 'getRange' of null` errors.
-  - **Fix:** Add a universal sheet getter:
+#### **FIXED Missing Sheet Validation:**
+
+- **Issue:** Functions in [`round_robin.js`](saleslog_files/round_robin.js:1) and [`PhoneUp.js`](saleslog_files/PhoneUp.js:1) call `getSheetByName()` without null checks.
+- **Impact:** If "RR_ROSTER" or "RR_USERS" is renamed or deleted, scripts crash with cryptic `Cannot read property 'getRange' of null` errors.
+- **Fix:** Add a universal sheet getter:
 
     ```javascript
     function getSheetOrThrow_(name) {
@@ -353,12 +372,13 @@
 
     Use this in all sheet access: `const roster = getSheetOrThrow_('RR_ROSTER');`
 
-- **Audit Logging is Noisy & Quota-Heavy:**
-  - **Issue:** Every assignment, reassignment, and undo writes a row to `RR_AUDIT`. With 50 actions/day, this grows to 18,000 rows/year.
-  - **Impact:** Exceeds typical use cases for Sheets; slows down `getDashboardData()`.
-  - **Fix:** Implement rolling audit log:
-    - Keep only last 1000 rows (delete older).
-    - Or, archive to a separate "Archive" sheet monthly via a time-driven trigger.
+#### **Audit Logging is Noisy & Quota-Heavy:**
+
+- **Issue:** Every assignment, reassignment, and undo writes a row to `RR_AUDIT`. With 50 actions/day, this grows to 18,000 rows/year.
+- **Impact:** Exceeds typical use cases for Sheets; slows down `getDashboardData()`.
+- **Fix:** Implement rolling audit log:
+  - Keep only last 1000 rows (delete older).
+  - Or, archive to a separate "Archive" sheet monthly via a time-driven trigger.
 
     ```javascript
     function archiveOldAuditLogs_() {
@@ -373,10 +393,11 @@
     }
     ```
 
-- **Phantom Edit Detection Compares Raw Values:**
-  - **Issue:** The phantom edit check compares `currentStatus === 'Assigned'` but doesn't account for trailing spaces, case differences, or formula-driven values.
-  - **Impact:** False positives may block legitimate assignments.
-  - **Fix:** Normalize before comparison:
+#### **Phantom Edit Detection Compares Raw Values:**
+
+- **Issue:** The phantom edit check compares `currentStatus === 'Assigned'` but doesn't account for trailing spaces, case differences, or formula-driven values.
+- **Impact:** False positives may block legitimate assignments.
+- **Fix:** Normalize before comparison:
 
     ```javascript
     function isPhantomEdit_(oldStatus, newStatus) {
@@ -385,10 +406,11 @@
     }
     ```
 
-- **Inconsistent "Assigned By" Identity:**
-  - **Issue:** Some functions use `Session.getActiveUser().getEmail()`, others use a parameter `assignedByName`, and some default to `"System Auto"`. No single source of truth.
-  - **Impact:** Audit logs mix email addresses, display names, and system identifiers, making reporting difficult.
-  - **Fix:** Centralize identity resolution:
+#### **Inconsistent "Assigned By" Identity:**
+
+- **Issue:** Some functions use `Session.getActiveUser().getEmail()`, others use a parameter `assignedByName`, and some default to `"System Auto"`. No single source of truth.
+- **Impact:** Audit logs mix email addresses, display names, and system identifiers, making reporting difficult.
+- **Fix:** Centralize identity resolution:
 
     ```javascript
     function getAssignedByIdentity_(customName) {
@@ -405,10 +427,11 @@
     }
     ```
 
-- **Bug: `logRoundRobinAction_()` is Undefined:**
-  - **Issue:** [`rr_sidebar.js`](saleslog_files/rr_sidebar.js:53) references `logRoundRobinAction_()` but this function does not exist in the codebase.
-  - **Impact:** Script crashes on certain actions (likely undo or reassign from sidebar).
-  - **Fix:** Define the function in [`utilities_locks.js`](saleslog_files/utilities_locks.js:1) or [`round_robin.js`](saleslog_files/round_robin.js:1):
+#### **Bug: `logRoundRobinAction_()` is Undefined:**
+
+- **Issue:** [`rr_sidebar.js`](saleslog_files/rr_sidebar.js:53) references `logRoundRobinAction_()` but this function does not exist in the codebase.
+- **Impact:** Script crashes on certain actions (likely undo or reassign from sidebar).
+- **Fix:** Define the function in [`utilities_locks.js`](saleslog_files/utilities_locks.js:1) or [`round_robin.js`](saleslog_files/round_robin.js:1):
 
     ```javascript
     function logRoundRobinAction_(action, details) {
@@ -423,10 +446,11 @@
     }
     ```
 
-- **Pointer Reset Not Lock-Protected:**
-  - **Issue:** If two admins try to reset the RR pointer simultaneously, the last write wins without any concurrency control.
-  - **Impact:** Potential desync in pointer state.
-  - **Fix:** Wrap pointer reset in `LockService`:
+#### **Pointer Reset Not Lock-Protected:**
+
+- **Issue:** If two admins try to reset the RR pointer simultaneously, the last write wins without any concurrency control.
+- **Impact:** Potential desync in pointer state.
+- **Fix:** Wrap pointer reset in `LockService`:
 
     ```javascript
     function resetRoundRobinPointer() {
@@ -442,10 +466,11 @@
     }
     ```
 
-- **Pointer Edit Not Prevented:**
-  - **Issue:** Cell B2 (RR_STATE) is editable by anyone with write access to the sheet.
-  - **Impact:** Manual edits will break round robin sequencing.
-  - **Fix:** Protect the range in the `onOpen` trigger:
+#### **Pointer Edit Not Prevented:**
+
+- **Issue:** Cell B2 (RR_STATE) is editable by anyone with write access to the sheet.
+- **Impact:** Manual edits will break round robin sequencing.
+- **Fix:** Protect the range in the `onOpen` trigger:
 
     ```javascript
     function onOpen() {
@@ -457,10 +482,11 @@
     }
     ```
 
-- **Reassignment Overwrites Created Timestamp:**
-  - **Issue:** When reassigning in [`round_robin.js`](saleslog_files/round_robin.js:1), the "Created" timestamp column is updated to `new Date()`, losing the original creation time.
-  - **Impact:** Reporting on "lead age" becomes inaccurate.
-  - **Fix:** Only update the "Assigned" timestamp column, not "Created":
+#### **Reassignment Overwrites Created Timestamp:**
+
+- **Issue:** When reassigning in [`round_robin.js`](saleslog_files/round_robin.js:1), the "Created" timestamp column is updated to `new Date()`, losing the original creation time.
+- **Impact:** Reporting on "lead age" becomes inaccurate.
+- **Fix:** Only update the "Assigned" timestamp column, not "Created":
 
     ```javascript
     function reassignCustomer(row, newUser, reason) {
@@ -471,10 +497,11 @@
     }
     ```
 
-- **Lock Failure Not Surfaced to Users:**
-  - **Issue:** If `LockService.tryLock()` fails, functions return `null` or throw errors, but the UI shows a generic failure message.
-  - **Impact:** Users don't know if they should retry or wait.
-  - **Fix:** Return specific error objects:
+#### **Lock Failure Not Surfaced to Users:**
+
+- **Issue:** If `LockService.tryLock()` fails, functions return `null` or throw errors, but the UI shows a generic failure message.
+- **Impact:** Users don't know if they should retry or wait.
+- **Fix:** Return specific error objects:
 
     ```javascript
     function assignPhoneLead(data) {
@@ -493,7 +520,7 @@
     }
     ```
 
-    Handle in the client:
+    **Handle in the client:**
 
     ```javascript
     .withSuccessHandler(result => {
@@ -503,15 +530,17 @@
     })
     ```
 
-- **PhoneUp State Semantics Inconsistent:**
-  - **Issue:** Cell C2 is labeled "Last Assigned" but [`PhoneUp.js`](saleslog_files/PhoneUp.js:1) treats it as "Next Up" (the user who should receive the next phone lead).
-  - **Impact:** Confusion when reading the sheet; potential off-by-one errors.
-  - **Fix:** Rename the cell to "Next Phone Lead User" and update all comments/docs. Or, change the logic to store "last assigned" and compute "next up" dynamically.
+#### **PhoneUp State Semantics Inconsistent:**
 
-- **Undo Message May Not Match Next Assignment:**
-  - **Issue:** The success message for undo says `"Undone. Next assignment will go to [User]"`, but if the roster has changed, the prediction may be wrong.
-  - **Impact:** Misleads users.
-  - **Fix:** Either remove the prediction or fetch the actual next user after undoing:
+- **Issue:** Cell C2 is labeled "Last Assigned" but [`PhoneUp.js`](saleslog_files/PhoneUp.js:1) treats it as "Next Up" (the user who should receive the next phone lead).
+- **Impact:** Confusion when reading the sheet; potential off-by-one errors.
+- **Fix:** Rename the cell to "Next Phone Lead User" and update all comments/docs. Or, change the logic to store "last assigned" and compute "next up" dynamically.
+
+#### **Undo Message May Not Match Next Assignment:**
+
+- **Issue:** The success message for undo says `"Undone. Next assignment will go to [User]"`, but if the roster has changed, the prediction may be wrong.
+- **Impact:** Misleads users.
+- **Fix:** Either remove the prediction or fetch the actual next user after undoing:
 
     ```javascript
     function undoLastAssignment() {
@@ -521,15 +550,17 @@
     }
     ```
 
-- **Server Should Validate `assignedByName` Against Allowlist:**
-  - **Issue:** The `assignedByName` parameter in [`round_robin.js`](saleslog_files/round_robin.js:1) is not validated against the `RR_USERS` sheet.
-  - **Impact:** Malicious or buggy clients could inject arbitrary names into audit logs.
-  - **Fix:** Add validation in `getAssignedByIdentity_()` (already shown above).
+#### **Server Should Validate `assignedByName` Against Allowlist:**
 
-- **Audit Action Names Inconsistent:**
-  - **Issue:** Audit logs use "Assigned", "Auto-Assigned", "Reassigned", "Undo Assignment", "PhoneUp", etc. without a controlled vocabulary.
-  - **Impact:** Dashboard filters and reporting logic must hardcode multiple variants.
-  - **Fix:** Define an enum-like object:
+- **Issue:** The `assignedByName` parameter in [`round_robin.js`](saleslog_files/round_robin.js:1) is not validated against the `RR_USERS` sheet.
+- **Impact:** Malicious or buggy clients could inject arbitrary names into audit logs.
+- **Fix:** Add validation in `getAssignedByIdentity_()` (already shown above).
+
+#### **Audit Action Names Inconsistent:**
+
+- **Issue:** Audit logs use "Assigned", "Auto-Assigned", "Reassigned", "Undo Assignment", "PhoneUp", etc. without a controlled vocabulary.
+- **Impact:** Dashboard filters and reporting logic must hardcode multiple variants.
+- **Fix:** Define an enum-like object:
 
     ```javascript
     const AUDIT_ACTIONS = {
@@ -541,7 +572,7 @@
     };
     ```
 
-    Use these constants everywhere: `logRoundRobinAction_(AUDIT_ACTIONS.REASSIGN, details);`
+    **Use these constants everywhere:** `logRoundRobinAction_(AUDIT_ACTIONS.REASSIGN, details);`
 
 ### **Prioritized Fix Plan**
 

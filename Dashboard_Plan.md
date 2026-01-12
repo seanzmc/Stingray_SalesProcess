@@ -1,4 +1,4 @@
-#Dashboard Plan
+# Dashboard Plan
 
 Role: You are an expert Google Apps Script developer.
 
@@ -28,13 +28,13 @@ Processing Needed: [Acceptable Input Aliases is a comma separated list of aliase
 
 Sheet Name: [RR_ROSTER]
 
-Columns: [Salesperson (name), Active (checkbox), Eligible for Leads (checkbox), Role/Notes (text), Pointer Key (number)] 
+Columns: [Salesperson (name), Active (checkbox), Eligible for Leads (checkbox), Role/Notes (text), Pointer Key (number)]
 
 Purpose: [Source of truth for salesperson eligibility for leads and phone-up round-robin assignments.]
 
 Sheet Name: [RR_STATE]
 
-Columns: [RoundRobin Cycle, Appointment NextUp	PhoneUp Last Assigned] 
+Columns: [RoundRobin Cycle, Appointment NextUp PhoneUp Last Assigned]
 
 Purpose: [RoundRobin function uses this sheet to track state.]
 
@@ -54,8 +54,8 @@ Processing Needed: [Depending on the action, the Reference column shows differen
 
 Sheet Name: ['DASHBOARD JAN 2026']
 
-Columns: [Rows 1-5 contain dashboard calculated metrics from the sheet. Data headers are in row 6. 
-Headers: 
+Columns: [Rows 1-5 contain dashboard calculated metrics from the sheet. Data headers are in row 6.
+Headers:
 A Date, B RDR Date(ignore), C Deal # (ignore), D Stock #, E Customer Name(ignore), F Sales Rep, G Sales Mgr (ignore), H Punched (ignore), I New/Used, J Make, K Model, L Age, M Trade-In, N F/C/L, O Front Gross, P Back Gross, Q Total Gross]
 
 Processing Needed: [Sales Rep should be matched from the SALESPEOPLE sheet using the acceptable input aliases and converted to the preferred display code which matches the RR_ROSTER sheet. Cells with two sales listed separated by a slash should be counted as a half deal for each salesperson. Column I determines New or Used for filtering. Column N is F=Finance, C=Cash, L=Lease.]
