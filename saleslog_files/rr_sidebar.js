@@ -69,7 +69,7 @@ function createAppointmentFromSidebar(payload) {
 
     // --- CENTRALIZED LOGIC CALL ---
     // This handles finding the assignee, advancing variable, and LOGGING TO AUDIT
-    const result = advanceRoundRobinPointer_(roster, {
+    const result = advanceRoundRobinPointerByName_(roster, {
       actionType: AUDIT_ACTIONS.NEW_APPOINTMENT,
       details: {
         appt: apptIso,

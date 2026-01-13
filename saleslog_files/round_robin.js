@@ -28,7 +28,10 @@ const COL_MODE = 6; // F
 const COL_ASSIGNED_BY = 7; // G
 
 // RR_STATE cells
+// B2: Numeric next-up index (legacy pointer; still maintained for compatibility/UI).
 const CELL_POINTER = 'B2';
+// D2: Appointments "last assigned name" (name-based pointer; resilient to roster changes).
+const CELL_APPT_LAST_ASSIGNED_NAME = 'D2';
 
 const SHEET_AUDIT = 'RR_AUDIT';
 
@@ -509,15 +512,22 @@ function menuRewindPointer() {
 
     let current = 0;
     let newPointer = 0;
+    let lastAssignedNameAfter = '';
     withDocumentLock_(() => {
-      current = getPointer_();
+      // Normalize in case the roster has changed since B2 was last updated.
+      current = normalizePointer_(getPointer_(), roster.length);
       newPointer = calculateRewoundIndex_(current, roster.length);
       setPointer_(newPointer);
+
+      // Keep appointments name-based pointer (RR_STATE!D2) consistent with numeric next-up pointer.
+      lastAssignedNameAfter = roster[(newPointer - 1 + roster.length) % roster.length];
+      getStateSheet_().getRange(CELL_APPT_LAST_ASSIGNED_NAME).setValue(lastAssignedNameAfter);
     });
 
     logRoundRobinEvent(AUDIT_ACTIONS.UNDO, {
       pointerBefore: current,
       pointerAfter: newPointer,
+      lastAssignedNameAfter: lastAssignedNameAfter,
       target: 'Pointer',
       reason: 'User requested rewind',
     });
@@ -548,6 +558,9 @@ function menuResetPointer() {
     withDocumentLock_(() => {
       oldPointer = getPointer_();
       setPointer_(0);
+
+      // Clear appointments name-based pointer so next assignment starts at roster[0].
+      getStateSheet_().getRange(CELL_APPT_LAST_ASSIGNED_NAME).clearContent();
     });
 
     logRoundRobinEvent(AUDIT_ACTIONS.POINTER_RESET, {
@@ -611,7 +624,7 @@ function processReassignment_(row, reason) {
 
 /**
  * Main entry point for auto-assigning a row.
- * Uses centralized advanceRoundRobinPointer_ for logic & auditing.
+ * Uses centralized advanceRoundRobinPointerByName_ for logic & auditing.
  */
 function assignRowAuto_(row, opts = {}) {
   const lockResult = acquireScriptLockWithRetry();
@@ -656,7 +669,7 @@ function assignRowAuto_(row, opts = {}) {
     const actionType = opts.forceReassign
       ? AUDIT_ACTIONS.REASSIGNMENT
       : AUDIT_ACTIONS.NEW_APPOINTMENT;
-    const result = advanceRoundRobinPointer_(roster, {
+    const result = advanceRoundRobinPointerByName_(roster, {
       actionType: actionType,
       details: {
         row: row,
@@ -685,7 +698,7 @@ function assignRowAuto_(row, opts = {}) {
     // Write back entire row in one call
     rowRange.setValues([vals]);
 
-    // Note: Logging was done in advanceRoundRobinPointer_ but we might want to ensure 'reason' is passed through.
+    // Note: Logging was done in advanceRoundRobinPointerByName_ but we might want to ensure 'reason' is passed through.
     // I passed `...auditInfo.details` in advanceRoundRobinPointer_
     // And in this function call I see:
     // details: {
@@ -714,7 +727,7 @@ function skipPointer_() {
     if (roster.length === 0) return;
 
     // Advance without assigning
-    advanceRoundRobinPointer_(roster, {
+    advanceRoundRobinPointerByName_(roster, {
       actionType: AUDIT_ACTIONS.SKIP,
       details: { reason: 'User requested skip' },
     });
@@ -752,13 +765,16 @@ function advanceRoundRobinPointer_(roster, auditInfo) {
   // Concurrency-safe pointer mutation (RR_STATE!B2)
   let pointerBefore = 0;
   let pointerAfter = 0;
+  let assignee = '';
   withDocumentLock_(() => {
     pointerBefore = normalizePointer_(getPointer_(), roster.length);
+    assignee = roster[pointerBefore];
     pointerAfter = (pointerBefore + 1) % roster.length;
     setPointer_(pointerAfter);
-  });
 
-  const assignee = roster[pointerBefore];
+    // Phase 1: store last assigned name (RR_STATE!D2) while preserving numeric pointer behavior.
+    getStateSheet_().getRange(CELL_APPT_LAST_ASSIGNED_NAME).setValue(assignee);
+  });
 
   // Log it
   const nextUp = roster[pointerAfter];
@@ -770,6 +786,70 @@ function advanceRoundRobinPointer_(roster, auditInfo) {
     nextUp: nextUp,
     rosterCount: roster.length,
     ...auditInfo.details,
+  });
+
+  return {
+    assignee,
+    pointerBefore,
+    pointerAfter,
+    nextUp,
+  };
+}
+
+/**
+ * Name-based appointment rotation using RR_STATE!D2 ("last assigned name").
+ * Keeps numeric pointer (RR_STATE!B2) in sync as the next-up index.
+ *
+ * @param {string[]} roster Eligible roster (trimmed names).
+ * @param {{actionType?: string, details?: Object}} auditInfo Audit metadata.
+ * @return {{assignee: string, pointerBefore: number, pointerAfter: number, nextUp: string}}
+ */
+function advanceRoundRobinPointerByName_(roster, auditInfo) {
+  if (!roster || roster.length === 0) throw new Error('Roster empty');
+
+  const ai = auditInfo || {};
+  const details = ai.details || {};
+
+  let lastAssignedNameBefore = '';
+  let pointerBefore = 0; // index assigned
+  let pointerAfter = 0; // next-up index
+  let assignee = '';
+  let nextUp = '';
+
+  withDocumentLock_(() => {
+    const stateSheet = getStateSheet_();
+
+    lastAssignedNameBefore = String(
+      stateSheet.getRange(CELL_APPT_LAST_ASSIGNED_NAME).getValue() || ''
+    ).trim();
+
+    // Find next person based on last assigned name.
+    let nextIndex = 0;
+    if (lastAssignedNameBefore) {
+      const lastIndex = roster.indexOf(String(lastAssignedNameBefore).trim());
+      nextIndex = lastIndex !== -1 ? (lastIndex + 1) % roster.length : 0;
+    }
+
+    assignee = roster[nextIndex];
+    pointerBefore = nextIndex;
+
+    // Update name-based state (RR_STATE!D2)
+    stateSheet.getRange(CELL_APPT_LAST_ASSIGNED_NAME).setValue(assignee);
+
+    // Keep numeric pointer in sync (RR_STATE!B2 represents "next-up index")
+    pointerAfter = (nextIndex + 1) % roster.length;
+    setPointer_(pointerAfter);
+    nextUp = roster[pointerAfter];
+  });
+
+  logRoundRobinEvent(ai.actionType || AUDIT_ACTIONS.ADVANCE, {
+    pointerBefore: pointerBefore,
+    pointerAfter: pointerAfter,
+    assignee: assignee,
+    nextUp: nextUp,
+    rosterCount: roster.length,
+    lastAssignedNameBefore: lastAssignedNameBefore || '(blank)',
+    ...details,
   });
 
   return {
@@ -969,9 +1049,85 @@ function setPointer_(n) {
   state.getRange(CELL_POINTER).setValue(n);
 }
 
+/**
+ * One-time migration helper:
+ * - Reads RR_STATE!B2 (numeric next-up index) and normalizes it to the current eligible roster.
+ * - Writes RR_STATE!D2 as the *previous* assignee so the next assignment remains unchanged.
+ * Idempotent: if RR_STATE!D2 already contains a valid name in the current roster, does nothing.
+ *
+ * @return {string} Status message for operator visibility.
+ */
+function migrateAppointmentPointerToName() {
+  const lockResult = acquireScriptLockWithRetry();
+  if (!lockResult.success) {
+    throw new Error('System busy (Lock Timeout). Please try again.');
+  }
+
+  try {
+    const roster = getEligibleRoster_();
+    if (!roster || roster.length === 0) {
+      throw new Error('Roster empty - cannot migrate appointment pointer.');
+    }
+
+    let existingLastAssignedName = '';
+    let normalizedNextUp = 0;
+    let lastAssignedName = '';
+    let didMigrate = false;
+
+    withDocumentLock_(() => {
+      const stateSheet = getStateSheet_();
+
+      existingLastAssignedName = String(
+        stateSheet.getRange(CELL_APPT_LAST_ASSIGNED_NAME).getValue() || ''
+      ).trim();
+
+      // Idempotency: if D2 already contains a valid roster name, do nothing.
+      if (existingLastAssignedName && roster.indexOf(existingLastAssignedName) !== -1) {
+        didMigrate = false;
+        return;
+      }
+
+      // B2 is "next-up index" (may be out of range); normalize to current roster.
+      normalizedNextUp = normalizePointer_(getPointer_(), roster.length);
+      const lastAssignedIndex = (normalizedNextUp - 1 + roster.length) % roster.length;
+      lastAssignedName = roster[lastAssignedIndex];
+
+      stateSheet.getRange(CELL_APPT_LAST_ASSIGNED_NAME).setValue(lastAssignedName);
+      didMigrate = true;
+    });
+
+    if (didMigrate) {
+      logRoundRobinEvent('System Migration', {
+        target: 'Appointments',
+        pointerCell: CELL_POINTER,
+        nameCell: CELL_APPT_LAST_ASSIGNED_NAME,
+        normalizedNextUp: normalizedNextUp,
+        lastAssignedName: lastAssignedName,
+        rosterCount: roster.length,
+        reason: 'Migrate appointment pointer from numeric next-up index to last-assigned name',
+      });
+      return `Migration complete: RR_STATE!${CELL_APPT_LAST_ASSIGNED_NAME}="${lastAssignedName}".`;
+    }
+
+    logRoundRobinEvent('System Migration', {
+      target: 'Appointments',
+      result: 'No-op',
+      existingLastAssignedName: existingLastAssignedName,
+      rosterCount: roster.length,
+      reason: 'RR_STATE!D2 already contains a valid name in the current roster',
+    });
+    return 'No migration needed: RR_STATE!D2 already contains a valid name.';
+  } catch (err) {
+    logError('migrateAppointmentPointerToName', err);
+    throw err;
+  } finally {
+    lockResult.lock.releaseLock();
+  }
+}
+
 /***** PROTECTION *****/
 /**
- * Idempotently applies protection to RR_STATE!B2 to prevent manual pointer edits.
+ * Idempotently applies protection to RR_STATE!B2 and RR_STATE!D2 to prevent manual edits.
  * Default is warning-only (least disruptive). Set Script Property
  * RR_STATE_POINTER_EDITORS to a comma-separated list of emails to enforce strict protection.
  */
@@ -979,34 +1135,48 @@ function ensureRRStatePointerProtection_() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const sheet = getSheetOrThrow_(SHEET_STATE);
-    const range = sheet.getRange(CELL_POINTER);
+    const pointerRange = sheet.getRange(CELL_POINTER);
+    const apptLastAssignedRange = sheet.getRange(CELL_APPT_LAST_ASSIGNED_NAME);
 
     const protections = sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE);
-    let protection = protections.find((p) => {
+    const getOrCreateSingleCellProtection_ = (targetRange) => {
+      let protection = protections.find((p) => {
+        try {
+          const r = p.getRange();
+          return (
+            r.getSheet().getName() === sheet.getName() &&
+            r.getRow() === targetRange.getRow() &&
+            r.getColumn() === targetRange.getColumn() &&
+            r.getNumRows() === 1 &&
+            r.getNumColumns() === 1
+          );
+        } catch (_) {
+          return false;
+        }
+      });
+
+      if (!protection) {
+        protection = targetRange.protect();
+      }
+      return protection;
+    };
+
+    const pointerProtection = getOrCreateSingleCellProtection_(pointerRange);
+    const apptLastAssignedProtection =
+      getOrCreateSingleCellProtection_(apptLastAssignedRange);
+
+    pointerProtection.setDescription('Round Robin Pointer (RR_STATE!B2) - Do Not Edit');
+    apptLastAssignedProtection.setDescription(
+      'Appointments Last Assigned Name (RR_STATE!D2) - Do Not Edit'
+    );
+
+    [pointerProtection, apptLastAssignedProtection].forEach((p) => {
       try {
-        const r = p.getRange();
-        return (
-          r.getSheet().getName() === sheet.getName() &&
-          r.getRow() === range.getRow() &&
-          r.getColumn() === range.getColumn() &&
-          r.getNumRows() === 1 &&
-          r.getNumColumns() === 1
-        );
+        p.setDomainEdit(false);
       } catch (_) {
-        return false;
+        // ignore for consumer accounts
       }
     });
-
-    if (!protection) {
-      protection = range.protect();
-    }
-
-    protection.setDescription('Round Robin Pointer (RR_STATE!B2) - Do Not Edit');
-    try {
-      protection.setDomainEdit(false);
-    } catch (_) {
-      // ignore for consumer accounts
-    }
 
     const raw =
       PropertiesService.getScriptProperties().getProperty(
@@ -1019,7 +1189,8 @@ function ensureRRStatePointerProtection_() {
 
     if (configuredEditors.length > 0) {
       // Strict mode: only configured editors (+ owner) can edit.
-      protection.setWarningOnly(false);
+      pointerProtection.setWarningOnly(false);
+      apptLastAssignedProtection.setWarningOnly(false);
       const editorSet = new Set(configuredEditors);
       try {
         const ownerEmail = ss.getOwner && ss.getOwner() ? ss.getOwner().getEmail() : '';
@@ -1028,19 +1199,22 @@ function ensureRRStatePointerProtection_() {
         // ignore
       }
 
-      try {
-        const current = protection.getEditors();
-        if (current && current.length) {
-          protection.removeEditors(current);
+      [pointerProtection, apptLastAssignedProtection].forEach((p) => {
+        try {
+          const current = p.getEditors();
+          if (current && current.length) {
+            p.removeEditors(current);
+          }
+        } catch (_) {
+          // ignore
         }
-      } catch (_) {
-        // ignore
-      }
 
-      protection.addEditors(Array.from(editorSet));
+        p.addEditors(Array.from(editorSet));
+      });
     } else {
       // Least-disruptive default: warn on edits, but do not block script/user flows.
-      protection.setWarningOnly(true);
+      pointerProtection.setWarningOnly(true);
+      apptLastAssignedProtection.setWarningOnly(true);
     }
 
     return true;

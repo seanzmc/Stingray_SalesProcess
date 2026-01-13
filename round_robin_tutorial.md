@@ -75,7 +75,7 @@ Sometimes things don't go as planned. Here is how to handle exceptions using the
 *You accidentally skipped someone, advanced the rotation incorrectly, or logged a duplicate appointment.*
 
 1. In the menu, go to **Round Robin > Rewind Pointer (Undo)**.
-2. **Result:** The "Next Up" indicator moves **BACK** one step to the previous salesperson.
+2. **Result:** The appointment pointer moves **BACK** to the previous salesperson in the rotation. Both the legacy "Next Up" index and the name-based state are adjusted.
 
 ### Scenario C: Manual Override
 
@@ -103,3 +103,68 @@ The **RR_AUDIT** sheet tracks *every single action* taken by the Round Robin sys
 - Verify who assigned a specific appointment.
 - Check if a salesperson was skipped correctly.
 - Audit why the rotation pointer moved (or didn't move).
+
+---
+
+## How Round Robin State Works (Technical Overview)
+
+The appointment round-robin system maintains its state in the **RR_STATE** sheet using two cells:
+
+- **`RR_STATE!B2` (Legacy):** Numeric index (1-based) pointing to the "next up" position. This is kept for backward compatibility and debugging but is **not used** for appointment assignments.
+- **`RR_STATE!D2` (Source of Truth):** The **name** of the last salesperson who was assigned an appointment via round-robin (e.g., *"Jane Smith"*). This is the **primary state** used by [`advanceRoundRobinPointerByName_()`](saleslog_files/round_robin.js:807).
+
+**Why Name-Based?**
+
+Name-based tracking is **resilient to roster changes**. If you remove a salesperson from the roster or reorder the list, the system can recover the correct "next up" position by finding the last-assigned name in the current roster and advancing from there.
+
+**Implementation Details:**
+
+- Assignments via sidebar ([`createAppointmentFromSidebar()`](saleslog_files/rr_sidebar.js:12)) and auto-assignment ([`assignRowAuto_()`](saleslog_files/round_robin.js:629)) both update **`RR_STATE!D2`** with the assigned name.
+- Rewind ([`menuRewindPointer()`](saleslog_files/round_robin.js:499)) and reset ([`menuResetPointer()`](saleslog_files/round_robin.js:555)) operations update **both** `B2` and `D2` to keep them in sync.
+- The name-based cell is **protected** along with the numeric index by [`ensureRRStatePointerProtection_()`](saleslog_files/round_robin.js:1134) to prevent accidental manual edits.
+
+---
+
+## Roster Changes & Resilience
+
+**What happens if you remove or reorder salespeople in `RR_ROSTER`?**
+
+The name-based pointer system handles this gracefully:
+
+1. **Removal:** If the last-assigned person is no longer in the roster, the system starts from the beginning of the current roster.
+2. **Reordering:** The system finds the last-assigned name in the **current** roster order and advances to the next eligible person, preserving fairness even after changes.
+3. **Additions:** New salespeople are added to the end of the roster and will naturally enter the rotation.
+
+**Example:**
+
+- Roster before: Alice, Bob, Charlie, Dana
+- Last assigned: Bob (stored in `D2`)
+- You remove Bob from the roster: Alice, Charlie, Dana
+- **Next assignment:** Charlie (the system continues from where Bob was in the sequence)
+
+This resilience ensures the round-robin system continues working even during roster transitions (e.g., temporary staff, seasonal changes).
+
+---
+
+## One-Time Migration (For Existing Installations)
+
+If you are upgrading from an older version that only used the numeric pointer (`RR_STATE!B2`), you must run a **one-time migration** to populate the name-based state cell (`D2`).
+
+### Migration Instructions
+
+1. Open **Google Apps Script** editor (Extensions > Apps Script).
+2. In the script editor, open the **round_robin.js** file.
+3. Locate the function [`migrateAppointmentPointerToName()`](saleslog_files/round_robin.js:1060).
+4. Run the function once (click the function name in the dropdown, then click the ▶ Run button).
+5. **What it does:**
+   - Reads the current numeric pointer from `B2`.
+   - Looks up the corresponding salesperson name in `RR_ROSTER`.
+   - **Writes the *previous* person's name** to `D2` (this preserves the current "next up" assignment).
+   - Logs the migration to the audit log.
+6. **Result:** The name-based pointer is now initialized, and future assignments will use it.
+
+**Important:** Run this **only once**. The migration is idempotent (safe to run multiple times), but it's designed as a one-time setup step.
+
+**Why preserve "next up"?**
+
+The migration writes the *previous* person's name so that the current "next up" person remains unchanged. This ensures no disruption to your existing rotation schedule.
