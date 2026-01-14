@@ -26,6 +26,7 @@ const COL_PHONE = 4; // D
 const COL_ASSIGNED = 5; // E
 const COL_MODE = 6; // F
 const COL_ASSIGNED_BY = 7; // G
+const COL_NOTES = 8; // H
 
 // RR_STATE cells
 // B2: Numeric next-up index (legacy pointer; still maintained for compatibility/UI).
@@ -41,6 +42,15 @@ const REASSIGNMENT_REASONS = [
   "Incorrect Assignment",
   "System Rotation Skip",
   "Manager Override"
+];
+
+// Rewind Pointer (Undo) reasons (strict allowlist)
+const REWIND_POINTER_REASONS = [
+  'Incorrect Assignment',
+  'Duplicate Appointment',
+  'Appointment Entered In Error',
+  'System Issue',
+  'Manager Request'
 ];
 
 const AUDIT_ACTIONS = {
@@ -496,51 +506,607 @@ function getReassignmentReasons() {
   return REASSIGNMENT_REASONS;
 }
 
-function menuRewindPointer() {
+/** Public endpoint for the Modal Dialog (RewindPointerDialog.html) */
+function processMenuRewindPointer(reason, stateToken) {
+  // The dialog provides a state token used for:
+  // - Drift validation (prevent undoing the wrong pointer state)
+  // - Idempotency (dedupe transport retries)
+  // A requestId is mandatory; we reject missing/invalid tokens with a user-safe error.
+  const normalizedToken = normalizeUndoStateTokenOrThrow_(stateToken);
+
   const lockResult = acquireScriptLockWithRetry();
   if (!lockResult.success) {
-    SpreadsheetApp.getUi().alert('System busy. Please try again.');
-    logError('menuRewindPointer', 'Lock acquisition failed', {
-      attempts: lockResult.attempts,
-    });
-    return;
+    const err = new Error('System busy. Please try again.');
+    try {
+      logError('processMenuRewindPointer', err, { attempts: lockResult.attempts });
+    } catch (_) {
+      // ignore
+    }
+    throw err;
   }
 
   try {
-    const roster = getEligibleRoster_();
-    if (roster.length === 0) return;
-
-    let current = 0;
-    let newPointer = 0;
-    let lastAssignedNameAfter = '';
-    withDocumentLock_(() => {
-      // Normalize in case the roster has changed since B2 was last updated.
-      current = normalizePointer_(getPointer_(), roster.length);
-      newPointer = calculateRewoundIndex_(current, roster.length);
-      setPointer_(newPointer);
-
-      // Keep appointments name-based pointer (RR_STATE!D2) consistent with numeric next-up pointer.
-      lastAssignedNameAfter = roster[(newPointer - 1 + roster.length) % roster.length];
-      getStateSheet_().getRange(CELL_APPT_LAST_ASSIGNED_NAME).setValue(lastAssignedNameAfter);
-    });
-
-    logRoundRobinEvent(AUDIT_ACTIONS.UNDO, {
-      pointerBefore: current,
-      pointerAfter: newPointer,
-      lastAssignedNameAfter: lastAssignedNameAfter,
-      target: 'Pointer',
-      reason: 'User requested rewind',
-    });
-
-    SpreadsheetApp.getActive().toast(
-      `Pointer rewound to ${newPointer} (${roster[newPointer]})`
-    );
+    const result = rewindPointerUndoWithReason_(reason, normalizedToken);
+    SpreadsheetApp.getActiveSpreadsheet().toast('Pointer rewound (Undo recorded).');
+    return result;
   } catch (err) {
-    logError('menuRewindPointer', err);
-    SpreadsheetApp.getUi().alert('Error: ' + err.message);
+    logError('processMenuRewindPointer', err);
+    throw err; // Re-throw to show in client
   } finally {
     lockResult.lock.releaseLock();
   }
+}
+
+function menuRewindPointer() {
+  try {
+    const htmlTemplate = HtmlService.createTemplateFromFile('RewindPointerDialog');
+    htmlTemplate.reasons = REWIND_POINTER_REASONS;
+    htmlTemplate.context = buildRewindPointerDialogContext_();
+    const html = htmlTemplate.evaluate().setWidth(560).setHeight(520);
+    SpreadsheetApp.getUi().showModalDialog(html, 'Rewind Pointer (Undo)');
+  } catch (err) {
+    logError('menuRewindPointer', err);
+    SpreadsheetApp.getUi().alert('Error opening dialog: ' + err.message);
+  }
+}
+
+/**
+ * Builds the modal dialog context object. Best-effort; never throws.
+ * @return {{ok: boolean, error?: string, token?: Object, pointer?: Object, appointment?: Object}}
+ */
+function buildRewindPointerDialogContext_() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const roster = getEligibleRoster_();
+    const rosterCount = roster.length;
+
+    if (!rosterCount) {
+      return {
+        ok: false,
+        error: 'No eligible salespeople found in RR_ROSTER. Cannot rewind pointer.',
+      };
+    }
+
+    const stateSheet = getStateSheet_();
+    const pointerCellValue = stateSheet.getRange(CELL_POINTER).getValue();
+    const pointerBefore = normalizePointer_(Number(pointerCellValue), rosterCount);
+    const pointerAfter = calculateRewoundIndex_(pointerBefore, rosterCount);
+
+    const lastAssignedNameBefore = String(
+      stateSheet.getRange(CELL_APPT_LAST_ASSIGNED_NAME).getValue() || ''
+    ).trim();
+    const lastAssignedNameAfter = roster[(pointerAfter - 1 + rosterCount) % rosterCount];
+
+    const apptsSheet = getApptsSheet_();
+    const appt = findLastAppointmentForUndo_(apptsSheet, lastAssignedNameBefore);
+
+    const requestId = Utilities.getUuid();
+
+    const token = {
+      pointerBefore: pointerBefore,
+      lastAssignedNameBefore: lastAssignedNameBefore,
+      apptRow: appt ? appt.row : null,
+      requestId: requestId,
+    };
+
+    return {
+      ok: true,
+      token: token,
+      pointer: {
+        rosterCount: rosterCount,
+        nextUpIndexBefore: pointerBefore,
+        nextUpNameBefore: roster[pointerBefore] || '',
+        nextUpIndexAfter: pointerAfter,
+        nextUpNameAfter: roster[pointerAfter] || '',
+        lastAssignedNameBefore: lastAssignedNameBefore || '(blank)',
+        lastAssignedNameAfter: lastAssignedNameAfter || '(blank)',
+      },
+      appointment: appt
+        ? {
+            row: appt.row,
+            createdTs: formatDateTimeForDialog_(appt.createdTs),
+            apptDt: formatDateTimeForDialog_(appt.apptDt),
+            customer: appt.customer,
+            phone: appt.phone,
+            assigned: appt.assigned,
+            mode: appt.mode,
+            assignedBy: appt.assignedBy,
+          }
+        : null,
+    };
+  } catch (e) {
+    try {
+      logError('buildRewindPointerDialogContext_', e);
+    } catch (_) {
+      // ignore
+    }
+    return {
+      ok: false,
+      error:
+        'Unable to build undo context. Please try again. If the problem persists, contact an admin.\n\n' +
+        (e && e.message ? e.message : String(e)),
+    };
+  }
+}
+
+/** Formats a Date/string for dialog display. */
+function formatDateTimeForDialog_(value) {
+  try {
+    if (!value) return '';
+    if (value instanceof Date && !isNaN(value.getTime())) {
+      return Utilities.formatDate(
+        value,
+        Session.getScriptTimeZone(),
+        'yyyy-MM-dd HH:mm'
+      );
+    }
+    return String(value);
+  } catch (_) {
+    return String(value || '');
+  }
+}
+
+/**
+ * Finds the most recent appointment row tied to the undo.
+ * - Prefer rows whose Assigned rep matches RR_STATE!D2 (last assigned name)
+ * - Fallback: most recent row with any non-empty Assigned rep
+ *
+ * Returns null when no appointment rows exist.
+ */
+function findLastAppointmentForUndo_(apptsSheet, lastAssignedNameBefore) {
+  const sheet = apptsSheet;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return null;
+
+  const targetAssigned = String(lastAssignedNameBefore || '').trim();
+  const chunkSize = 200;
+
+  /** @type {{row:number, values:any[]}|null} */
+  let fallback = null;
+
+  for (let endRow = lastRow; endRow >= 2; endRow -= chunkSize) {
+    const startRow = Math.max(2, endRow - chunkSize + 1);
+    const numRows = endRow - startRow + 1;
+    const values = sheet.getRange(startRow, 1, numRows, COL_NOTES).getValues();
+
+    for (let i = values.length - 1; i >= 0; i--) {
+      const rowNumber = startRow + i;
+      const rowVals = values[i];
+      const assigned = String(rowVals[COL_ASSIGNED - 1] || '').trim();
+
+      if (!fallback && assigned) {
+        fallback = { row: rowNumber, values: rowVals };
+        if (!targetAssigned) break;
+      }
+
+      if (targetAssigned && assigned === targetAssigned) {
+        return {
+          row: rowNumber,
+          createdTs: rowVals[COL_CREATED_TS - 1],
+          apptDt: rowVals[COL_APPT_DT - 1],
+          customer: String(rowVals[COL_CUST_NAME - 1] || ''),
+          phone: String(rowVals[COL_PHONE - 1] || ''),
+          assigned: assigned,
+          mode: String(rowVals[COL_MODE - 1] || ''),
+          assignedBy: String(rowVals[COL_ASSIGNED_BY - 1] || ''),
+          notes: String(rowVals[COL_NOTES - 1] || ''),
+        };
+      }
+    }
+
+    if (!targetAssigned && fallback) break;
+  }
+
+  if (!fallback) return null;
+  const rowVals = fallback.values;
+  return {
+    row: fallback.row,
+    createdTs: rowVals[COL_CREATED_TS - 1],
+    apptDt: rowVals[COL_APPT_DT - 1],
+    customer: String(rowVals[COL_CUST_NAME - 1] || ''),
+    phone: String(rowVals[COL_PHONE - 1] || ''),
+    assigned: String(rowVals[COL_ASSIGNED - 1] || ''),
+    mode: String(rowVals[COL_MODE - 1] || ''),
+    assignedBy: String(rowVals[COL_ASSIGNED_BY - 1] || ''),
+    notes: String(rowVals[COL_NOTES - 1] || ''),
+  };
+}
+
+function validateRewindPointerReason_(reason) {
+  const trimmed = String(reason || '').trim();
+  if (!trimmed) throw new Error('Reason is required.');
+  if (REWIND_POINTER_REASONS.indexOf(trimmed) === -1) {
+    throw new Error('Invalid reason. Please select a reason from the list.');
+  }
+  return trimmed;
+}
+
+/** Normalizes and validates the Undo dialog state token. Throws user-safe errors. */
+function normalizeUndoStateTokenOrThrow_(stateToken) {
+  if (!stateToken || typeof stateToken !== 'object') {
+    throw new Error(
+      'Undo dialog state is missing. Close and reopen the Undo dialog and try again.'
+    );
+  }
+
+  const requestId = String(stateToken.requestId || '').trim();
+  if (!requestId) {
+    throw new Error(
+      'Undo dialog state is missing a request id. Close and reopen the Undo dialog and try again.'
+    );
+  }
+
+  const pointerBefore = Number(stateToken.pointerBefore);
+  if (!Number.isFinite(pointerBefore)) {
+    throw new Error(
+      'Undo dialog state is invalid (pointer). Close and reopen the Undo dialog and try again.'
+    );
+  }
+
+  // Allow blank, but keep a normalized string for drift validation.
+  const lastAssignedNameBefore = String(stateToken.lastAssignedNameBefore || '').trim();
+
+  const apptRow = Number(stateToken.apptRow);
+  if (!Number.isFinite(apptRow) || apptRow < 2) {
+    throw new Error(
+      'Undo dialog state is invalid (appointment). Close and reopen the Undo dialog and try again.'
+    );
+  }
+
+  return {
+    pointerBefore: Math.floor(pointerBefore),
+    lastAssignedNameBefore: lastAssignedNameBefore,
+    apptRow: Math.floor(apptRow),
+    requestId: requestId,
+  };
+}
+
+function buildUndoNotesMarker_(requestId) {
+  const id = String(requestId || '').trim();
+  // requestId is required. Do NOT fall back to a broad marker, because it breaks dedupe correctness.
+  if (!id) throw new Error('Undo requestId is required.');
+  return `[[RR_UNDO:${id}]]`;
+}
+
+function buildUndoNotesLine_(now, actorName, reason, marker) {
+  const ts = Utilities.formatDate(
+    now,
+    Session.getScriptTimeZone(),
+    'yyyy-MM-dd HH:mm:ss'
+  );
+  const who = String(actorName || '').trim() || '(unknown user)';
+  const safeReason = String(reason || '').trim();
+  return `${ts} - REWIND POINTER (UNDO) by ${who}: ${safeReason} ${marker}`;
+}
+
+function appendLineIfMissingMarker_(existing, line, marker) {
+  const notes = String(existing || '');
+  if (!marker) return notes;
+  if (notes.indexOf(marker) !== -1) return notes;
+  if (!notes.trim()) return line;
+  return notes.replace(/\s*$/, '') + '\n' + line;
+}
+
+function getOrCreateAuditSheet_(ss) {
+  let auditSheet = ss.getSheetByName(SHEET_AUDIT);
+  if (!auditSheet) {
+    auditSheet = ss.insertSheet(SHEET_AUDIT);
+    auditSheet
+      .getRange(1, 1, 1, 5)
+      .setValues([['Timestamp', 'User', 'Action', 'Reference', 'Details']]);
+    auditSheet.setFrozenRows(1);
+  }
+  return auditSheet;
+}
+
+/**
+ * Strict audit append for atomic operations.
+ * Must be called while holding DocumentLock (via withDocumentLock_).
+ * Returns the appended row number.
+ */
+function appendAuditRowOrThrow_(auditSheet, rowValues) {
+  const targetRow = Math.max(2, auditSheet.getLastRow() + 1);
+  auditSheet.getRange(targetRow, 1, 1, rowValues.length).setValues([rowValues]);
+  return targetRow;
+}
+
+function buildAuditDetailsString_(detailsObj) {
+  if (!detailsObj) return '';
+  const { row: _row, user: _u, ...rest } = detailsObj;
+  return Object.entries(rest)
+    .map(([k, v]) => {
+      let valStr = String(v);
+      valStr = valStr.replace(/[|=]/g, '-');
+      valStr = String(sanitizeForSheetCell_(valStr));
+      return `${k}=${valStr}`;
+    })
+    .join(' | ');
+}
+
+function validateUndoStateTokenOrThrow_(stateToken, live) {
+  if (!stateToken || typeof stateToken !== 'object') return;
+  const expectedPointerBefore = stateToken.pointerBefore;
+  const expectedLastAssigned = String(stateToken.lastAssignedNameBefore || '').trim();
+
+  if (
+    expectedPointerBefore !== null &&
+    expectedPointerBefore !== undefined &&
+    Number(expectedPointerBefore) !== Number(live.pointerBefore)
+  ) {
+    throw new Error(
+      'Pointer state changed since this dialog was opened. Close and reopen the Undo dialog and try again.'
+    );
+  }
+
+  if (
+    expectedLastAssigned &&
+    String(live.lastAssignedNameBefore || '').trim() !== expectedLastAssigned
+  ) {
+    throw new Error(
+      'Last-assigned state changed since this dialog was opened. Close and reopen the Undo dialog and try again.'
+    );
+  }
+}
+
+function validateUndoAppointmentTokenOrThrow_(stateToken, apptRow) {
+  if (!stateToken || typeof stateToken !== 'object') return;
+  if (stateToken.apptRow === null || stateToken.apptRow === undefined) return;
+  if (Number(stateToken.apptRow) !== Number(apptRow)) {
+    throw new Error(
+      'Appointment context changed since this dialog was opened. Close and reopen the Undo dialog and try again.'
+    );
+  }
+}
+
+/**
+ * Core implementation: rewinds pointer + writes audit + appends notes (deduped) atomically.
+ * Throws on any failure; guarantees pointer is not left rewound.
+ */
+function rewindPointerUndoWithReason_(reason, stateToken, options) {
+  const validatedReason = validateRewindPointerReason_(reason);
+  const token = normalizeUndoStateTokenOrThrow_(stateToken);
+  const opts = options || {};
+  const now = opts.now instanceof Date ? opts.now : new Date();
+
+  const rosterOverride = Array.isArray(opts.roster) ? opts.roster : null;
+  const getRoster_ =
+    typeof opts.getEligibleRoster === 'function'
+      ? opts.getEligibleRoster
+      : () => getEligibleRoster_();
+  const withDocLock_ =
+    typeof opts.withDocumentLock === 'function' ? opts.withDocumentLock : withDocumentLock_;
+  const stateSheetOverride = opts.stateSheet || null;
+  const apptsSheetOverride = opts.apptsSheet || null;
+  const auditSheetOverride = opts.auditSheet || null;
+  const ssOverride = opts.ss || null;
+  const userEmailOverride =
+    typeof opts.userEmail === 'string' && opts.userEmail.trim()
+      ? opts.userEmail.trim()
+      : '';
+  const actorNameOverride =
+    typeof opts.actorName === 'string' && opts.actorName.trim()
+      ? opts.actorName.trim()
+      : '';
+
+  const failpoint = String(opts.failpoint || '').trim();
+  const maybeFail_ = (name) => {
+    if (failpoint && failpoint === name) throw new Error(`Simulated failure: ${name}`);
+  };
+
+  return withDocLock_(() => {
+    const ss = ssOverride || SpreadsheetApp.getActiveSpreadsheet();
+    const roster = rosterOverride || getRoster_();
+    if (!roster.length) throw new Error('No eligible salespeople found in RR_ROSTER.');
+
+    const stateSheet = stateSheetOverride || getStateSheet_();
+    const apptsSheet = apptsSheetOverride || getApptsSheet_();
+
+    const pointerCell = stateSheet.getRange(CELL_POINTER);
+    const lastAssignedCell = stateSheet.getRange(CELL_APPT_LAST_ASSIGNED_NAME);
+
+    const pointerCellValueBefore = pointerCell.getValue();
+    const pointerBeforeLive = normalizePointer_(Number(pointerCellValueBefore), roster.length);
+    const pointerAfter = calculateRewoundIndex_(pointerBeforeLive, roster.length);
+
+    const lastAssignedNameBeforeLive = String(lastAssignedCell.getValue() || '').trim();
+    const lastAssignedNameAfter = roster[(pointerAfter - 1 + roster.length) % roster.length];
+
+    // --- Drift validation + idempotency correctness ---
+    // The same requestId may be retried by the client (network retries / dialog resubmission).
+    // We allow a retry ONLY when the current pointer state is either:
+    //   A) exactly the dialog's "before" state (normal execution), OR
+    //   B) exactly the expected "after" state (already applied).
+    // Any other state indicates drift or partial failure.
+    if (token.pointerBefore < 0 || token.pointerBefore >= roster.length) {
+      throw new Error(
+        'Pointer state changed since this dialog was opened. Close and reopen the Undo dialog and try again.'
+      );
+    }
+    const expectedPointerAfter = calculateRewoundIndex_(token.pointerBefore, roster.length);
+    const expectedLastAssignedNameAfter =
+      roster[(expectedPointerAfter - 1 + roster.length) % roster.length];
+
+    const matchesBeforeState =
+      Number(pointerBeforeLive) === Number(token.pointerBefore) &&
+      String(lastAssignedNameBeforeLive || '') === String(token.lastAssignedNameBefore || '');
+
+    const matchesAfterState =
+      Number(pointerBeforeLive) === Number(expectedPointerAfter) &&
+      String(lastAssignedNameBeforeLive || '') === String(expectedLastAssignedNameAfter || '');
+
+    if (!matchesBeforeState && !matchesAfterState) {
+      throw new Error(
+        'Pointer state changed since this dialog was opened. Close and reopen the Undo dialog and try again.'
+      );
+    }
+
+    // Identify the target appointment row using the token's context (not live state, which may be "after" on retries).
+    const appt = findLastAppointmentForUndo_(apptsSheet, token.lastAssignedNameBefore);
+    if (!appt) {
+      throw new Error(
+        'No appointment rows found to attach the Undo reason. The pointer was not changed.'
+      );
+    }
+
+    validateUndoAppointmentTokenOrThrow_(token, appt.row);
+
+    const userEmail = userEmailOverride || safeUserEmail_();
+    const actorName = actorNameOverride || getAuditLogNameFromEmail_(userEmail);
+
+    const requestId = token.requestId;
+    const marker = buildUndoNotesMarker_(requestId);
+
+    // --- Prepare notes append ---
+    const apptRow = appt.row;
+    const notesCell = apptsSheet.getRange(apptRow, COL_NOTES);
+    const notesBefore = String(notesCell.getValue() || '');
+
+    // If the notes marker already exists, ONLY treat it as alreadyApplied when pointer state is already "after".
+    if (notesBefore.indexOf(marker) !== -1) {
+      if (matchesAfterState) {
+        return {
+          ok: true,
+          alreadyApplied: true,
+          pointerAfter: pointerBeforeLive,
+          pointerNameAfter: roster[pointerBeforeLive] || '',
+          lastAssignedNameAfter: lastAssignedNameBeforeLive,
+          appointmentRow: apptRow,
+          notesMarker: marker,
+        };
+      }
+
+      throw new Error(
+        'Undo request appears to have partially applied (notes marker exists but pointer state is not fully rewound). ' +
+        `Please contact an admin with requestId=${requestId}.`
+      );
+    }
+
+    // Pointer/lastAssigned indicate "after", but marker is missing -> partial failure.
+    if (matchesAfterState) {
+      throw new Error(
+        'Undo request appears to have partially applied (pointer state updated but notes marker is missing). ' +
+        `Please contact an admin with requestId=${requestId}.`
+      );
+    }
+
+    const line = buildUndoNotesLine_(now, actorName, validatedReason, marker);
+    const notesAfter = appendLineIfMissingMarker_(notesBefore, line, marker);
+
+    // --- Prepare audit row ---
+    const pointerNameBefore = roster[pointerBeforeLive] || '';
+    const pointerNameAfter = roster[pointerAfter] || '';
+    const detailsObj = {
+      row: apptRow,
+      target: 'Pointer',
+      pointerBefore: pointerBeforeLive,
+      pointerAfter: pointerAfter,
+      pointerNameBefore: pointerNameBefore,
+      pointerNameAfter: pointerNameAfter,
+      lastAssignedNameBefore: lastAssignedNameBeforeLive || '(blank)',
+      lastAssignedNameAfter: lastAssignedNameAfter || '(blank)',
+      appt: formatDateTimeForDialog_(appt.apptDt),
+      customer: appt.customer,
+      phone: appt.phone,
+      assigned: appt.assigned,
+      reason: validatedReason,
+      requestId: requestId,
+      source: 'Menu',
+
+      // DO NOT use the key "user" here; buildAuditDetailsString_ strips it.
+      // Keep a durable identifier in Details for post-hoc auditability.
+      actorEmail: userEmail,
+      user: userEmail,
+    };
+
+    const auditSheet = auditSheetOverride || getOrCreateAuditSheet_(ss);
+    const detailsStr = buildAuditDetailsString_(detailsObj);
+    const reference = `Row ${apptRow}`;
+
+    /** @type {{notesUpdated:boolean, auditRow:number|null}} */
+    const changeTracker = { notesUpdated: false, auditRow: null };
+
+    try {
+      // 1) Notes append (deduped)
+      maybeFail_('beforeNotesWrite');
+      if (notesAfter !== notesBefore) {
+        notesCell.setValue(sanitizeForSheetCell_(notesAfter));
+        changeTracker.notesUpdated = true;
+      }
+      maybeFail_('afterNotesWrite');
+
+      // 2) Audit append (strict)
+      maybeFail_('beforeAuditWrite');
+      changeTracker.auditRow = appendAuditRowOrThrow_(auditSheet, [
+        sanitizeForSheetCell_(now),
+        sanitizeForSheetCell_(actorName),
+        sanitizeForSheetCell_(AUDIT_ACTIONS.UNDO),
+        sanitizeForSheetCell_(reference),
+        sanitizeForSheetCell_(detailsStr),
+      ]);
+      maybeFail_('afterAuditWrite');
+
+      // 3) Pointer write (commit last)
+      maybeFail_('beforePointerWrite');
+      pointerCell.setValue(pointerAfter);
+      lastAssignedCell.setValue(lastAssignedNameAfter);
+      maybeFail_('afterPointerWrite');
+
+      return {
+        ok: true,
+        pointerBefore: pointerBeforeLive,
+        pointerAfter: pointerAfter,
+        pointerNameBefore: pointerNameBefore,
+        pointerNameAfter: pointerNameAfter,
+        lastAssignedNameBefore: lastAssignedNameBeforeLive,
+        lastAssignedNameAfter: lastAssignedNameAfter,
+        appointmentRow: apptRow,
+        notesMarker: marker,
+      };
+    } catch (err) {
+      // --- Rollback (best-effort, but we must not leave pointer rewound) ---
+      const rollbackErrors = [];
+      try {
+        pointerCell.setValue(pointerCellValueBefore);
+      } catch (e) {
+        rollbackErrors.push('pointer');
+      }
+      try {
+        lastAssignedCell.setValue(lastAssignedNameBeforeLive);
+      } catch (e) {
+        rollbackErrors.push('lastAssigned');
+      }
+      if (changeTracker.notesUpdated) {
+        try {
+          notesCell.setValue(sanitizeForSheetCell_(notesBefore));
+        } catch (e) {
+          rollbackErrors.push('notes');
+        }
+      }
+      if (changeTracker.auditRow) {
+        try {
+          const lr = auditSheet.getLastRow();
+          if (lr === changeTracker.auditRow) {
+            auditSheet.deleteRow(changeTracker.auditRow);
+          } else {
+            auditSheet.getRange(changeTracker.auditRow, 1, 1, 5).clearContent();
+          }
+        } catch (e) {
+          rollbackErrors.push('audit');
+        }
+      }
+
+      if (rollbackErrors.length) {
+        try {
+          logError('rewindPointerUndoWithReason__rollback', err, {
+            rollbackErrors: rollbackErrors.join(','),
+          });
+        } catch (_) {
+          // ignore
+        }
+      }
+      throw err;
+    }
+  });
 }
 
 function calculateRewoundIndex_(currentIndex, totalCount) {

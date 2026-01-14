@@ -75,7 +75,20 @@ Sometimes things don't go as planned. Here is how to handle exceptions using the
 *You accidentally skipped someone, advanced the rotation incorrectly, or logged a duplicate appointment.*
 
 1. In the menu, go to **Round Robin > Rewind Pointer (Undo)**.
-2. **Result:** The appointment pointer moves **BACK** to the previous salesperson in the rotation. Both the legacy "Next Up" index and the name-based state are adjusted.
+2. A dialog will appear showing:
+   - The current pointer state (Next Up Before/After the rewind)
+   - The last appointment details (date/time, customer, assigned rep)
+   - A **required dropdown** to select a reason for the rewind (e.g., "Duplicate appointment," "Wrong rep assigned," etc.)
+3. Select a reason from the dropdown and click **Confirm Undo**.
+4. **Result:**
+   - The appointment pointer moves **BACK** to the previous salesperson in the rotation. Both the legacy "Next Up" index (1-based) and the name-based state are adjusted.
+   - **The appointment record itself is NOT deleted or reassigned**—it remains in the `APPOINTMENTS` sheet exactly as it was.
+   - The selected reason is **recorded in two places**:
+     - **Appended to the last appointment's Notes** (column H in `APPOINTMENTS`) with a timestamp and marker.
+     - **Logged to the audit sheet** (`RR_AUDIT`) as an "Undo" action with full context.
+   - This creates a clear audit trail explaining why the pointer was rewound.
+
+> **Note:** Rewind only affects the rotation pointer—not the appointment data. If you need to change who the appointment is assigned to, use "Skip & Reassign" instead.
 
 ### Scenario C: Manual Override
 
