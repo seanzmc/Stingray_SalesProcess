@@ -46,11 +46,11 @@ const REASSIGNMENT_REASONS = [
 
 // Rewind Pointer (Undo) reasons (strict allowlist)
 const REWIND_POINTER_REASONS = [
-  'Incorrect Assignment',
   'Duplicate Appointment',
   'Appointment Entered In Error',
   'System Issue',
-  'Manager Request'
+  'Manager Request',
+  'Testing (Do Not Use)'
 ];
 
 const AUDIT_ACTIONS = {
@@ -94,6 +94,42 @@ function getSheetOrThrow_(name) {
 function getSheetOrNull_(name) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   return ss.getSheetByName(name);
+}
+
+function normalizeHeaderKey_(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function getHeaderMap_(sheet) {
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 1) return {};
+  const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  const map = {};
+  for (let i = 0; i < headers.length; i++) {
+    const key = normalizeHeaderKey_(headers[i]);
+    if (key) {
+      map[key] = i;
+    }
+  }
+  return map;
+}
+
+function findHeaderIndex_(headerMap, candidates) {
+  if (!headerMap || !candidates) return -1;
+  for (let i = 0; i < candidates.length; i++) {
+    const key = normalizeHeaderKey_(candidates[i]);
+    if (Object.prototype.hasOwnProperty.call(headerMap, key)) {
+      return headerMap[key];
+    }
+  }
+  return -1;
+}
+
+function getCellValueFromRow_(rowValues, index) {
+  if (!rowValues || index < 0 || index >= rowValues.length) return '';
+  const value = rowValues[index];
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
 }
 
 function getAuditLogNameMap_() {
@@ -476,7 +512,7 @@ function showReassignDialog() {
     htmlTemplate.reasons = REASSIGNMENT_REASONS;
     const html = htmlTemplate.evaluate()
       .setWidth(400)
-      .setHeight(250);
+      .setHeight(360);
     SpreadsheetApp.getUi().showModalDialog(html, 'Reassign Opportunity');
   } catch (err) {
     logError('showReassignDialog', err);
@@ -496,6 +532,110 @@ function processMenuReassignment(reason) {
   } catch (err) {
     logError('processMenuReassignment', err);
     throw err; // Re-throw to show in client
+  }
+}
+
+/** Returns selection info for the Reassign dialog. */
+function getCurrentSelectionInfo() {
+  try {
+    const sheet = SpreadsheetApp.getActiveSheet();
+    if (!sheet || sheet.getName() !== SHEET_APPTS) {
+      return {
+        ok: false,
+        message: `Please select a row in ${SHEET_APPTS} first.`,
+      };
+    }
+
+    const range = SpreadsheetApp.getActiveRange();
+    if (!range) {
+      return {
+        ok: false,
+        message: 'No active selection found.',
+      };
+    }
+
+    const row = range.getRow();
+    if (row <= 1) {
+      return {
+        ok: false,
+        message: `Please select a row in ${SHEET_APPTS} first.`,
+      };
+    }
+
+    const lastCol = sheet.getLastColumn();
+    if (lastCol < 1) {
+      return {
+        ok: false,
+        message: 'No columns found in APPOINTMENTS sheet.',
+      };
+    }
+
+    const headerMap = getHeaderMap_(sheet);
+    const rowValues = sheet.getRange(row, 1, 1, lastCol).getValues()[0];
+
+    const customerIndex = findHeaderIndex_(headerMap, [
+      'Customer',
+      'Customer Name',
+      'Name',
+    ]);
+    const statusIndex = findHeaderIndex_(headerMap, [
+      'Status',
+      'Appointment Status',
+      'Appt Status',
+      'Mode',
+      'Assignment Mode',
+    ]);
+    const assignedIndex = findHeaderIndex_(headerMap, [
+      'Assigned',
+      'Assigned Salesperson',
+      'Assigned Rep',
+      'Sales Rep',
+      'Salesperson',
+      'Assignee',
+    ]);
+
+    const customer = getCellValueFromRow_(rowValues, customerIndex);
+    const status = getCellValueFromRow_(rowValues, statusIndex);
+    const assigned = getCellValueFromRow_(rowValues, assignedIndex);
+    const nextAssignee = getNextAssigneePreview_();
+
+    return {
+      ok: true,
+      row: row,
+      customer: customer,
+      status: status,
+      assigned: assigned,
+      nextAssignee: nextAssignee,
+    };
+  } catch (err) {
+    logError('getCurrentSelectionInfo', err);
+    return {
+      ok: false,
+      message: err && err.message ? err.message : String(err),
+    };
+  }
+}
+
+function getNextAssigneePreview_() {
+  try {
+    const roster = getEligibleRoster_();
+    if (!roster.length) return '';
+
+    const stateSheet = getStateSheet_();
+    const lastAssignedNameBefore = String(
+      stateSheet.getRange(CELL_APPT_LAST_ASSIGNED_NAME).getValue() || ''
+    ).trim();
+
+    let nextIndex = 0;
+    if (lastAssignedNameBefore) {
+      const lastIndex = roster.indexOf(lastAssignedNameBefore);
+      nextIndex = lastIndex !== -1 ? (lastIndex + 1) % roster.length : 0;
+    }
+
+    return roster[nextIndex] || '';
+  } catch (err) {
+    logError('getNextAssigneePreview_', err);
+    return '';
   }
 }
 

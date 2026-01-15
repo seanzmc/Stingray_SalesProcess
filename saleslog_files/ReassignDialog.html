@@ -6,6 +6,43 @@
       body {
         font-family: sans-serif;
         padding: 10px;
+        line-height: 1.35;
+      }
+      h2 {
+        margin: 0 0 10px 0;
+        font-size: 18px;
+      }
+      .panel {
+        border: 1px solid #e3e3e3;
+        border-radius: 6px;
+        padding: 10px;
+        margin-bottom: 12px;
+        background: #f9f9f9;
+      }
+      .panel h3 {
+        margin: 0 0 8px 0;
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: #444;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12.5px;
+      }
+      td {
+        padding: 4px 6px;
+        vertical-align: top;
+      }
+      td.key {
+        width: 38%;
+        color: #555;
+        font-weight: 600;
+      }
+      td.val {
+        color: #111;
+        word-break: break-word;
       }
       select,
       button {
@@ -28,25 +65,170 @@
         color: black;
         margin-top: 5px;
       }
+      button.cancel:hover {
+        background-color: #bdbdbd;
+      }
+      .preview {
+        margin-top: 10px;
+        padding: 10px;
+        border: 1px solid #f0c36d;
+        background: #fff7d6;
+        color: #6b4e00;
+        border-radius: 6px;
+        display: none;
+        font-size: 12.5px;
+      }
+      .error {
+        margin-top: 10px;
+        padding: 10px;
+        border: 1px solid #e53935;
+        background: #ffebee;
+        color: #b71c1c;
+        border-radius: 6px;
+        display: none;
+        white-space: pre-wrap;
+      }
+      .muted {
+        color: #666;
+        font-size: 12px;
+      }
     </style>
   </head>
   <body>
-    <div>
-      <label for="reason">Select Reason for Reassignment:</label>
-      <select id="reason">
-        <? for (var i = 0; i < reasons.length; i++) { ?>
-        <option value="<?= reasons[i] ?>"><?= reasons[i] ?></option>
-        <? } ?>
-      </select>
-      <button onclick="submit()">Confirm Reassign</button>
-      <button class="cancel" onclick="google.script.host.close()">
-        Cancel
-      </button>
+    <h2>Reassign Opportunity</h2>
+
+    <div class="panel">
+      <h3>Selected Appointment</h3>
+      <table>
+        <tbody>
+          <tr>
+            <td class="key">Row</td>
+            <td class="val" id="selRow"></td>
+          </tr>
+          <tr>
+            <td class="key">Customer</td>
+            <td class="val" id="selCustomer"></td>
+          </tr>
+          <tr>
+            <td class="key">Status</td>
+            <td class="val" id="selStatus"></td>
+          </tr>
+          <tr>
+            <td class="key">Current Assigned</td>
+            <td class="val" id="selAssigned"></td>
+          </tr>
+          <tr>
+            <td class="key">Next Assignee</td>
+            <td class="val" id="selNext"></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="muted" id="selectionHint"></div>
     </div>
+
+    <label for="reason">Select Reason for Reassignment:</label>
+    <select id="reason">
+      <option value="">-- Select a reason --</option>
+      <? for (var i = 0; i < reasons.length; i++) { ?>
+      <option value="<?= reasons[i] ?>"><?= reasons[i] ?></option>
+      <? } ?>
+    </select>
+
+    <div id="preview" class="preview"></div>
+    <div id="error" class="error"></div>
+
+    <button id="confirmBtn" type="button" onclick="submit()">Confirm Reassign</button>
+    <button class="cancel" type="button" onclick="google.script.host.close()">
+      Cancel
+    </button>
     <script>
-      function submit() {
+      var selectionInfo = null;
+      var confirmStage = 0;
+
+      function setError(msg) {
+        var el = document.getElementById('error');
+        el.textContent = msg || '';
+        el.style.display = msg ? 'block' : 'none';
+      }
+
+      function setPreview(msg) {
+        var el = document.getElementById('preview');
+        el.textContent = msg || '';
+        el.style.display = msg ? 'block' : 'none';
+      }
+
+      function setText(id, value) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.textContent = value == null ? '' : String(value);
+      }
+
+      function clearConfirmState() {
+        confirmStage = 0;
+        setPreview('');
+        var btn = document.getElementById('confirmBtn');
+        btn.textContent = 'Confirm Reassign';
+      }
+
+      function updateSelectionInfo(info) {
+        selectionInfo = info || null;
+        setText('selRow', info && info.row ? info.row : '');
+        setText('selCustomer', info && info.customer ? info.customer : '(blank)');
+        setText('selStatus', info && info.status ? info.status : '(blank)');
+        setText('selAssigned', info && info.assigned ? info.assigned : '(blank)');
+        setText('selNext', info && info.nextAssignee ? info.nextAssignee : '(unavailable)');
+
+        var hint = document.getElementById('selectionHint');
+        if (info && info.message) {
+          hint.textContent = info.message;
+        } else {
+          hint.textContent = '';
+        }
+      }
+
+      function buildPreviewText_(reason) {
+        var customer = (selectionInfo && selectionInfo.customer) || 'this customer';
+        var oldUser = (selectionInfo && selectionInfo.assigned) || 'current assignee';
+        var newUser = (selectionInfo && selectionInfo.nextAssignee) || 'next assignee';
+        return (
+          'This will reassign ' +
+          customer +
+          ' from ' +
+          oldUser +
+          ' to ' +
+          newUser +
+          ' for reason: ' +
+          reason +
+          '. Confirm?'
+        );
+      }
+
+      function validateReason_() {
         var reason = document.getElementById('reason').value;
-        var btn = document.querySelector('button');
+        if (!reason) {
+          setError('Please select a reason.');
+          return '';
+        }
+        return reason;
+      }
+
+      function submit() {
+        setError('');
+        var reason = validateReason_();
+        if (!reason) {
+          clearConfirmState();
+          return;
+        }
+
+        if (confirmStage === 0) {
+          setPreview(buildPreviewText_(reason));
+          confirmStage = 1;
+          var btn = document.getElementById('confirmBtn');
+          btn.textContent = 'Confirm Reassign (Click Again)';
+          return;
+        }
+
+        var btn = document.getElementById('confirmBtn');
         btn.disabled = true;
         btn.textContent = 'Processing...';
 
@@ -55,12 +237,40 @@
             google.script.host.close();
           })
           .withFailureHandler(function (err) {
-            alert('Error: ' + err.message);
+            var msg = err && err.message ? err.message : String(err);
+            setError('Error: ' + msg);
             btn.disabled = false;
             btn.textContent = 'Confirm Reassign';
+            clearConfirmState();
           })
           .processMenuReassignment(reason);
       }
+
+      function init() {
+        clearConfirmState();
+        google.script.run
+          .withSuccessHandler(function (info) {
+            if (!info || !info.ok) {
+              updateSelectionInfo(info || {});
+              setError((info && info.message) || 'Unable to load selection info.');
+              document.getElementById('confirmBtn').disabled = true;
+              return;
+            }
+            updateSelectionInfo(info);
+          })
+          .withFailureHandler(function (err) {
+            var msg = err && err.message ? err.message : String(err);
+            setError('Error: ' + msg);
+            document.getElementById('confirmBtn').disabled = true;
+          })
+          .getCurrentSelectionInfo();
+      }
+
+      document.getElementById('reason').addEventListener('change', function () {
+        clearConfirmState();
+      });
+
+      init();
     </script>
   </body>
 </html>
