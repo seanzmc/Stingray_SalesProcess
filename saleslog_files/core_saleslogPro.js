@@ -846,6 +846,35 @@ function tallyCounts(rows, aliasMap, sides) {
   return { counts, unknownInputs };
 }
 
+function updateLeaderboardFromCounts_(leaderboardRange, countsByFullName, options) {
+  const opts = options || {};
+  const mode = opts.mode || 'add';
+  const values = leaderboardRange.getValues();
+
+  values.forEach((row) => {
+    const name = row[0];
+    const raw = countsByFullName && Object.prototype.hasOwnProperty.call(countsByFullName, name)
+      ? countsByFullName[name]
+      : 0;
+    const count = Number(raw) || 0;
+
+    if (mode === 'add') {
+      if (count) row[1] = (Number(row[1]) || 0) + count;
+    } else {
+      row[1] = count;
+    }
+  });
+
+  values.sort(
+    (a, b) =>
+      (Number(b[1]) || 0) - (Number(a[1]) || 0) ||
+      (Number(b[2]) || 0) - (Number(a[2]) || 0)
+  );
+
+  leaderboardRange.setValues(values);
+  return values;
+}
+
 function summarizeRows(rows) {
   let newCount = 0,
     usedCount = 0,
@@ -1706,17 +1735,7 @@ function processDaily() {
       unknownInputs = tallyResult.unknownInputs;
 
       const lbRange = sheets.today.getRange(RANGES.leaderboard);
-      const lbValues = lbRange.getValues();
-      lbValues.forEach((r) => {
-        if (countsByFullName[r[0]])
-          r[1] = (Number(r[1]) || 0) + countsByFullName[r[0]];
-      });
-      lbValues.sort(
-        (a, b) =>
-          (Number(b[1]) || 0) - (Number(a[1]) || 0) ||
-          (Number(b[2]) || 0) - (Number(a[2]) || 0)
-      );
-      lbRange.setValues(lbValues);
+      updateLeaderboardFromCounts_(lbRange, countsByFullName, { mode: 'add' });
 
       sheets.today.getRange(RANGES.mtd).setNumberFormat('0.#');
       sheets.today.getRange(RANGES.avg).setNumberFormat('0.#');
@@ -2144,16 +2163,7 @@ function recalcMtdFromMonthly() {
       );
 
       const lbRange = todaySheet.getRange(RANGES.leaderboard);
-      const lbValues = lbRange.getValues();
-      lbValues.forEach((r) => {
-        r[1] = countsByFullName[r[0]] || 0;
-      });
-      lbValues.sort(
-        (a, b) =>
-          (Number(b[1]) || 0) - (Number(a[1]) || 0) ||
-          (Number(b[2]) || 0) - (Number(a[2]) || 0)
-      );
-      lbRange.setValues(lbValues);
+      updateLeaderboardFromCounts_(lbRange, countsByFullName, { mode: 'set' });
       todaySheet.getRange(RANGES.mtd).setNumberFormat('0.#');
       toastInfo('Updating leaderboard counts...', 'Working (5/6)');
       reapplyCF();
@@ -2373,51 +2383,12 @@ function rolloverMonth() {
       const leaderboardData = sheets.today
         .getRange(RANGES.leaderboard)
         .getValues();
-      const avgValues = Array(leaderboardData.length)
-        .fill(null)
-        .map(() => [0]);
-      let tempDate = new Date(currentDate);
-      for (let i = 0; i < leaderboardData.length; i++) {
-        const currentFullName = leaderboardData[i][0];
-        let totalSales = 0,
-          months = 0;
-        let cursorDate = new Date(tempDate);
-        for (let j = 0; j < 3; j++) {
-          let loopYear = cursorDate.getFullYear();
-          let loopM = cursorDate.getMonth() - 1;
-          if (loopM < 0) {
-            loopM = 11;
-            loopYear--;
-          }
-          const prevArchiveName = `${loopM + 1}/${String(
-            loopYear % 100
-          ).padStart(2, '0')}`;
-          const prevSheet = SS.getSheetByName(prevArchiveName);
-          if (prevSheet) {
-            try {
-              const archiveLastRow = prevSheet.getLastRow();
-              const archiveEndRow = Math.max(2, archiveLastRow);
-              const prevLbRange = `P2:R${archiveEndRow}`;
-              const prevLbVals = prevSheet.getRange(prevLbRange).getValues();
-              const personRow = prevLbVals.find(
-                (row) => row[0] === currentFullName
-              );
-              if (personRow && typeof personRow[1] === 'number') {
-                totalSales += personRow[1];
-                months++;
-              }
-            } catch (e) {
-              logWarning(
-                'rolloverMonth',
-                'Error reading archive for average calculation',
-                { archiveName: prevArchiveName, error: e.toString() }
-              );
-            }
-          }
-          cursorDate.setMonth(cursorDate.getMonth() - 1);
-        }
-        avgValues[i][0] = months > 0 ? roundHalf(totalSales / months) : 0;
-      }
+      const averagesMap = computeThreeMonthAverageMap(
+        leaderboardData.map((row) => row[0])
+      );
+      const avgValues = leaderboardData.map((row) => [
+        averagesMap[row[0]] || 0,
+      ]);
       sheets.today
         .getRange(RANGES.avg)
         .setValues(avgValues)
