@@ -9,8 +9,10 @@
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
 
+  <?!= include('Stylesheet'); ?>
   <style>
-    body { font-family: 'Outfit', sans-serif; background-color: #0f172a; color: #e2e8f0; }
+    /* page-specific overrides */
+    body { font-family: 'Outfit', sans-serif; background-color: #0f172a; color: #e2e8f0; padding: 0; line-height: inherit; }
     .glass-panel {
       background: rgba(30, 41, 59, 0.7);
       backdrop-filter: blur(12px);

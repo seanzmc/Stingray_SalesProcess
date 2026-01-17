@@ -8,6 +8,10 @@
 // WEB APP SERVING
 // -----------------------------------------------------------------------------
 
+function include(filename) {
+  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+}
+
 /**
  * Serves the dashboard HTML.
  */

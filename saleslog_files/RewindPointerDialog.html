@@ -3,16 +3,9 @@
   <head>
     <base target="_top">
     <title>Rewind Pointer (Undo)</title>
+    <?!= include('Stylesheet'); ?>
     <style>
-      body {
-        font-family: sans-serif;
-        padding: 10px;
-        line-height: 1.35;
-      }
-      h2 {
-        margin: 0 0 10px 0;
-        font-size: 18px;
-      }
+      /* page-specific overrides */
       .help {
         font-size: 12.5px;
         color: #333;
@@ -22,93 +15,37 @@
         border-radius: 6px;
         margin-bottom: 12px;
       }
-      .panel {
-        border: 1px solid #e3e3e3;
-        border-radius: 6px;
-        padding: 10px;
-        margin-bottom: 12px;
-      }
-      .panel h3 {
-        margin: 0 0 8px 0;
-        font-size: 13px;
-        text-transform: uppercase;
-        letter-spacing: 0.03em;
-        color: #444;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        font-size: 12.5px;
-      }
-      td {
-        padding: 4px 6px;
-        vertical-align: top;
-      }
-      td.key {
+      .panel td.key {
         width: 42%;
-        color: #555;
-        font-weight: 600;
-      }
-      td.val {
-        color: #111;
-        word-break: break-word;
       }
       label {
         display: block;
         margin-top: 8px;
         font-weight: 600;
       }
-      select,
-      button {
-        width: 100%;
-        padding: 8px;
+      body > select,
+      body > button {
         margin-top: 8px;
-        box-sizing: border-box;
       }
       button {
         background-color: #d32f2f;
         color: white;
-        border: none;
-        cursor: pointer;
       }
       button:hover {
         background-color: #b71c1c;
       }
       button.cancel {
-        background-color: #ccc;
-        color: black;
         margin-top: 6px;
-      }
-      button.cancel:hover {
-        background-color: #bdbdbd;
-      }
-      .error {
-        margin-top: 10px;
-        padding: 10px;
-        border: 1px solid #e53935;
-        background: #ffebee;
-        color: #b71c1c;
-        border-radius: 6px;
-        display: none;
-        white-space: pre-wrap;
-      }
-      .muted {
-        color: #666;
-        font-size: 12px;
       }
       .mono {
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
           'Liberation Mono', 'Courier New', monospace;
       }
-
       .mt8 {
         margin-top: 8px;
       }
       .help-list {
         margin: 6px 0 0 18px;
-      }
-      .hidden {
-        display: none;
       }
     </style>
   </head>
