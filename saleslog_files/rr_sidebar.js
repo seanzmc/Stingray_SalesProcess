@@ -114,11 +114,12 @@ function createAppointmentFromSidebar(payload) {
       // Ignore persistence errors
     }
 
-    // Success response
+    // Success response (include row for sidebar reassign override)
     return {
       ok: true,
       assignedTo: assignee,
       nextUp,
+      row: newRow,
     };
   } catch (err) {
     // Log server-side before returning

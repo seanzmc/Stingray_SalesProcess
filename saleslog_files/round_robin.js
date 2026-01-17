@@ -506,10 +506,29 @@ function menuSkipAndReassignSelectedRow() {
   showReassignDialog();
 }
 
-function showReassignDialog() {
+function showReassignDialog(options) {
   try {
     const htmlTemplate = HtmlService.createTemplateFromFile('ReassignDialog');
     htmlTemplate.reasons = REASSIGNMENT_REASONS;
+    htmlTemplate.rowOverride = null;
+    htmlTemplate.initialSelection = null;
+
+    const hasOverride =
+      options && Object.prototype.hasOwnProperty.call(options, 'rowOverride');
+    if (hasOverride) {
+      const rowOverride = Number(options.rowOverride);
+      // Sidebar flow can provide a row override to preload selection info.
+      if (Number.isFinite(rowOverride) && rowOverride > 1) {
+        htmlTemplate.rowOverride = rowOverride;
+        htmlTemplate.initialSelection = getSelectionInfoForRow(rowOverride);
+      } else {
+        htmlTemplate.initialSelection = {
+          ok: false,
+          message: 'Invalid row override provided.',
+        };
+      }
+    }
+
     const html = htmlTemplate.evaluate()
       .setWidth(400)
       .setHeight(360);
@@ -535,6 +554,24 @@ function processMenuReassignment(reason) {
   }
 }
 
+/**
+ * Public endpoint called by the Modal Dialog (ReassignDialog.html) when
+ * reassigning a specific row (sidebar flow).
+ */
+function processReassignmentForRow(row, reason) {
+  try {
+    const rowNum = Number(row);
+    if (!Number.isFinite(rowNum) || rowNum <= 1) {
+      throw new Error('Invalid appointment row.');
+    }
+    processReassignment_(rowNum, reason);
+    SpreadsheetApp.getActiveSpreadsheet().toast("Reassignment Complete");
+  } catch (err) {
+    logError('processReassignmentForRow', err, { row: row });
+    throw err; // Re-throw to show in client
+  }
+}
+
 /** Returns selection info for the Reassign dialog. */
 function getCurrentSelectionInfo() {
   try {
@@ -554,59 +591,7 @@ function getCurrentSelectionInfo() {
       };
     }
 
-    const row = range.getRow();
-    if (row <= 1) {
-      return {
-        ok: false,
-        message: `Please select a row in ${SHEET_APPTS} first.`,
-      };
-    }
-
-    const lastCol = sheet.getLastColumn();
-    if (lastCol < 1) {
-      return {
-        ok: false,
-        message: 'No columns found in APPOINTMENTS sheet.',
-      };
-    }
-
-    const headerMap = getHeaderMap_(sheet);
-    const rowValues = sheet.getRange(row, 1, 1, lastCol).getValues()[0];
-
-    const customerIndex = findHeaderIndex_(headerMap, [
-      'Customer',
-      'Customer Name',
-      'Name',
-    ]);
-    const statusIndex = findHeaderIndex_(headerMap, [
-      'Status',
-      'Appointment Status',
-      'Appt Status',
-      'Mode',
-      'Assignment Mode',
-    ]);
-    const assignedIndex = findHeaderIndex_(headerMap, [
-      'Assigned',
-      'Assigned Salesperson',
-      'Assigned Rep',
-      'Sales Rep',
-      'Salesperson',
-      'Assignee',
-    ]);
-
-    const customer = getCellValueFromRow_(rowValues, customerIndex);
-    const status = getCellValueFromRow_(rowValues, statusIndex);
-    const assigned = getCellValueFromRow_(rowValues, assignedIndex);
-    const nextAssignee = getNextAssigneePreview_();
-
-    return {
-      ok: true,
-      row: row,
-      customer: customer,
-      status: status,
-      assigned: assigned,
-      nextAssignee: nextAssignee,
-    };
+    return buildSelectionInfoForRow_(sheet, range.getRow());
   } catch (err) {
     logError('getCurrentSelectionInfo', err);
     return {
@@ -614,6 +599,91 @@ function getCurrentSelectionInfo() {
       message: err && err.message ? err.message : String(err),
     };
   }
+}
+
+/** Returns selection info for a specific row in APPOINTMENTS. */
+function getSelectionInfoForRow(row) {
+  try {
+    const sheet = getApptsSheet_();
+    return buildSelectionInfoForRow_(sheet, row);
+  } catch (err) {
+    logError('getSelectionInfoForRow', err, { row: row });
+    return {
+      ok: false,
+      message: err && err.message ? err.message : String(err),
+    };
+  }
+}
+
+function buildSelectionInfoForRow_(sheet, row) {
+  if (!sheet || sheet.getName() !== SHEET_APPTS) {
+    return {
+      ok: false,
+      message: `Please select a row in ${SHEET_APPTS} first.`,
+    };
+  }
+
+  const rowNum = Number(row);
+  if (!Number.isFinite(rowNum) || rowNum <= 1) {
+    return {
+      ok: false,
+      message: `Please select a row in ${SHEET_APPTS} first.`,
+    };
+  }
+
+  const lastRow = sheet.getLastRow();
+  if (rowNum > lastRow) {
+    return {
+      ok: false,
+      message: `Row ${rowNum} is outside the ${SHEET_APPTS} data range.`,
+    };
+  }
+
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 1) {
+    return {
+      ok: false,
+      message: 'No columns found in APPOINTMENTS sheet.',
+    };
+  }
+
+  const headerMap = getHeaderMap_(sheet);
+  const rowValues = sheet.getRange(rowNum, 1, 1, lastCol).getValues()[0];
+
+  const customerIndex = findHeaderIndex_(headerMap, [
+    'Customer',
+    'Customer Name',
+    'Name',
+  ]);
+  const statusIndex = findHeaderIndex_(headerMap, [
+    'Status',
+    'Appointment Status',
+    'Appt Status',
+    'Mode',
+    'Assignment Mode',
+  ]);
+  const assignedIndex = findHeaderIndex_(headerMap, [
+    'Assigned',
+    'Assigned Salesperson',
+    'Assigned Rep',
+    'Sales Rep',
+    'Salesperson',
+    'Assignee',
+  ]);
+
+  const customer = getCellValueFromRow_(rowValues, customerIndex);
+  const status = getCellValueFromRow_(rowValues, statusIndex);
+  const assigned = getCellValueFromRow_(rowValues, assignedIndex);
+  const nextAssignee = getNextAssigneePreview_();
+
+  return {
+    ok: true,
+    row: rowNum,
+    customer: customer,
+    status: status,
+    assigned: assigned,
+    nextAssignee: nextAssignee,
+  };
 }
 
 function getNextAssigneePreview_() {
@@ -1278,33 +1348,6 @@ function menuResetPointer() {
   } catch (err) {
     logError('menuResetPointer', err);
     SpreadsheetApp.getUi().alert('Error: ' + err.message);
-  }
-}
-
-/**
- * Reassign a selected row from the sidebar with a specific reason.
- *
- * @param {string} reason - The reason for reassignment
- * @return {object} { ok: boolean, message: string, newAssignee: string }
- */
-function reassignSelectedRow(reason) {
-  try {
-    const row = getActiveRow_();
-    if (!row) {
-      return { ok: false, message: 'Please select a row in APPOINTMENTS first.' };
-    }
-
-    processReassignment_(row, reason);
-
-    // Get the new assignee from the sheet to confirm
-    const appts = getApptsSheet_();
-    const newAssignee = appts.getRange(row, COL_ASSIGNED).getValue();
-
-    return { ok: true, newAssignee: newAssignee };
-
-  } catch (e) {
-    logError('reassignSelectedRow', e);
-    return { ok: false, message: e.message };
   }
 }
 

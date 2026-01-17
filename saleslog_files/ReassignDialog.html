@@ -92,9 +92,19 @@
         color: #666;
         font-size: 12px;
       }
+      .hidden {
+        display: none;
+      }
     </style>
   </head>
   <body>
+    <div id="initialSelectionB64" class="hidden">
+      <?!= Utilities.base64EncodeWebSafe(JSON.stringify(initialSelection)) ?>
+    </div>
+    <div id="rowOverrideB64" class="hidden">
+      <?!= Utilities.base64EncodeWebSafe(JSON.stringify(rowOverride)) ?>
+    </div>
+
     <h2>Reassign Opportunity</h2>
 
     <div class="panel">
@@ -142,6 +152,33 @@
       Cancel
     </button>
     <script>
+      function decodeWebSafeBase64_(b64) {
+        var s = String(b64 || '').trim();
+        s = s.replace(/-/g, '+').replace(/_/g, '/');
+        while (s.length % 4) s += '=';
+        return atob(s);
+      }
+
+      function parseTemplateJson_(elementId, errorValue) {
+        try {
+          var el = document.getElementById(elementId);
+          if (!el) return errorValue;
+          var b64 = (el.textContent || '').trim();
+          if (!b64) return null;
+          var json = decodeWebSafeBase64_(b64);
+          return JSON.parse(json);
+        } catch (e) {
+          return errorValue;
+        }
+      }
+
+      var initialSelection = parseTemplateJson_('initialSelectionB64', {
+        ok: false,
+        message: 'Failed to parse selection info.',
+      });
+      var rowOverride = parseTemplateJson_('rowOverrideB64', null);
+      var overrideMode = initialSelection !== null;
+
       var selectionInfo = null;
       var confirmStage = 0;
 
@@ -232,7 +269,7 @@
         btn.disabled = true;
         btn.textContent = 'Processing...';
 
-        google.script.run
+        var runner = google.script.run
           .withSuccessHandler(function () {
             google.script.host.close();
           })
@@ -242,12 +279,30 @@
             btn.disabled = false;
             btn.textContent = 'Confirm Reassign';
             clearConfirmState();
-          })
-          .processMenuReassignment(reason);
+          });
+
+        if (overrideMode) {
+          runner.processReassignmentForRow(rowOverride, reason);
+          return;
+        }
+
+        runner.processMenuReassignment(reason);
       }
 
       function init() {
         clearConfirmState();
+        if (overrideMode) {
+          updateSelectionInfo(initialSelection || {});
+          if (!initialSelection || !initialSelection.ok) {
+            setError(
+              (initialSelection && initialSelection.message) ||
+                'Unable to load selection info.'
+            );
+            document.getElementById('confirmBtn').disabled = true;
+          }
+          return;
+        }
+
         google.script.run
           .withSuccessHandler(function (info) {
             if (!info || !info.ok) {

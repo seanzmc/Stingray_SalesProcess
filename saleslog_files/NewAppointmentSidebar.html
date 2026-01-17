@@ -112,9 +112,8 @@
             color: #333;
         }
 
-        /* Phone Lead + Reassign containers */
-        #phone-lead-container,
-        #reassign-container {
+        /* Phone Lead container */
+        #phone-lead-container {
             margin-bottom: 20px;
             padding: 10px;
             border: 1px solid #ccc;
@@ -123,10 +122,6 @@
 
         #phone-lead-container {
             background-color: #f0f8ff;
-        }
-
-        #reassign-container {
-            background-color: #fff3e0;
         }
 
         /* Phone Lead styling */
@@ -157,40 +152,6 @@
             margin-top: 8px;
             font-weight: bold;
             color: #d32f2f;
-            text-align: center;
-            min-height: 20px;
-        }
-
-        /* Reassign styling */
-        #reassign-container h4 {
-            margin: 0 0 2px 0;
-        }
-
-        #reassign-container p {
-            margin: 0 0 10px 0;
-            font-weight: 400;
-            font-size: 13px;
-        }
-
-        #reassign-container label {
-            margin-top: 0;
-            font-weight: 400;
-            font-size: 13px;
-        }
-
-        #reassignReason {
-            margin-top: 4px;
-        }
-
-        #reassignBtn {
-            margin-top: 10px;
-            background-color: #FF9800;
-            color: white;
-        }
-
-        #reassignResult {
-            margin-top: 8px;
-            font-weight: bold;
             text-align: center;
             min-height: 20px;
         }
@@ -228,8 +189,6 @@
             aria-selected="true" onclick="setActiveTab('tab-appointment')">Appointment</button>
         <button type="button" class="tab-btn" data-tab="tab-phone-lead" aria-controls="tab-phone-lead"
             aria-selected="false" onclick="setActiveTab('tab-phone-lead')">Phone Lead</button>
-        <button type="button" class="tab-btn" data-tab="tab-manage" aria-controls="tab-manage" aria-selected="false"
-            onclick="setActiveTab('tab-manage')">Manage<span class="tab-sub">Reassign workflows</span></button>
     </div>
 
     <div id="tab-appointment" class="tab-panel" role="tabpanel">
@@ -264,7 +223,8 @@
             <div class="success-check">&#10004;</div>
             <h3>Appointment Created</h3>
             <div id="success-details"></div>
-            <button type="button" onclick="google.script.host.close()">Close</button>
+            <button type="button" onclick="google.script.host.close()">Done</button>
+            <button id="reassignNewBtn" type="button" onclick="openReassignDialog()">Reassign this appointment</button>
         </div>
 
         <div id="status"></div>
@@ -277,21 +237,6 @@
             <button id="getLeadBtn" type="button" onclick="getPhoneLead()">Assign Phone Lead</button>
             <button id="undoLeadBtn" type="button" onclick="undoPhoneLead()">↺ Recall / Undo Last Assignment</button>
             <div id="phoneLeadResult"></div>
-        </div>
-    </div>
-
-    <div id="tab-manage" class="tab-panel" role="tabpanel">
-        <div id="reassign-container">
-            <h4>Reassign Appointment</h4>
-            <p>Select the row to reassign
-                on the APPOINTMENTS sheet.</p>
-            <label>Reason:</label>
-            <select id="reassignReason">
-                <option>Loading...</option>
-            </select>
-            <button id="reassignBtn" type="button" onclick="reassignRow()">Reassign</button>
-            <div id="reassignResult">
-            </div>
         </div>
     </div>
 
@@ -404,6 +349,9 @@
 
                         const successDiv = document.getElementById('success-container');
                         document.getElementById('success-details').innerHTML = details;
+                        const reassignBtn = document.getElementById('reassignNewBtn');
+                        reassignBtn.dataset.row = String(res.row || '');
+                        reassignBtn.disabled = !res.row;
                         successDiv.style.display = 'block';
 
                     } else {
@@ -415,6 +363,19 @@
                     setStatus(err && err.message ? err.message : String(err), false);
                 })
                 .createAppointmentFromSidebar(payload);
+        }
+
+        function openReassignDialog() {
+            const btn = document.getElementById('reassignNewBtn');
+            const rowOverride = Number(btn.dataset.row || '');
+            if (!rowOverride) {
+                setStatus('Unable to open reassignment: missing appointment row.', false);
+                return;
+            }
+
+            google.script.run
+                // Pass the just-created appointment row into the reassign modal.
+                .showReassignDialog({ rowOverride: rowOverride });
         }
 
         // New Phone Lead Handler
@@ -466,73 +427,6 @@
                 })
                 .undoLastPhoneUp();
         }
-
-        // Reassign Row Handler
-        function reassignRow() {
-            const reason = document.getElementById('reassignReason').value;
-            const btn = document.getElementById('reassignBtn');
-            const resultDiv = document.getElementById('reassignResult');
-
-            if (!reason) {
-                resultDiv.textContent = 'Please select a reason.';
-                resultDiv.style.color = 'red';
-                return;
-            }
-
-            btn.disabled = true;
-            btn.textContent = 'Reassigning...';
-            resultDiv.textContent = '';
-            resultDiv.style.color = 'black';
-
-            google.script.run
-                .withSuccessHandler((res) => {
-                    btn.disabled = false;
-                    btn.textContent = 'Reassign';
-
-                    if (res.ok) {
-                        resultDiv.textContent = 'New Assignee: ' + res.newAssignee;
-                        resultDiv.style.color = 'green';
-                    } else {
-                        resultDiv.textContent = 'Error: ' + res.message;
-                        resultDiv.style.color = 'red';
-                    }
-                })
-                .withFailureHandler((err) => {
-                    btn.disabled = false;
-                    btn.textContent = 'Reassign';
-                    resultDiv.textContent = 'Error: ' + (err.message || err);
-                    resultDiv.style.color = 'red';
-                })
-                .reassignSelectedRow(reason); // This calls the server-side function which now validates against allowlist (optionally)
-        }
-
-        function loadReassignReasons() {
-             google.script.run
-                .withSuccessHandler((reasons) => {
-                    const sel = document.getElementById('reassignReason');
-                    sel.innerHTML = ''; // Clear loading/static options
-                    reasons.forEach(r => {
-                        const opt = document.createElement('option');
-                        opt.value = r;
-                        opt.textContent = r;
-                        sel.appendChild(opt);
-                    });
-                })
-                .withFailureHandler((err) => {
-                     console.error("Failed to load reasons", err);
-                     // Fallback or show error in select
-                     const sel = document.getElementById('reassignReason');
-                     sel.innerHTML = '<option>Error loading reasons</option>';
-                })
-                .getReassignmentReasons();
-        }
-
-        // Add to window.onload
-        const originalOnLoad = window.onload;
-        window.onload = function() {
-            if (originalOnLoad) originalOnLoad();
-            loadReassignReasons();
-        };
 
         // Tab switching
         function setActiveTab(tabId) {
