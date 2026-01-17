@@ -798,6 +798,26 @@ function alertError(msg, title = 'Error') {
 }
 
 // Data transforms
+function applySplitSalespersonInput_(salespersonInput, aliasMap, onResolved, onUnknown) {
+  const raw = String(salespersonInput || '');
+  if (!raw) return;
+
+  const rawParts = raw.split('/');
+  const increment = rawParts.length > 1 ? 0.5 : 1;
+
+  rawParts.forEach((rawPart) => {
+    const part = String(rawPart || '').trim();
+    if (!part) return;
+    const key = part.toUpperCase();
+    const fullName = aliasMap && aliasMap[key];
+    if (fullName) {
+      if (typeof onResolved === 'function') onResolved(fullName, increment);
+      return;
+    }
+    if (typeof onUnknown === 'function') onUnknown(part, rawPart);
+  });
+}
+
 function tallyCounts(rows, aliasMap, sides) {
   const counts = {};
   const unknownInputs = [];
@@ -810,28 +830,17 @@ function tallyCounts(rows, aliasMap, sides) {
       if (!isValidFIFlag(fiFlag)) return; // Only delivered
       const salespersonInput = String(row[saleIdx] || '').trim();
       if (!salespersonInput) return;
-      const parts = salespersonInput
-        .split('/')
-        .map((s) => s.trim().toUpperCase());
-      const inc = parts.length > 1 ? 0.5 : 1;
-      parts.forEach((part) => {
-        if (!part) return;
-        const fullName = aliasMap[part];
-        if (fullName) counts[fullName] = (counts[fullName] || 0) + inc;
-        else if (
-          !unknownInputs.includes(
-            salespersonInput
-              .split('/')
-              .find((p) => p.trim().toUpperCase() === part) || part
-          )
-        ) {
-          unknownInputs.push(
-            salespersonInput
-              .split('/')
-              .find((p) => p.trim().toUpperCase() === part) || part
-          );
+      applySplitSalespersonInput_(
+        salespersonInput,
+        aliasMap,
+        (fullName, increment) => {
+          counts[fullName] = (counts[fullName] || 0) + increment;
+        },
+        (unknown, rawPart) => {
+          const value = typeof rawPart === 'string' ? rawPart : unknown;
+          if (!unknownInputs.includes(value)) unknownInputs.push(value);
         }
-      });
+      );
     });
   });
   return { counts, unknownInputs };

@@ -1020,10 +1020,14 @@ function appendAuditRowOrThrow_(auditSheet, rowValues) {
   return targetRow;
 }
 
-function buildAuditDetailsString_(detailsObj) {
+function formatAuditDetails_(detailsObj, options) {
   if (!detailsObj) return '';
-  const { row: _row, user: _u, ...rest } = detailsObj;
-  return Object.entries(rest)
+  const opts = options || {};
+  const excludeKeys = Array.isArray(opts.excludeKeys) ? opts.excludeKeys : ['row', 'user'];
+  const excludeSet = new Set(excludeKeys);
+
+  return Object.entries(detailsObj)
+    .filter(([key]) => !excludeSet.has(key))
     .map(([k, v]) => {
       let valStr = String(v);
       valStr = valStr.replace(/[|=]/g, '-');
@@ -1031,6 +1035,10 @@ function buildAuditDetailsString_(detailsObj) {
       return `${k}=${valStr}`;
     })
     .join(' | ');
+}
+
+function buildAuditDetailsString_(detailsObj) {
+  return formatAuditDetails_(detailsObj);
 }
 
 function validateUndoStateTokenOrThrow_(stateToken, live) {
@@ -1635,21 +1643,7 @@ function logRoundRobinEvent(action, detailsObj) {
     const user = getAuditLogNameFromEmail_(userEmail);
 
     // Format details
-    let detailsStr = '';
-    if (detailsObj) {
-      const { row, user: _u, ...rest } = detailsObj;
-
-      detailsStr = Object.entries(rest)
-        .map(([k, v]) => {
-          // Sanitize Value: replace | and = with -
-          let valStr = String(v);
-          valStr = valStr.replace(/[|=]/g, '-');
-          // Prevent formula injection within the details cell (belt & suspenders)
-          valStr = String(sanitizeForSheetCell_(valStr));
-          return `${k}=${valStr}`;
-        })
-        .join(' | ');
-    }
+    const detailsStr = formatAuditDetails_(detailsObj);
 
     const reference = detailsObj && detailsObj.row ? `Row ${detailsObj.row}` : '';
 

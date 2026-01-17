@@ -70,11 +70,7 @@ function undoLastPhoneUp() {
     const lastRow = rosterSheet.getLastRow();
     if (lastRow < 2) throw new Error("No salespeople configured in RR_ROSTER.");
 
-    const rosterValues = rosterSheet.getRange(2, 1, lastRow - 1, 3).getValues();
-    const activeUsers = rosterValues
-      .filter(r => r[0] && r[1] === true && r[2] === true)
-      .map(r => String(r[0]).trim());
-
+    const activeUsers = getEligibleRoster_();
     if (activeUsers.length === 0) {
       throw new Error("No active and eligible salespeople found.");
     }
@@ -108,7 +104,7 @@ function undoLastPhoneUp() {
       target: AUDIT_ACTIONS.PHONE_LEAD
     });
 
-    return `Rotation rewound. Next Up is now ${newName}`;
+    return `Rotation rewound. Last Assigned is now ${newName}`;
 
   } catch (e) {
     logError('undoLastPhoneUp', e);
@@ -130,15 +126,7 @@ function executePhoneUpAssignment_() {
   const lastRow = rosterSheet.getLastRow();
   if (lastRow < 2) throw new Error("No salespeople configured in RR_ROSTER.");
 
-  // Read names (A), Active (B), Eligible (C) from RR_ROSTER
-  // Assuming standard layout: Col 1=Name, Col 2=Active, Col 3=Eligible
-  const rosterValues = rosterSheet.getRange(2, 1, lastRow - 1, 3).getValues();
-
-  // Filter: Must be Active (Col 2 === true) AND Eligible (Col 3 === true)
-  const activeUsers = rosterValues
-    .filter(r => r[0] && r[1] === true && r[2] === true)
-    .map(r => String(r[0]).trim());
-
+  const activeUsers = getEligibleRoster_();
   if (activeUsers.length === 0) {
     throw new Error("No active and eligible salespeople found.");
   }

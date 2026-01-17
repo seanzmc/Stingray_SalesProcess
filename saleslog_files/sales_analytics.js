@@ -344,16 +344,10 @@ function processMonthlyDataForAnalytics(monthlyData, aliasMap) {
  * @returns {void}
  */
 function processNewSale(salespersonInput, metrics, aliasMap) {
-  const parts = salespersonInput.split('/').map((s) => s.trim());
-  const increment = parts.length > 1 ? 0.5 : 1;
-
-  parts.forEach((part) => {
-    if (!part) return;
-
-    const upperPart = part.toUpperCase();
-    const fullName = aliasMap[upperPart];
-
-    if (fullName) {
+  applySplitSalespersonInput_(
+    salespersonInput,
+    aliasMap,
+    (fullName, increment) => {
       if (!metrics.salespersonAccumulator[fullName]) {
         metrics.salespersonAccumulator[fullName] = {
           newCount: 0,
@@ -362,13 +356,13 @@ function processNewSale(salespersonInput, metrics, aliasMap) {
       }
       metrics.salespersonAccumulator[fullName].newCount += increment;
       metrics.totalNew += increment;
-    } else {
-      // Track unknown salesperson
-      if (!metrics.unknownSalespeople.includes(part)) {
-        metrics.unknownSalespeople.push(part);
+    },
+    (unknown) => {
+      if (!metrics.unknownSalespeople.includes(unknown)) {
+        metrics.unknownSalespeople.push(unknown);
       }
     }
-  });
+  );
 }
 
 /**
@@ -382,16 +376,10 @@ function processNewSale(salespersonInput, metrics, aliasMap) {
  * @returns {void}
  */
 function processUsedSale(salespersonInput, metrics, aliasMap) {
-  const parts = salespersonInput.split('/').map((s) => s.trim());
-  const increment = parts.length > 1 ? 0.5 : 1;
-
-  parts.forEach((part) => {
-    if (!part) return;
-
-    const upperPart = part.toUpperCase();
-    const fullName = aliasMap[upperPart];
-
-    if (fullName) {
+  applySplitSalespersonInput_(
+    salespersonInput,
+    aliasMap,
+    (fullName, increment) => {
       if (!metrics.salespersonAccumulator[fullName]) {
         metrics.salespersonAccumulator[fullName] = {
           newCount: 0,
@@ -400,13 +388,13 @@ function processUsedSale(salespersonInput, metrics, aliasMap) {
       }
       metrics.salespersonAccumulator[fullName].usedCount += increment;
       metrics.totalUsed += increment;
-    } else {
-      // Track unknown salesperson
-      if (!metrics.unknownSalespeople.includes(part)) {
-        metrics.unknownSalespeople.push(part);
+    },
+    (unknown) => {
+      if (!metrics.unknownSalespeople.includes(unknown)) {
+        metrics.unknownSalespeople.push(unknown);
       }
     }
-  });
+  );
 }
 
 // ============================================================================
