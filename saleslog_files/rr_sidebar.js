@@ -1,7 +1,7 @@
 function showNewAppointmentSidebar() {
-  const html = HtmlService.createHtmlOutputFromFile(
-    'NewAppointmentSidebar'
-  ).setTitle('New Appointment');
+  const html = HtmlService.createTemplateFromFile('NewAppointmentSidebar')
+    .evaluate()
+    .setTitle('New Appointment');
   SpreadsheetApp.getUi().showSidebar(html);
 }
 
