@@ -161,23 +161,4 @@ This resilience ensures the round-robin system continues working even during ros
 
 ## One-Time Migration (For Existing Installations)
 
-If you are upgrading from an older version that only used the numeric pointer (`RR_STATE!B2`), you must run a **one-time migration** to populate the name-based state cell (`D2`).
-
-### Migration Instructions
-
-1. Open **Google Apps Script** editor (Extensions > Apps Script).
-2. In the script editor, open the **round_robin.js** file.
-3. Locate the function [`migrateAppointmentPointerToName()`](saleslog_files/round_robin.js:1060).
-4. Run the function once (click the function name in the dropdown, then click the ▶ Run button).
-5. **What it does:**
-   - Reads the current numeric pointer from `B2`.
-   - Looks up the corresponding salesperson name in `RR_ROSTER`.
-   - **Writes the *previous* person's name** to `D2` (this preserves the current "next up" assignment).
-   - Logs the migration to the audit log.
-6. **Result:** The name-based pointer is now initialized, and future assignments will use it.
-
-**Important:** Run this **only once**. The migration is idempotent (safe to run multiple times), but it's designed as a one-time setup step.
-
-**Why preserve "next up"?**
-
-The migration writes the *previous* person's name so that the current "next up" person remains unchanged. This ensures no disruption to your existing rotation schedule.
+If you are upgrading from an older version that only used the numeric pointer (`RR_STATE!B2`), the name-based state in `RR_STATE!D2` must already be initialized. If your spreadsheet is already running with the name-based pointer, no action is required.

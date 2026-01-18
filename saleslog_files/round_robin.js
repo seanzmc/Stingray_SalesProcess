@@ -2,10 +2,10 @@
  * Round Robin Logic for Sales Log Pro
  *
  * REQUIRED INSTALLABLE TRIGGERS:
- * 1. "On form submit" -> handleFormSubmit (for APPOINTMENTS sheet)
- * 2. "On edit"        -> handleAppointmentEdit (for APPOINTMENTS sheet manual edits)
- * 3. "On edit"        -> handleRRStateEdit (for RR_STATE sheet - Audit Pointer Edits)
- * 4. "On edit"        -> handleRosterEdit (for RR_ROSTER sheet - Audit Roster Changes)
+ * 1. "On edit"   -> handleAppointmentEdit (for APPOINTMENTS sheet manual edits)
+ * 2. "On edit"   -> handleRRStateEdit (for RR_STATE sheet - Audit Pointer Edits)
+ * 3. "On edit"   -> handleRosterEdit (for RR_ROSTER sheet - Audit Roster Changes)
+ * 4. "On change" -> handleAppointmentStructureChange (for APPOINTMENTS structure changes)
  *
  * NOTE ON LISTS:
  * - RR_ROSTER = Salespeople who RECEIVE appointments (Active + Eligible)
@@ -245,24 +245,6 @@ function logRoundRobinAction_(action, detailsObj) {
 }
 
 /***** TRIGGERS *****/
-
-/**
- * Handle form submission for new appointments.
- * Must be bound to an installable "On form submit" trigger.
- */
-function handleFormSubmit(e) {
-  try {
-    const sheet = e.range.getSheet();
-    if (sheet.getName() !== SHEET_APPTS) return;
-
-    const row = e.range.getRow();
-    assignRowAuto_(row);
-  } catch (err) {
-    logError('handleFormSubmit', err, {
-      range: e ? e.range.getA1Notation() : 'unknown',
-    });
-  }
-}
 
 /**
  * Handle manual edits to the APPOINTMENTS sheet.
@@ -1714,49 +1696,6 @@ function normalizeAuditAction_(action) {
   return map[lower] || raw;
 }
 
-function normalizeAuditLogEntries() {
-  const sheet = getSheetOrThrow_(SHEET_AUDIT);
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) {
-    Logger.log('normalizeAuditLogEntries: no audit rows to normalize.');
-    return { updatedRows: 0, totalRows: 0 };
-  }
-
-  const batchSize = 500;
-  let updatedRows = 0;
-  let totalRows = 0;
-
-  for (let startRow = 2; startRow <= lastRow; startRow += batchSize) {
-    const numRows = Math.min(batchSize, lastRow - startRow + 1);
-    const range = sheet.getRange(startRow, 1, numRows, 5);
-    const values = range.getValues();
-
-    let hasChanges = false;
-    const userActionValues = values.map((row) => {
-      totalRows++;
-      const currentUser = row[1];
-      const currentAction = row[2];
-      const normalizedUser = currentUser ? getAuditLogNameFromEmail_(currentUser) : '';
-      const normalizedAction = normalizeAuditAction_(currentAction);
-
-      if (normalizedUser !== currentUser || normalizedAction !== currentAction) {
-        hasChanges = true;
-        updatedRows++;
-      }
-
-      return [normalizedUser, normalizedAction];
-    });
-
-    if (hasChanges) {
-      sheet.getRange(startRow, 2, numRows, 2).setValues(userActionValues);
-    }
-  }
-
-  Logger.log(
-    `normalizeAuditLogEntries: updated ${updatedRows} of ${totalRows} audit rows.`
-  );
-  return { updatedRows: updatedRows, totalRows: totalRows };
-}
 
 /***** DATA ACCESS *****/
 function getApptsSheet_() {
@@ -1800,73 +1739,6 @@ function setPointer_(n) {
  *
  * @return {string} Status message for operator visibility.
  */
-function migrateAppointmentPointerToName() {
-  const lockResult = acquireScriptLockWithRetry();
-  if (!lockResult.success) {
-    throw new Error('System busy (Lock Timeout). Please try again.');
-  }
-
-  try {
-    const roster = getEligibleRoster_();
-    if (!roster || roster.length === 0) {
-      throw new Error('Roster empty - cannot migrate appointment pointer.');
-    }
-
-    let existingLastAssignedName = '';
-    let normalizedNextUp = 0;
-    let lastAssignedName = '';
-    let didMigrate = false;
-
-    withDocumentLock_(() => {
-      const stateSheet = getStateSheet_();
-
-      existingLastAssignedName = String(
-        stateSheet.getRange(CELL_APPT_LAST_ASSIGNED_NAME).getValue() || ''
-      ).trim();
-
-      // Idempotency: if D2 already contains a valid roster name, do nothing.
-      if (existingLastAssignedName && roster.indexOf(existingLastAssignedName) !== -1) {
-        didMigrate = false;
-        return;
-      }
-
-      // B2 is "next-up index" (may be out of range); normalize to current roster.
-      normalizedNextUp = normalizePointer_(getPointer_(), roster.length);
-      const lastAssignedIndex = (normalizedNextUp - 1 + roster.length) % roster.length;
-      lastAssignedName = roster[lastAssignedIndex];
-
-      stateSheet.getRange(CELL_APPT_LAST_ASSIGNED_NAME).setValue(lastAssignedName);
-      didMigrate = true;
-    });
-
-    if (didMigrate) {
-      logRoundRobinEvent('System Migration', {
-        target: 'Appointments',
-        pointerCell: CELL_POINTER,
-        nameCell: CELL_APPT_LAST_ASSIGNED_NAME,
-        normalizedNextUp: normalizedNextUp,
-        lastAssignedName: lastAssignedName,
-        rosterCount: roster.length,
-        reason: 'Migrate appointment pointer from numeric next-up index to last-assigned name',
-      });
-      return `Migration complete: RR_STATE!${CELL_APPT_LAST_ASSIGNED_NAME}="${lastAssignedName}".`;
-    }
-
-    logRoundRobinEvent('System Migration', {
-      target: 'Appointments',
-      result: 'No-op',
-      existingLastAssignedName: existingLastAssignedName,
-      rosterCount: roster.length,
-      reason: 'RR_STATE!D2 already contains a valid name in the current roster',
-    });
-    return 'No migration needed: RR_STATE!D2 already contains a valid name.';
-  } catch (err) {
-    logError('migrateAppointmentPointerToName', err);
-    throw err;
-  } finally {
-    lockResult.lock.releaseLock();
-  }
-}
 
 /***** PROTECTION *****/
 /**

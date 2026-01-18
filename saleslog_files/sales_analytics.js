@@ -215,7 +215,7 @@ function invalidateAnalyticsCache() {
 }
 /**
  * Internal helper that performs analytics refresh without user prompts.
- * Used by both recalcMtdFromMonthly() and refreshAnalyticsManually().
+ * Used by recalcMtdFromMonthly().
  *
  * @param {Object} sheets - Sheet references from getSheets()
  * @returns {Object} Result object with structure:
@@ -757,65 +757,4 @@ function createEmptyAnalytics() {
       errorCount: 0,
     },
   };
-}
-
-/**
- * Manually refresh analytics from the menu.
- * Shows confirmation dialog before execution and summary after completion.
- */
-function refreshAnalyticsManually() {
-  withScriptLock(() => {
-    try {
-      const ui = SpreadsheetApp.getUi();
-
-      // Confirmation dialog
-      const response = ui.alert(
-        'Refresh Monthly Analytics',
-        'This will recalculate all monthly analytics from MONTHLY sheet data.\n\nContinue?',
-        ui.ButtonSet.YES_NO
-      );
-
-      if (response !== ui.Button.YES) {
-        return;
-      }
-
-      // Get sheet references
-      const sheets = getSheets();
-      if (!sheets) {
-        alertError('Required sheets not found.');
-        return;
-      }
-
-      // Execute analytics refresh
-      toastInfo('Refreshing analytics...', 'Analytics', 3);
-      const result = refreshAnalyticsInternal(sheets);
-
-      if (!result.success) {
-        alertError(
-          'Analytics refresh failed: ' + (result.error || 'Unknown error')
-        );
-        return;
-      }
-
-      // Show summary dialog
-      const analytics = result.data;
-      const topPerformer = analytics.salespersonMetrics[0] || {
-        displayCode: 'N/A',
-        totalSales: 0,
-      };
-
-      ui.alert(
-        'Analytics Updated',
-        `Monthly analytics refreshed successfully!\n\n` +
-        `Total Delivered: ${analytics.totals.delivered || 0}\n` +
-        `New: ${analytics.totals.newDelivered || 0}\n` +
-        `Used: ${analytics.totals.usedDelivered || 0}\n\n` +
-        `Top Performer: ${topPerformer.displayCode} (${topPerformer.totalSales} units)`,
-        ui.ButtonSet.OK
-      );
-    } catch (e) {
-      logError('refreshAnalyticsManually', e);
-      alertError('Error refreshing analytics: ' + e.message);
-    }
-  });
 }

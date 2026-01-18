@@ -103,45 +103,10 @@ Expected:
 - A new line is appended in the format:
   - `YYYY-MM-DD HH:mm:ss - REWIND POINTER (UNDO) by <user>: <reason> [[RR_UNDO:<uuid>]]`
 
-## Test 5 — Server validation (invalid reason rejected)
+## Automated Coverage
 
-This test requires running a helper from Apps Script editor.
+The automated test runner (`runAllTests_RewindPointerUndo()`) covers:
 
-1. Open Apps Script editor.
-2. Run:
-   - `manualTest_RewindPointerUndo_InvokeWithInvalidReason()`
-
-Expected:
-
-- It throws/returns an error indicating invalid reason.
-- No pointer change is performed.
-
-## Test 6 — Dedupe on retries (same requestId)
-
-This test requires running a helper from Apps Script editor.
-
-1. Open Apps Script editor.
-2. Run:
-   - `manualTest_RewindPointerUndo_SimulateRetry_NoDuplicate()`
-
-Expected:
-
-- Only one notes marker is present for the generated `requestId`.
-- Only one `RR_AUDIT` row contains the `requestId`.
-
-## Test 7 — Rollback on failure (pointer unchanged)
-
-This test requires running a helper from Apps Script editor.
-
-1. Open Apps Script editor.
-2. Run one (or more) of:
-   - `manualTest_RewindPointerUndo_SimulateFailure('afterNotesWrite')`
-   - `manualTest_RewindPointerUndo_SimulateFailure('afterAuditWrite')`
-   - `manualTest_RewindPointerUndo_SimulateFailure('afterPointerWrite')`
-
-Expected:
-
-- The helper reports `ok: true`.
-- `RR_STATE!B2` and `RR_STATE!D2` are unchanged.
-- No notes marker remains.
-- No audit entry containing the test `requestId` remains.
+- Invalid reason rejection
+- Retry dedupe behavior (no duplicate notes/audit)
+- Rollback correctness on simulated failures
