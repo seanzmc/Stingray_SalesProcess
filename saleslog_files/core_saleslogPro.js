@@ -717,6 +717,18 @@ function menuExportTradesToReconLogDryRun() {
   }
 }
 
+function authorizeReconAccess() {
+  const reconSS = SpreadsheetApp.openById(RECON_SPREADSHEET_ID);
+  let reconSheet = reconSS.getSheetByName(RECON_SHEET_NAME);
+  if (!reconSheet) {
+    reconSheet = reconSS.insertSheet(RECON_SHEET_NAME);
+  }
+  const cell = reconSheet.getRange('A1');
+  const currentValue = cell.getValue();
+  cell.setValue(currentValue);
+  Logger.log('authorizeReconAccess: Recon spreadsheet access confirmed.');
+}
+
 // Basic utilities
 /**
  * Rounds a number to the nearest 0.5 (half unit)
@@ -2896,6 +2908,8 @@ function onOpen() {
     // 4. Service Tools Submenu
     const serviceMenu = ui.createMenu('Service Tools');
     serviceMenu
+      .addItem('Authorize Recon Access', 'authorizeReconAccess')
+      .addSeparator()
       .addItem('Export Trades to Recon Log', 'menuExportTradesToReconLog')
       .addSeparator()
       .addItem(
