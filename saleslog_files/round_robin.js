@@ -215,12 +215,22 @@ function sanitizeForSheetCell_(value) {
 /** Lock-protected, non-racey append (uses lastRow+setValues under DocumentLock). */
 function appendAuditRowSafely_(auditSheet, rowValues) {
   const lock = LockService.getDocumentLock();
-  if (!lock.tryLock(10000)) return false;
   try {
-    const targetRow = Math.max(2, auditSheet.getLastRow() + 1);
+    lock.waitLock(10000);
+  } catch (e) {
+    return false;
+  }
+  try {
+    let targetRow = Math.max(2, auditSheet.getLastRow() + 1);
+    let existing = auditSheet.getRange(targetRow, 1).getValue();
+    while (existing !== '' && existing !== null && existing !== undefined) {
+      targetRow += 1;
+      existing = auditSheet.getRange(targetRow, 1).getValue();
+    }
     auditSheet
       .getRange(targetRow, 1, 1, rowValues.length)
       .setValues([rowValues]);
+    SpreadsheetApp.flush();
     return true;
   } finally {
     try {
@@ -1604,6 +1614,14 @@ function advanceRoundRobinPointerByName_(roster, auditInfo) {
  * Central Logger for all Round Robin events.
  * Enforces key=value | key=value format and sanitizes inputs.
  */
+function formatAuditTimestampMs_() {
+  const d = new Date();
+  const tz = Session.getScriptTimeZone();
+  const base = Utilities.formatDate(d, tz, 'yyyy-MM-dd HH:mm:ss');
+  const ms = String(d.getMilliseconds()).padStart(3, '0');
+  return `${base}.${ms}`;
+}
+
 function logRoundRobinEvent(action, detailsObj) {
   try {
     const ss = SpreadsheetApp.getActive();
@@ -1618,7 +1636,7 @@ function logRoundRobinEvent(action, detailsObj) {
       auditSheet.setFrozenRows(1);
     }
 
-    const now = new Date();
+    const now = formatAuditTimestampMs_();
 
     // Use system user unless specifically passed in details
     const userEmail = detailsObj && detailsObj.user ? detailsObj.user : safeUserEmail_();
