@@ -717,6 +717,30 @@ function menuExportTradesToReconLogDryRun() {
   }
 }
 
+function menuBackfillReconKeys() {
+  try {
+    const reconSS = SpreadsheetApp.openById(RECON_SPREADSHEET_ID);
+    const reconSheet = reconSS.getSheetByName(RECON_SHEET_NAME);
+    if (!reconSheet) {
+      throw new Error(`Missing destination sheet: ${RECON_SHEET_NAME}`);
+    }
+    const result = backfillReconSourceKeys_(reconSheet);
+    const updatedKeys = result && result.updatedKeys ? result.updatedKeys : 0;
+    const updatedImportedAt =
+      result && result.updatedImportedAt ? result.updatedImportedAt : 0;
+    toastInfo(
+      `Backfilled ${updatedKeys} keys. ImportedAt set: ${updatedImportedAt}.`,
+      'Recon Backfill'
+    );
+  } catch (e) {
+    logError('menuBackfillReconKeys', e);
+    alertError(
+      'Backfill failed. Check logs for details.',
+      'Recon Backfill Failed'
+    );
+  }
+}
+
 function authorizeReconAccess() {
   const reconSS = SpreadsheetApp.openById(RECON_SPREADSHEET_ID);
   let reconSheet = reconSS.getSheetByName(RECON_SHEET_NAME);
@@ -1191,6 +1215,97 @@ function collectMonthlyRowsWithDates_(monthlySheet) {
   return rowsWithDates;
 }
 
+function backfillReconSourceKeys_(reconSheet, options) {
+  if (!reconSheet) {
+    return {
+      updatedKeys: 0,
+      updatedImportedAt: 0,
+      totalRows: 0,
+      backfilledKeys: [],
+    };
+  }
+
+  const opts = options || {};
+  const dryRun = !!opts.dryRun;
+  let maxCols = reconSheet.getMaxColumns();
+  if (!dryRun && maxCols < 14) {
+    reconSheet.insertColumnsAfter(maxCols, 14 - maxCols);
+    maxCols = reconSheet.getMaxColumns();
+  }
+  if (maxCols < 13) {
+    return {
+      updatedKeys: 0,
+      updatedImportedAt: 0,
+      totalRows: 0,
+      backfilledKeys: [],
+    };
+  }
+
+  const lastRow = reconSheet.getLastRow();
+  if (lastRow < 2) {
+    return {
+      updatedKeys: 0,
+      updatedImportedAt: 0,
+      totalRows: 0,
+      backfilledKeys: [],
+    };
+  }
+
+  const numRows = lastRow - 1;
+  const rowValues = reconSheet.getRange(2, 1, numRows, 3).getValues();
+  const keyRangeWidth = maxCols >= 14 ? 2 : 1;
+  const keyValues = reconSheet.getRange(2, 13, numRows, keyRangeWidth).getValues();
+  const backfilledKeys = [];
+  let updatedKeys = 0;
+  let updatedImportedAt = 0;
+  const now = Utilities.formatDate(
+    new Date(),
+    Session.getScriptTimeZone(),
+    'yyyy-MM-dd HH:mm:ss'
+  );
+
+  for (let i = 0; i < numRows; i++) {
+    const dateDisplay = rowValues[i][0];
+    const stockCell = rowValues[i][1];
+    const existingKey = keyValues[i][0];
+    if (!dateDisplay || String(dateDisplay).trim() === '') continue;
+    if (!stockCell || String(stockCell).trim() === '') continue;
+    if (existingKey && String(existingKey).trim() !== '') continue;
+
+    const dateISO = normalizeDealDateIso_(dateDisplay);
+    if (!dateISO) continue;
+    const stock = String(stockCell || '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '');
+    if (!/^[A-Z0-9]{8}$/.test(stock)) continue;
+
+    const newKey = `${dateISO}|${stock}`;
+    backfilledKeys.push(newKey);
+    if (dryRun) continue;
+
+    keyValues[i][0] = newKey;
+    updatedKeys++;
+    if (keyRangeWidth > 1) {
+      const importedAt = keyValues[i][1];
+      if (!importedAt || String(importedAt).trim() === '') {
+        keyValues[i][1] = now;
+        updatedImportedAt++;
+      }
+    }
+  }
+
+  if (!dryRun && (updatedKeys || updatedImportedAt)) {
+    reconSheet.getRange(2, 13, numRows, keyRangeWidth).setValues(keyValues);
+  }
+
+  return {
+    updatedKeys: updatedKeys,
+    updatedImportedAt: updatedImportedAt,
+    totalRows: numRows,
+    backfilledKeys: backfilledKeys,
+  };
+}
+
 function appendTradesToRecon_(candidates, options) {
   const opts = options || {};
   const dryRun = !!opts.dryRun;
@@ -1227,6 +1342,13 @@ function appendTradesToRecon_(candidates, options) {
     }
   }
 
+  const backfillResult = backfillReconSourceKeys_(reconSheet, { dryRun: dryRun });
+  const backfilledKeys = new Set(
+    backfillResult && backfillResult.backfilledKeys
+      ? backfillResult.backfilledKeys
+      : []
+  );
+
   const lastRow = reconSheet.getLastRow();
   const existingKeys = new Set();
   if (lastRow >= 2 && reconSheet.getMaxColumns() >= 13) {
@@ -1234,6 +1356,11 @@ function appendTradesToRecon_(candidates, options) {
     keyValues.forEach((row) => {
       const key = String(row[0] || '').trim();
       if (key) existingKeys.add(key);
+    });
+  }
+  if (backfilledKeys.size) {
+    backfilledKeys.forEach((key) => {
+      existingKeys.add(key);
     });
   }
 
@@ -2955,7 +3082,13 @@ function onOpen() {
 
     menu.addSubMenu(analyticsMenu).addSeparator();
 
-    // 4. Service Tools Submenu
+    // 4. Recon Tools Submenu
+    const reconMenu = ui.createMenu('Recon Tools');
+    reconMenu.addItem('Backfill Recon Keys', 'menuBackfillReconKeys');
+
+    menu.addSubMenu(reconMenu).addSeparator();
+
+    // 5. Service Tools Submenu
     const serviceMenu = ui.createMenu('Service Tools');
     serviceMenu
       .addItem('Authorize Recon Access', 'authorizeReconAccess')
