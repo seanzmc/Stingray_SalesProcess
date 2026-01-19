@@ -1415,7 +1415,7 @@ function appendTradesToRecon_(candidates, options) {
       '',
       '',
       '',
-      '',
+      'Plant City',
       '',
       '',
       '',
