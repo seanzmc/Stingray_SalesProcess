@@ -76,6 +76,10 @@ const RANGES = {
     return getDynamicLeaderboardRanges().avg;
   },
 };
+const RECON_SPREADSHEET_ID = '1REAs1ySLZFAHylXWrvoG8N3cvj_iLlNiPVWArT3EEvw';
+const RECON_SHEET_NAME = 'RECON_IMPORT';
+const RECON_SOURCEKEY_HEADER = 'SourceKey';
+const RECON_IMPORTEDAT_HEADER = 'ImportedAt';
 
 // Default color constants (used as fallbacks if configuration not available)
 const DEFAULT_COLORS = {
@@ -673,6 +677,46 @@ function manualRefreshLeaderboard() {
   }
 }
 
+function menuExportTradesToReconLog() {
+  try {
+    const result = exportTradesToReconLog({ scanMonthly: true, dryRun: false });
+    if (result) {
+      toastInfo(
+        `Trades exported: ${result.appended}. Duplicates skipped: ${result.skippedDuplicates}.`,
+        'Recon Export'
+      );
+    }
+  } catch (e) {
+    logError('menuExportTradesToReconLog', e);
+    alertError(
+      'Trade export failed. Check logs for details.',
+      'Recon Export Failed'
+    );
+  }
+}
+
+function menuExportTradesToReconLogDryRun() {
+  try {
+    const result = exportTradesToReconLog({ scanMonthly: true, dryRun: true });
+    if (result) {
+      const wouldAppend = Math.max(
+        0,
+        (result.candidateTrades || 0) - (result.skippedDuplicates || 0)
+      );
+      toastInfo(
+        `Dry run: ${result.candidateTrades} candidates, ${result.skippedDuplicates} duplicates, ${wouldAppend} would append.`,
+        'Recon Export'
+      );
+    }
+  } catch (e) {
+    logError('menuExportTradesToReconLogDryRun', e);
+    alertError(
+      'Trade export dry run failed. Check logs for details.',
+      'Recon Export Failed'
+    );
+  }
+}
+
 // Basic utilities
 /**
  * Rounds a number to the nearest 0.5 (half unit)
@@ -926,6 +970,353 @@ function summarizeRows(rows) {
     }
   });
   return { newCount, usedCount, tradeCount };
+}
+
+function parseTradeStocks(cellValue) {
+  const raw = String(cellValue || '').trim();
+  if (!raw) return [];
+  if (raw.toUpperCase() === 'NT') return [];
+
+  const sanitized = raw
+    .toUpperCase()
+    .replace(/[^A-Z0-9,\/&;|\n+\s]/g, '');
+  const parts = sanitized.split(/[,\n\/&;|+\s]+/);
+  const unique = new Set();
+  parts.forEach((part) => {
+    const token = String(part || '').trim();
+    if (!token) return;
+    if (/^[A-Z0-9]{8}$/.test(token)) unique.add(token);
+  });
+  return Array.from(unique);
+}
+
+function normalizeDealDateIso_(dealDateDisplay) {
+  if (!dealDateDisplay) return '';
+  if (dealDateDisplay instanceof Date && !isNaN(dealDateDisplay.getTime())) {
+    return Utilities.formatDate(
+      dealDateDisplay,
+      Session.getScriptTimeZone(),
+      'yyyy-MM-dd'
+    );
+  }
+
+  const raw = String(dealDateDisplay || '').trim();
+  if (!raw) return '';
+
+  let year;
+  let month;
+  let day;
+  let match = raw.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if (match) {
+    year = Number(match[1]);
+    month = Number(match[2]);
+    day = Number(match[3]);
+  } else {
+    match = raw.match(/^(\d{1,2})[\/\-](\d{1,2})(?:[\/\-](\d{2,4}))?$/);
+    if (match) {
+      month = Number(match[1]);
+      day = Number(match[2]);
+      if (match[3]) {
+        year = Number(match[3]);
+        if (year < 100) year += 2000;
+      } else {
+        const now = new Date();
+        year = now.getFullYear();
+        const currentMonth = now.getMonth() + 1;
+        if (month > currentMonth) year -= 1;
+      }
+    }
+  }
+
+  if (year && month && day) {
+    const parsed = new Date(year, month - 1, day);
+    if (!isNaN(parsed.getTime())) {
+      return Utilities.formatDate(
+        parsed,
+        Session.getScriptTimeZone(),
+        'yyyy-MM-dd'
+      );
+    }
+  }
+
+  const fallback = new Date(raw);
+  if (!isNaN(fallback.getTime())) {
+    return Utilities.formatDate(
+      fallback,
+      Session.getScriptTimeZone(),
+      'yyyy-MM-dd'
+    );
+  }
+
+  return '';
+}
+
+function buildTradeExportCandidatesFromRow_(row, dealDateDisplay, side) {
+  const result = [];
+  const fiFlag =
+    row.length > side.fiIdx
+      ? String(row[side.fiIdx] || '')
+        .trim()
+        .toUpperCase()
+      : '';
+  if (!isValidFIFlag(fiFlag)) return result;
+
+  const tradeCell = row.length > side.tradeIdx ? row[side.tradeIdx] : '';
+  const tradeRaw = String(tradeCell || '').trim();
+  if (!tradeRaw || tradeRaw.toUpperCase() === 'NT') return result;
+
+  const stocks = parseTradeStocks(tradeRaw);
+  if (!stocks.length) return result;
+
+  const dateISO = normalizeDealDateIso_(dealDateDisplay);
+  if (!dateISO) return result;
+
+  const salesperson =
+    row.length > side.salesIdx ? String(row[side.salesIdx] || '').trim() : '';
+  stocks.forEach((stock) => {
+    result.push({
+      dateISO: dateISO,
+      dateDisplay: String(dealDateDisplay || '').trim(),
+      stock: stock,
+      salesperson: salesperson,
+      key: `${dateISO}|${stock}`,
+    });
+  });
+  return result;
+}
+
+function rowHasSalesActivity_(row) {
+  if (!row || !row.length) return false;
+  const hasNewActivity =
+    row.length > 1 &&
+    row
+      .slice(1, Math.min(7, row.length))
+      .some((val) => val && String(val).trim() !== '');
+  const hasUsedActivity =
+    row.length > 8 &&
+    row
+      .slice(8, Math.min(14, row.length))
+      .some((val) => val && String(val).trim() !== '');
+  return hasNewActivity || hasUsedActivity;
+}
+
+function sideHasActivity_(row, side) {
+  if (!row || !row.length) return false;
+  const endIdx = Math.min(side.dataEndIdx, row.length);
+  if (endIdx <= side.dataStartIdx) return false;
+  return row
+    .slice(side.dataStartIdx, endIdx)
+    .some((val) => val && String(val).trim() !== '');
+}
+
+function collectMonthlyRowsWithDates_(monthlySheet) {
+  const lastRowMonthly = monthlySheet.getLastRow();
+  const maxColsMonthly = monthlySheet.getMaxColumns();
+  if (lastRowMonthly < 2) return [];
+
+  const allMonthlyContent = monthlySheet
+    .getRange(1, 1, lastRowMonthly, maxColsMonthly)
+    .getValues();
+  const mergedRanges = monthlySheet
+    .getRange(1, 1, lastRowMonthly, 1)
+    .getMergedRanges();
+  const dateHeaderRows = mergedRanges
+    .filter(
+      (mr) => mr.getRow() > 0 && mr.getColumn() === 1 && mr.getWidth() >= 14
+    )
+    .map((mr) => mr.getRow())
+    .sort((a, b) => a - b);
+
+  const rowsWithDates = [];
+  if (!dateHeaderRows.length) {
+    Logger.log(
+      'exportTradesToReconLog: No distinct date headers found in MONTHLY.'
+    );
+    return rowsWithDates;
+  }
+
+  for (let i = 0; i < dateHeaderRows.length; i++) {
+    const headerRow = dateHeaderRows[i];
+    const headerValue = allMonthlyContent[headerRow - 1]
+      ? allMonthlyContent[headerRow - 1][0]
+      : '';
+    const dateDisplay = String(headerValue || '').trim();
+    const startRow = headerRow + 1;
+    const endRow =
+      i + 1 < dateHeaderRows.length
+        ? dateHeaderRows[i + 1] - 1
+        : lastRowMonthly;
+
+    for (let rowNum = startRow; rowNum <= endRow; rowNum++) {
+      const rowValues = allMonthlyContent[rowNum - 1];
+      if (!rowHasSalesActivity_(rowValues)) continue;
+      rowsWithDates.push({ row: rowValues, dateDisplay: dateDisplay });
+    }
+  }
+
+  return rowsWithDates;
+}
+
+function appendTradesToRecon_(candidates, options) {
+  const opts = options || {};
+  const dryRun = !!opts.dryRun;
+  if (!candidates || !candidates.length) {
+    return { appended: 0, skippedDuplicates: 0, totalCandidates: 0 };
+  }
+
+  const reconSS = SpreadsheetApp.openById(RECON_SPREADSHEET_ID);
+  const reconSheet = reconSS.getSheetByName(RECON_SHEET_NAME);
+  if (!reconSheet) {
+    throw new Error(`Missing destination sheet: ${RECON_SHEET_NAME}`);
+  }
+
+  const maxCols = reconSheet.getMaxColumns();
+  if (!dryRun && maxCols < 14) {
+    reconSheet.insertColumnsAfter(maxCols, 14 - maxCols);
+  }
+
+  if (!dryRun && reconSheet.getMaxColumns() >= 14) {
+    const headerRange = reconSheet.getRange(1, 13, 1, 2);
+    const headerValues = headerRange.getValues();
+    const headerRow = headerValues[0] || [];
+    if (
+      headerRow[0] !== RECON_SOURCEKEY_HEADER ||
+      headerRow[1] !== RECON_IMPORTEDAT_HEADER
+    ) {
+      headerRange.setValues([[RECON_SOURCEKEY_HEADER, RECON_IMPORTEDAT_HEADER]]);
+    }
+  }
+
+  const lastRow = reconSheet.getLastRow();
+  const existingKeys = new Set();
+  if (lastRow >= 2 && reconSheet.getMaxColumns() >= 13) {
+    const keyValues = reconSheet.getRange(2, 13, lastRow - 1, 1).getValues();
+    keyValues.forEach((row) => {
+      const key = String(row[0] || '').trim();
+      if (key) existingKeys.add(key);
+    });
+  }
+
+  const rowsToAppend = [];
+  let skippedDuplicates = 0;
+  const importedAt = Utilities.formatDate(
+    new Date(),
+    Session.getScriptTimeZone(),
+    'yyyy-MM-dd HH:mm:ss'
+  );
+
+  candidates.forEach((candidate) => {
+    const key = candidate && candidate.key ? String(candidate.key).trim() : '';
+    if (!key || existingKeys.has(key)) {
+      skippedDuplicates++;
+      return;
+    }
+    existingKeys.add(key);
+    rowsToAppend.push([
+      candidate.dateDisplay || '',
+      candidate.stock || '',
+      candidate.salesperson || '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      key,
+      importedAt,
+    ]);
+  });
+
+  if (rowsToAppend.length && !dryRun) {
+    const appendRow = Math.max(2, reconSheet.getLastRow() + 1);
+    reconSheet.getRange(appendRow, 1, rowsToAppend.length, 14).setValues(rowsToAppend);
+    try {
+      reconSheet.hideColumns(13, 2);
+    } catch (_) {
+      // Ignore if hiding is not permitted.
+    }
+  }
+
+  return {
+    appended: rowsToAppend.length,
+    skippedDuplicates: skippedDuplicates,
+    totalCandidates: candidates.length,
+  };
+}
+
+function exportTradesToReconLog(options) {
+  const opts = options || {};
+  const dryRun = !!opts.dryRun;
+  const sideDefs = [
+    { fiIdx: 2, tradeIdx: 5, salesIdx: 6, dataStartIdx: 1, dataEndIdx: 7 },
+    { fiIdx: 9, tradeIdx: 12, salesIdx: 13, dataStartIdx: 8, dataEndIdx: 14 },
+  ];
+
+  let rowsWithDates = [];
+  if (opts.rows && opts.dealDateDisplay) {
+    rowsWithDates = (opts.rows || []).map((row) => ({
+      row: row,
+      dateDisplay: opts.dealDateDisplay,
+    }));
+  } else if (opts.scanMonthly) {
+    const sheets = getSheets();
+    rowsWithDates = collectMonthlyRowsWithDates_(sheets.monthly);
+  } else {
+    Logger.log(
+      'exportTradesToReconLog: No rows provided and scanMonthly not set.'
+    );
+    return null;
+  }
+
+  let scannedRows = 0;
+  let candidateTrades = 0;
+  let skippedInvalid = 0;
+  const candidates = [];
+
+  rowsWithDates.forEach((entry) => {
+    const row = entry.row || [];
+    const dealDateDisplay = entry.dateDisplay;
+    if (!rowHasSalesActivity_(row)) return;
+    scannedRows++;
+    sideDefs.forEach((side) => {
+      if (!sideHasActivity_(row, side)) return;
+      const sideCandidates = buildTradeExportCandidatesFromRow_(
+        row,
+        dealDateDisplay,
+        side
+      );
+      if (sideCandidates.length) {
+        candidateTrades += sideCandidates.length;
+        candidates.push(...sideCandidates);
+      } else {
+        skippedInvalid++;
+      }
+    });
+  });
+
+  const appendResult = appendTradesToRecon_(candidates, { dryRun: dryRun });
+  Logger.log(
+    [
+      'exportTradesToReconLog summary:',
+      `scanned rows: ${scannedRows}`,
+      `candidate trades: ${candidateTrades}`,
+      `appended: ${appendResult.appended || 0}`,
+      `skipped duplicates: ${appendResult.skippedDuplicates || 0}`,
+      `skipped invalid/not delivered/no trade: ${skippedInvalid}`,
+    ].join(' ')
+  );
+
+  return {
+    scannedRows: scannedRows,
+    candidateTrades: candidateTrades,
+    appended: appendResult.appended || 0,
+    skippedDuplicates: appendResult.skippedDuplicates || 0,
+    skippedInvalid: skippedInvalid,
+    dryRun: dryRun,
+  };
 }
 
 /**
@@ -1594,6 +1985,19 @@ function processDaily() {
         rowCount: rowsToLogToMonthly.length,
         rows: rowsToLogToMonthly,
       });
+
+      try {
+        exportTradesToReconLog({
+          rows: rowsToLogToMonthly,
+          dealDateDisplay: dateStr,
+          dryRun: false,
+        });
+      } catch (e) {
+        logWarning('processDaily', 'Trade export failed; continuing.', {
+          error: e && e.message ? e.message : String(e),
+        });
+        logError('exportTradesToReconLog', e, { phase: 'processDaily' });
+      }
 
       // Modify Column A
       rowsToLogToMonthly = rowsToLogToMonthly.map((row, index) => {
@@ -2487,7 +2891,19 @@ function onOpen() {
       .addSeparator()
       .addItem('Refresh Leaderboard', 'manualRefreshLeaderboard');
 
-    menu.addSubMenu(analyticsMenu);
+    menu.addSubMenu(analyticsMenu).addSeparator();
+
+    // 4. Service Tools Submenu
+    const serviceMenu = ui.createMenu('Service Tools');
+    serviceMenu
+      .addItem('Export Trades to Recon Log', 'menuExportTradesToReconLog')
+      .addSeparator()
+      .addItem(
+        'Dry Run: Export Trades to Recon Log',
+        'menuExportTradesToReconLogDryRun'
+      );
+
+    menu.addSubMenu(serviceMenu);
 
     menu.addToUi();
   } catch (e) {
