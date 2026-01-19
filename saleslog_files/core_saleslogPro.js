@@ -1097,6 +1097,24 @@ function normalizeDealDateIso_(dealDateDisplay) {
   return '';
 }
 
+function formatReconDealDate_(dealDateDisplay, dateISO) {
+  const normalizedIso = dateISO || normalizeDealDateIso_(dealDateDisplay);
+  if (!normalizedIso) return '';
+  const parts = normalizedIso.split('-');
+  if (parts.length !== 3) return '';
+  const year = Number(parts[0]);
+  const month = Number(parts[1]);
+  const day = Number(parts[2]);
+  if (!year || !month || !day) return '';
+  const dateObj = new Date(year, month - 1, day);
+  if (isNaN(dateObj.getTime())) return '';
+  return Utilities.formatDate(
+    dateObj,
+    Session.getScriptTimeZone(),
+    'EEE MMM dd yyyy'
+  );
+}
+
 function buildTradeExportCandidatesFromRow_(row, dealDateDisplay, side) {
   const result = [];
   const fiFlag =
@@ -1385,8 +1403,12 @@ function appendTradesToRecon_(candidates, options) {
     existingKeys.add(key);
     if (isInvalid) invalidAppended++;
     const notes = candidate && candidate.notes ? String(candidate.notes) : '';
+    const reconDateDisplay =
+      formatReconDealDate_(candidate.dateDisplay, candidate.dateISO) ||
+      candidate.dateISO ||
+      '';
     rowsToAppend.push([
-      candidate.dateDisplay || '',
+      reconDateDisplay,
       candidate.stock || '',
       candidate.salesperson || '',
       '',
