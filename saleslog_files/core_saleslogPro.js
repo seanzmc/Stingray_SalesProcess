@@ -984,22 +984,32 @@ function summarizeRows(rows) {
   return { newCount, usedCount, tradeCount };
 }
 
-function parseTradeStocks(cellValue) {
+function parseTradeStocksDetailed(cellValue) {
   const raw = String(cellValue || '').trim();
-  if (!raw) return [];
-  if (raw.toUpperCase() === 'NT') return [];
+  if (!raw) return { valid: [], invalid: [] };
+  if (raw.toUpperCase() === 'NT') return { valid: [], invalid: [] };
 
-  const sanitized = raw
-    .toUpperCase()
-    .replace(/[^A-Z0-9,\/&;|\n+\s]/g, '');
-  const parts = sanitized.split(/[,\n\/&;|+\s]+/);
-  const unique = new Set();
-  parts.forEach((part) => {
-    const token = String(part || '').trim();
-    if (!token) return;
-    if (/^[A-Z0-9]{8}$/.test(token)) unique.add(token);
+  const normalized = raw.toUpperCase();
+  const cleaned = normalized.replace(/[^A-Z0-9]+/g, ' ');
+  const tokens = cleaned.match(/[A-Z0-9]+/g) || [];
+  const valid = new Set();
+  const invalid = new Set();
+
+  tokens.forEach((token) => {
+    const trimmed = String(token || '').trim();
+    if (!trimmed) return;
+    if (trimmed.length === 8) {
+      valid.add(trimmed);
+    } else if (trimmed.length >= 4 && trimmed.length <= 12) {
+      invalid.add(trimmed);
+    }
   });
-  return Array.from(unique);
+
+  return { valid: Array.from(valid), invalid: Array.from(invalid) };
+}
+
+function parseTradeStocks(cellValue) {
+  return parseTradeStocksDetailed(cellValue).valid;
 }
 
 function normalizeDealDateIso_(dealDateDisplay) {
@@ -1077,21 +1087,33 @@ function buildTradeExportCandidatesFromRow_(row, dealDateDisplay, side) {
   const tradeRaw = String(tradeCell || '').trim();
   if (!tradeRaw || tradeRaw.toUpperCase() === 'NT') return result;
 
-  const stocks = parseTradeStocks(tradeRaw);
-  if (!stocks.length) return result;
+  const parsedStocks = parseTradeStocksDetailed(tradeRaw);
+  if (!parsedStocks.valid.length && !parsedStocks.invalid.length) return result;
 
   const dateISO = normalizeDealDateIso_(dealDateDisplay);
   if (!dateISO) return result;
 
   const salesperson =
     row.length > side.salesIdx ? String(row[side.salesIdx] || '').trim() : '';
-  stocks.forEach((stock) => {
+  const dateDisplay = String(dealDateDisplay || '').trim();
+  parsedStocks.valid.forEach((stock) => {
     result.push({
       dateISO: dateISO,
-      dateDisplay: String(dealDateDisplay || '').trim(),
+      dateDisplay: dateDisplay,
       stock: stock,
       salesperson: salesperson,
       key: `${dateISO}|${stock}`,
+    });
+  });
+  parsedStocks.invalid.forEach((token) => {
+    result.push({
+      dateISO: dateISO,
+      dateDisplay: dateDisplay,
+      stock: token,
+      salesperson: salesperson,
+      notes: `INVALID STOCK LENGTH: ${token}`,
+      key: `${dateISO}|INVALID|${token}`,
+      isInvalid: true,
     });
   });
   return result;
@@ -1173,7 +1195,13 @@ function appendTradesToRecon_(candidates, options) {
   const opts = options || {};
   const dryRun = !!opts.dryRun;
   if (!candidates || !candidates.length) {
-    return { appended: 0, skippedDuplicates: 0, totalCandidates: 0 };
+    return {
+      appended: 0,
+      skippedDuplicates: 0,
+      invalidAppended: 0,
+      invalidSkippedDuplicates: 0,
+      totalCandidates: 0,
+    };
   }
 
   const reconSS = SpreadsheetApp.openById(RECON_SPREADSHEET_ID);
@@ -1211,6 +1239,8 @@ function appendTradesToRecon_(candidates, options) {
 
   const rowsToAppend = [];
   let skippedDuplicates = 0;
+  let invalidSkippedDuplicates = 0;
+  let invalidAppended = 0;
   const importedAt = Utilities.formatDate(
     new Date(),
     Session.getScriptTimeZone(),
@@ -1219,11 +1249,15 @@ function appendTradesToRecon_(candidates, options) {
 
   candidates.forEach((candidate) => {
     const key = candidate && candidate.key ? String(candidate.key).trim() : '';
+    const isInvalid = !!(candidate && candidate.isInvalid);
     if (!key || existingKeys.has(key)) {
       skippedDuplicates++;
+      if (isInvalid) invalidSkippedDuplicates++;
       return;
     }
     existingKeys.add(key);
+    if (isInvalid) invalidAppended++;
+    const notes = candidate && candidate.notes ? String(candidate.notes) : '';
     rowsToAppend.push([
       candidate.dateDisplay || '',
       candidate.stock || '',
@@ -1236,7 +1270,7 @@ function appendTradesToRecon_(candidates, options) {
       '',
       '',
       '',
-      '',
+      notes,
       key,
       importedAt,
     ]);
@@ -1255,6 +1289,8 @@ function appendTradesToRecon_(candidates, options) {
   return {
     appended: rowsToAppend.length,
     skippedDuplicates: skippedDuplicates,
+    invalidAppended: invalidAppended,
+    invalidSkippedDuplicates: invalidSkippedDuplicates,
     totalCandidates: candidates.length,
   };
 }
@@ -1285,6 +1321,7 @@ function exportTradesToReconLog(options) {
 
   let scannedRows = 0;
   let candidateTrades = 0;
+  let invalidTokensFound = 0;
   let skippedInvalid = 0;
   const candidates = [];
 
@@ -1301,7 +1338,12 @@ function exportTradesToReconLog(options) {
         side
       );
       if (sideCandidates.length) {
-        candidateTrades += sideCandidates.length;
+        const invalidCount = sideCandidates.reduce(
+          (count, candidate) => (candidate && candidate.isInvalid ? count + 1 : count),
+          0
+        );
+        candidateTrades += sideCandidates.length - invalidCount;
+        invalidTokensFound += invalidCount;
         candidates.push(...sideCandidates);
       } else {
         skippedInvalid++;
@@ -1315,8 +1357,13 @@ function exportTradesToReconLog(options) {
       'exportTradesToReconLog summary:',
       `scanned rows: ${scannedRows}`,
       `candidate trades: ${candidateTrades}`,
+      `invalid tokens found: ${invalidTokensFound}`,
       `appended: ${appendResult.appended || 0}`,
       `skipped duplicates: ${appendResult.skippedDuplicates || 0}`,
+      `invalid rows appended: ${appendResult.invalidAppended || 0}`,
+      `invalid rows skipped duplicates: ${
+        appendResult.invalidSkippedDuplicates || 0
+      }`,
       `skipped invalid/not delivered/no trade: ${skippedInvalid}`,
     ].join(' ')
   );
@@ -1324,8 +1371,11 @@ function exportTradesToReconLog(options) {
   return {
     scannedRows: scannedRows,
     candidateTrades: candidateTrades,
+    invalidTokensFound: invalidTokensFound,
     appended: appendResult.appended || 0,
     skippedDuplicates: appendResult.skippedDuplicates || 0,
+    invalidRowsAppended: appendResult.invalidAppended || 0,
+    invalidRowsSkippedDuplicates: appendResult.invalidSkippedDuplicates || 0,
     skippedInvalid: skippedInvalid,
     dryRun: dryRun,
   };
