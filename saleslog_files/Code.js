@@ -309,10 +309,16 @@ function computeDashboardDataFromSpreadsheet_(ss) {
     };
   });
 
-  const salesRepData = getSalesRepData_(spreadsheet, userData);
-  const salesStats = {};
-  salesRepData.reps.forEach((rep) => {
-    salesStats[rep.name] = {
+  const rosterData = getRosterData_(spreadsheet);
+  if (!rosterData.sheetFound) {
+    addWarning_(warnings, warningSet, `Roster sheet "${rosterData.sheetName}" not found.`);
+  } else {
+    sources.push({ sheet: rosterData.sheetName, rows: rosterData.rows });
+  }
+
+  const rosterStats = {};
+  rosterData.roster.forEach((rep) => {
+    rosterStats[rep.name] = {
       name: rep.name,
       active: rep.active,
       appointmentsAssigned: 0,
@@ -322,24 +328,39 @@ function computeDashboardDataFromSpreadsheet_(ss) {
 
   const apptsSheetName = getAppointmentsSheetName_();
   const apptsSheet = spreadsheet.getSheetByName(apptsSheetName);
+  const assignedCol = typeof COL_ASSIGNED !== 'undefined' ? COL_ASSIGNED : 5;
+  const modeCol = typeof COL_MODE !== 'undefined' ? COL_MODE : 6;
+  const assignedByCol = typeof COL_ASSIGNED_BY !== 'undefined' ? COL_ASSIGNED_BY : 7;
+  const dateCol = getAppointmentsCreatedColumnIndex_();
+  const dateRangeLabel = dateCol
+    ? `${columnIndexToA1Letter_(dateCol)}2:${columnIndexToA1Letter_(dateCol)}`
+    : '';
+  const assignedRangeLabel = assignedCol
+    ? `${columnIndexToA1Letter_(assignedCol)}2:${columnIndexToA1Letter_(assignedCol)}`
+    : '';
+  const modeRangeLabel = modeCol
+    ? `${columnIndexToA1Letter_(modeCol)}2:${columnIndexToA1Letter_(modeCol)}`
+    : '';
+  const assignedByRangeLabel = assignedByCol
+    ? `${columnIndexToA1Letter_(assignedByCol)}2:${columnIndexToA1Letter_(assignedByCol)}`
+    : '';
   if (!apptsSheet) {
     addWarning_(warnings, warningSet, `Appointments sheet "${apptsSheetName}" not found.`);
     sources.push({
       metric: 'appointmentsAssigned',
       sheet: apptsSheetName,
-      range: 'G2:G',
+      ranges: {
+        assigned: assignedRangeLabel,
+        mode: modeRangeLabel,
+        assignedBy: assignedByRangeLabel,
+      },
+      dateRange: dateRangeLabel,
       status: 'missing',
     });
   } else {
     const lastRow = apptsSheet.getLastRow();
     const rowCount = Math.max(0, lastRow - 1);
     sources.push({ sheet: apptsSheetName, rows: rowCount });
-    const assigneeCol = 7; // Column G per spec (APPOINTMENTS!G:G)
-    const dateCol = getAppointmentsDateColumnIndex_();
-    const dateRangeLabel = dateCol
-      ? `${columnIndexToA1Letter_(dateCol)}2:${columnIndexToA1Letter_(dateCol)}`
-      : '';
-    const assigneeRangeLabel = 'G2:G';
 
     let filterByToday = true;
     let dateValues = null;
@@ -358,7 +379,7 @@ function computeDashboardDataFromSpreadsheet_(ss) {
           addWarning_(
             warnings,
             warningSet,
-            `Appointments date column ${dateRangeLabel || dateCol} has no valid dates; counting all-time.`
+            `Appointments created timestamp column ${dateRangeLabel || dateCol} has no valid dates; counting all-time.`
           );
         }
       } else {
@@ -366,7 +387,7 @@ function computeDashboardDataFromSpreadsheet_(ss) {
         addWarning_(
           warnings,
           warningSet,
-          'Appointments date column not found; counting all-time.'
+          'Appointments created timestamp column not found; counting all-time.'
         );
       }
     }
@@ -374,29 +395,41 @@ function computeDashboardDataFromSpreadsheet_(ss) {
     sources.push({
       metric: 'appointmentsAssigned',
       sheet: apptsSheetName,
-      range: assigneeRangeLabel,
+      ranges: {
+        assigned: assignedRangeLabel,
+        mode: modeRangeLabel,
+        assignedBy: assignedByRangeLabel,
+      },
       dateRange: dateRangeLabel,
       window: filterByToday ? 'today' : 'all-time',
     });
 
     if (rowCount > 0) {
-      const assigneeRange = apptsSheet.getRange(2, assigneeCol, rowCount, 1).getValues();
-      for (let i = 0; i < assigneeRange.length; i++) {
+      const assignedRange = apptsSheet.getRange(2, assignedCol, rowCount, 1).getValues();
+      const modeRange = apptsSheet.getRange(2, modeCol, rowCount, 1).getValues();
+      const assignedByRange = apptsSheet.getRange(2, assignedByCol, rowCount, 1).getValues();
+      for (let i = 0; i < assignedRange.length; i++) {
         if (filterByToday) {
           const dateObj = parseSheetDate_(dateValues[i][0], tz);
           if (!isWithinWindow_(dateObj, windowStart, windowEnd)) continue;
         }
 
-        const assigneeRaw = assigneeRange[i][0];
-        const assigneeKey = normalizeName_(assigneeRaw).toLowerCase();
-        const bdcName = bdcNameMap[assigneeKey];
+        const assignedByRaw = assignedByRange[i][0];
+        const assignedByKey = normalizeName_(assignedByRaw).toLowerCase();
+        const bdcName = bdcNameMap[assignedByKey];
         if (bdcName && bdcStats[bdcName]) {
           bdcStats[bdcName].appointmentsAssigned++;
+          const modeRaw = String(modeRange[i][0] || '').trim().toLowerCase();
+          if (modeRaw === 'manual reassign') {
+            bdcStats[bdcName].appointmentsReassigned++;
+          }
         }
 
-        const salesName = salesRepData.nameMap[assigneeKey];
-        if (salesName && salesStats[salesName]) {
-          salesStats[salesName].appointmentsAssigned++;
+        const salesAssigneeRaw = assignedRange[i][0];
+        const salesAssigneeKey = normalizeName_(salesAssigneeRaw).toLowerCase();
+        const salesName = rosterData.nameMap[salesAssigneeKey];
+        if (salesName && rosterStats[salesName]) {
+          rosterStats[salesName].appointmentsAssigned++;
         }
       }
     }
@@ -413,14 +446,6 @@ function computeDashboardDataFromSpreadsheet_(ss) {
       sheet: auditSheetName,
       range: 'A2:C',
       action: actions.PHONE_LEAD,
-      window: 'today',
-      status: 'missing',
-    });
-    sources.push({
-      metric: 'appointmentsReassigned',
-      sheet: auditSheetName,
-      range: 'A2:E',
-      action: actions.REASSIGNMENT,
       window: 'today',
       status: 'missing',
     });
@@ -444,20 +469,12 @@ function computeDashboardDataFromSpreadsheet_(ss) {
       window: 'today',
     });
     sources.push({
-      metric: 'appointmentsReassigned',
-      sheet: auditSheetName,
-      range: 'A2:E',
-      action: actions.REASSIGNMENT,
-      window: 'today',
-      note: 'Includes Manual Override with old/new assignee.',
-    });
-    sources.push({
       metric: 'appointmentsReassignedFrom',
       sheet: auditSheetName,
       range: 'A2:E',
       action: actions.REASSIGNMENT,
       window: 'today',
-      note: 'Uses details.from/oldAssignee or reference fallback.',
+      note: 'Uses reassignment/manual override details.from/oldAssignee or reference fallback.',
     });
 
     if (auditRowCount > 0) {
@@ -509,15 +526,14 @@ function computeDashboardDataFromSpreadsheet_(ss) {
           }
           const fromNameRaw = getReassignmentFromName_(details, referenceRaw);
           if (fromNameRaw) {
-            const resolvedFrom = resolveNameAlias_(fromNameRaw, userData.aliasToName) || fromNameRaw;
-            const fromKey = normalizeName_(resolvedFrom).toLowerCase();
-            const salesName = salesRepData.nameMap[fromKey];
+            const fromKey = normalizeName_(fromNameRaw).toLowerCase();
+            const salesName = rosterData.nameMap[fromKey];
             if (
               salesName &&
-              salesStats[salesName] &&
-              salesStats[salesName].appointmentsReassignedFrom !== null
+              rosterStats[salesName] &&
+              rosterStats[salesName].appointmentsReassignedFrom !== null
             ) {
-              salesStats[salesName].appointmentsReassignedFrom++;
+              rosterStats[salesName].appointmentsReassignedFrom++;
             }
           } else {
             reassignFromUnknown = true;
@@ -527,9 +543,6 @@ function computeDashboardDataFromSpreadsheet_(ss) {
         if (bdcName && bdcStats[bdcName]) {
           if (isPhoneLeadAction) {
             bdcStats[bdcName].phoneLeadsAssigned++;
-          }
-          if (isReassignmentAction || isManualOverrideAssignment) {
-            bdcStats[bdcName].appointmentsReassigned++;
           }
         }
       }
@@ -550,9 +563,9 @@ function computeDashboardDataFromSpreadsheet_(ss) {
       warningSet,
       'Need appointmentId and structured from/to in audit details.'
     );
-    salesRepData.reps.forEach((rep) => {
-      if (salesStats[rep.name]) {
-        salesStats[rep.name].appointmentsReassignedFrom = null;
+    rosterData.roster.forEach((rep) => {
+      if (rosterStats[rep.name]) {
+        rosterStats[rep.name].appointmentsReassignedFrom = null;
       }
     });
   }
@@ -592,7 +605,7 @@ function computeDashboardDataFromSpreadsheet_(ss) {
     },
     groupTotals: groupTotals,
     bdcReps: bdcReps,
-    salesRoster: salesRepData.reps.map((rep) => salesStats[rep.name]),
+    salesRoster: rosterData.roster.map((rep) => rosterStats[rep.name]),
     debug: { warnings: warnings, sources: sources },
   };
 }
@@ -622,9 +635,9 @@ function getRosterSheetName_() {
   return 'RR_ROSTER';
 }
 
-function getAppointmentsDateColumnIndex_() {
-  if (typeof COL_APPT_DT !== 'undefined') return COL_APPT_DT;
-  return 2;
+function getAppointmentsCreatedColumnIndex_() {
+  if (typeof COL_CREATED_TS !== 'undefined') return COL_CREATED_TS;
+  return 1;
 }
 
 function columnIndexToA1Letter_(index) {
@@ -821,12 +834,13 @@ function getRosterData_(ss) {
   const seen = new Set();
 
   data.forEach((row) => {
-    const name = String(row[0] || '').trim();
+    const name = normalizeName_(row[0]);
     if (!name) return;
     const key = name.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
-    result.roster.push({ name: name, active: row[1] === true });
+    const active = row[1] === true && row[2] === true;
+    result.roster.push({ name: name, active: active });
     result.nameMap[key] = name;
   });
 
