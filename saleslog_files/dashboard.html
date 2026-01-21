@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Live Round Robin Dashboard</title>
+  <title>BDC Live Dashboard</title>
 
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
@@ -33,7 +33,7 @@
       <div class="flex items-center gap-3">
         <div class="w-2 h-8 bg-indigo-500 rounded-full"></div>
         <div>
-          <h1 class="text-xl font-bold text-white tracking-wide">ROUND ROBIN <span class="text-indigo-400">LIVE</span></h1>
+          <h1 class="text-xl font-bold text-white tracking-wide">BDC Live Dashboard</h1>
         </div>
       </div>
       <div class="text-right">
@@ -45,113 +45,180 @@
     <!-- METRICS CARDS -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
       <div class="glass-panel rounded-xl p-4 border-l-4 border-emerald-500">
-        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">Total Leads Today</div>
-        <div class="text-3xl font-bold text-white mt-1">{{ stats.totalAssignments }}</div>
+        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">Total Appointments Assigned Today</div>
+        <div class="text-3xl font-bold text-white mt-1">{{ groupTotals.bdc.appointmentsAssigned }}</div>
       </div>
 
       <div class="glass-panel rounded-xl p-4 border-l-4 border-amber-500">
-        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">Manual Overrides</div>
-        <div class="text-3xl font-bold text-white mt-1">{{ stats.manualOverrides }}</div>
+        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">Total Phone Leads Assigned Today</div>
+        <div class="text-3xl font-bold text-white mt-1">{{ groupTotals.bdc.phoneLeadsAssigned }}</div>
       </div>
 
-      <div class="glass-panel rounded-xl p-4 border-l-4 border-blue-500">
-        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">Active Actors</div>
-        <div class="text-3xl font-bold text-white mt-1">{{ stats.activeUsersCount }}</div>
+      <div v-if="hasReassignments" class="glass-panel rounded-xl p-4 border-l-4 border-blue-500">
+        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">Total Reassignments Today</div>
+        <div class="text-3xl font-bold text-white mt-1">{{ groupTotals.bdc.appointmentsReassigned }}</div>
       </div>
     </div>
 
     <!-- MAIN CONTENT -->
     <div class="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-4 min-h-0">
 
-      <!-- LEADERBOARD -->
+      <!-- BDC REP ACTIVITY -->
       <div class="glass-panel rounded-xl flex flex-col overflow-hidden">
         <div class="p-4 bg-slate-800/50 border-b border-white/5 font-semibold text-white flex justify-between items-center">
-          <span>🏆 Leaderboard</span>
+          <span>BDC Rep Activity</span>
+          <span class="text-xs text-slate-500">Sorted by Appointments</span>
         </div>
         <div class="flex-1 overflow-y-auto scrollbar-thin p-2">
           <table class="w-full text-left border-collapse">
             <thead class="bg-slate-800/50 text-xs uppercase text-slate-400 sticky top-0">
               <tr>
                 <th class="p-3 w-16 text-center">Rank</th>
-                <th class="p-3">Name</th>
-                <th class="p-3 w-24 text-right">Count</th>
+                <th class="p-3">Rep Name</th>
+                <th class="p-3 w-28 text-right">Appointments</th>
+                <th class="p-3 w-24 text-right">Reassigned</th>
+                <th class="p-3 w-24 text-right">Phone Leads</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="(item, idx) in leaderboard" :key="item.name" class="border-b border-slate-700/50 hover:bg-white/5 transition">
+              <tr v-for="(item, idx) in bdcRows" :key="item.name" class="border-b border-slate-700/50 hover:bg-white/5 transition">
                 <td class="p-3 text-center font-mono text-slate-500">
-                  <span v-if="idx===0 && item.count > 0">🥇</span>
-                  <span v-else-if="idx===1 && item.count > 0">🥈</span>
-                  <span v-else-if="idx===2 && item.count > 0">🥉</span>
+                  <span v-if="idx===0 && item.appointmentsAssigned > 0">🥇</span>
+                  <span v-else-if="idx===1 && item.appointmentsAssigned > 0">🥈</span>
+                  <span v-else-if="idx===2 && item.appointmentsAssigned > 0">🥉</span>
                   <span v-else>{{ idx + 1 }}</span>
                 </td>
                 <td class="p-3 font-medium text-slate-200">{{ item.name }}</td>
-                <td class="p-3 text-right">
-                   <!-- Highlight Logic: Green if Top, Red if Low (but only if counts exist) -->
-                   <span class="px-2 py-1 rounded text-xs font-bold"
-                         :class="getBadgeClass(idx, item.count)">
-                     {{ item.count }}
-                   </span>
-                </td>
+                <td class="p-3 text-right font-mono">{{ item.appointmentsAssigned }}</td>
+                <td class="p-3 text-right font-mono">{{ item.appointmentsReassigned }}</td>
+                <td class="p-3 text-right font-mono">{{ item.phoneLeadsAssigned }}</td>
               </tr>
-              <tr v-if="leaderboard.length === 0">
-                <td colspan="3" class="p-8 text-center text-slate-500 italic">No data available</td>
+              <tr v-if="bdcRows.length === 0">
+                <td colspan="5" class="p-8 text-center text-slate-500 italic">No data available</td>
               </tr>
             </tbody>
           </table>
         </div>
       </div>
 
-      <!-- ACTIVITY FEED -->
+      <!-- SALES ROSTER -->
       <div class="glass-panel rounded-xl flex flex-col overflow-hidden">
-        <div class="p-4 bg-slate-800/50 border-b border-white/5 font-semibold text-white">
-          <span>⚡ Activity Feed</span>
+        <div class="p-4 bg-slate-800/50 border-b border-white/5 font-semibold text-white flex justify-between items-center">
+          <span>Sales Roster</span>
+          <span class="text-xs text-slate-500">Reassigned From = moved off rep</span>
         </div>
-        <div class="flex-1 overflow-y-auto scrollbar-thin p-3 space-y-2">
-          <div v-for="(log, i) in feed" :key="i" class="p-3 rounded-lg bg-slate-800/50 hover:bg-slate-700/50 border border-slate-700 transition flex flex-col gap-2">
-
-            <div class="flex justify-between items-start">
-               <!-- Pill Badge -->
-               <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border"
-                     :class="getActionPillClass(log.action)">
-                 {{ log.action }}
-               </span>
-               <span class="text-xs text-slate-500 font-mono">{{ log.time }}</span>
-            </div>
-
-            <div class="text-sm font-semibold text-slate-300">
-              {{ log.actor }}
-            </div>
-
-            <div class="flex flex-wrap gap-2">
-               <template v-for="(val, key) in log.details" :key="key">
-                 <span v-if="key !== 'raw'"
-                       class="inline-flex items-center px-2 py-1 rounded text-xs border border-slate-600/50 bg-slate-700/30 text-slate-300">
-                   <span class="opacity-50 uppercase mr-1 text-[10px] tracking-wide">{{ key }}:</span>
-                   <span class="font-medium">{{ val }}</span>
-                 </span>
-               </template>
-            </div>
-
-          </div>
-          <div v-if="feed.length === 0" class="p-8 text-center text-slate-500 italic">No recent activity</div>
+        <div class="flex-1 overflow-y-auto scrollbar-thin p-2">
+          <table class="w-full text-left border-collapse">
+            <thead class="bg-slate-800/50 text-xs uppercase text-slate-400 sticky top-0">
+              <tr>
+                <th class="p-3">Rep Name</th>
+                <th class="p-3 w-20 text-center">Active</th>
+                <th class="p-3 w-28 text-right">Appointments</th>
+                <th class="p-3 w-32 text-right">Reassigned From</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="rep in salesRows" :key="rep.name" class="border-b border-slate-700/50 hover:bg-white/5 transition">
+                <td class="p-3 font-medium text-slate-200">{{ rep.name }}</td>
+                <td class="p-3 text-center">
+                  <span class="inline-flex items-center gap-1 text-xs font-semibold"
+                        :class="rep.active ? 'text-emerald-400' : 'text-slate-500'">
+                    <span class="w-1.5 h-1.5 rounded-full"
+                          :class="rep.active ? 'bg-emerald-400' : 'bg-slate-500'"></span>
+                    {{ rep.active ? 'Yes' : 'No' }}
+                  </span>
+                </td>
+                <td class="p-3 text-right font-mono">{{ rep.appointmentsAssigned }}</td>
+                <td class="p-3 text-right font-mono">
+                  <span v-if="rep.appointmentsReassignedFrom === null" class="text-slate-500">N/A</span>
+                  <span v-else>{{ rep.appointmentsReassignedFrom }}</span>
+                </td>
+              </tr>
+              <tr v-if="salesRows.length === 0">
+                <td colspan="4" class="p-8 text-center text-slate-500 italic">No sales reps available</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
     </div>
 
+    <!-- DEBUG -->
+    <div class="glass-panel rounded-xl p-4 text-sm">
+      <div class="flex items-center justify-between">
+        <div class="text-xs uppercase tracking-wider text-slate-400 font-bold">Debug</div>
+        <button class="text-xs px-2 py-1 rounded border border-slate-600/50 hover:bg-slate-700/40"
+                @click="showDebug = !showDebug">
+          {{ showDebug ? 'Hide' : 'Show' }}
+        </button>
+      </div>
+      <div v-if="showDebug" class="mt-3 space-y-3">
+        <div>
+          <div class="text-xs text-slate-500 uppercase tracking-wider mb-2">Warnings</div>
+          <ul v-if="debug.warnings.length" class="space-y-1 text-slate-300">
+            <li v-for="(warning, idx) in debug.warnings" :key="idx" class="text-xs font-mono">
+              {{ warning }}
+            </li>
+          </ul>
+          <div v-else class="text-xs text-slate-500 italic">No warnings</div>
+        </div>
+        <div>
+          <button class="text-xs px-2 py-1 rounded border border-slate-600/50 hover:bg-slate-700/40"
+                  @click="showDebugJson = !showDebugJson">
+            {{ showDebugJson ? 'Hide Payload' : 'Show Payload' }}
+          </button>
+          <pre v-if="showDebugJson" class="mt-2 text-xs text-slate-300 bg-slate-900/60 border border-slate-700/50 rounded p-3 overflow-x-auto">{{ debugJson }}</pre>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <script>
-    const { createApp, ref, onMounted } = Vue;
+    const { createApp, ref, computed, onMounted } = Vue;
 
     createApp({
       setup() {
-        const stats = ref({ totalAssignments: 0, manualOverrides: 0, activeUsersCount: 0 });
-        const leaderboard = ref([]);
-        const feed = ref([]);
+        const meta = ref({ generatedAt: '', timezone: '', window: { mode: 'today', startIso: '', endIso: '' } });
+        const groupTotals = ref({ bdc: { appointmentsAssigned: 0, phoneLeadsAssigned: 0, appointmentsReassigned: null } });
+        const bdcReps = ref([]);
+        const salesRoster = ref([]);
+        const debug = ref({ warnings: [], sources: [] });
+        const rawPayload = ref(null);
         const loading = ref(true);
         const lastUpdated = ref('');
+        const showDebug = ref(false);
+        const showDebugJson = ref(false);
+
+        const hasReassignments = computed(() => {
+          const val = groupTotals.value && groupTotals.value.bdc
+            ? groupTotals.value.bdc.appointmentsReassigned
+            : null;
+          return val !== null && val !== undefined;
+        });
+
+        const bdcRows = computed(() => {
+          const rows = Array.isArray(bdcReps.value) ? bdcReps.value.slice() : [];
+          return rows.sort((a, b) => {
+            const aVal = Number(a.appointmentsAssigned || 0);
+            const bVal = Number(b.appointmentsAssigned || 0);
+            if (bVal !== aVal) return bVal - aVal;
+            return String(a.name || '').localeCompare(String(b.name || ''));
+          });
+        });
+
+        const salesRows = computed(() => {
+          return Array.isArray(salesRoster.value) ? salesRoster.value : [];
+        });
+
+        const debugJson = computed(() => {
+          try {
+            return JSON.stringify(rawPayload.value, null, 2);
+          } catch (_) {
+            return '';
+          }
+        });
 
         const fetchData = () => {
           loading.value = true;
@@ -160,10 +227,13 @@
           google.script.run
             .withSuccessHandler(data => {
               if(!data.error) {
-                stats.value = data.stats;
-                leaderboard.value = data.leaderboard;
-                feed.value = data.feed;
-                lastUpdated.value = data.lastUpdated;
+                meta.value = data.meta || meta.value;
+                groupTotals.value = data.groupTotals || groupTotals.value;
+                bdcReps.value = Array.isArray(data.bdcReps) ? data.bdcReps : [];
+                salesRoster.value = Array.isArray(data.salesRoster) ? data.salesRoster : [];
+                debug.value = data.debug || { warnings: [], sources: [] };
+                rawPayload.value = data;
+                lastUpdated.value = data.meta && data.meta.generatedAt ? data.meta.generatedAt : '';
               }
               loading.value = false;
             })
@@ -174,33 +244,26 @@
             .getDashboardData();
         };
 
-        // Badge Logic for Leaderboard
-        const getBadgeClass = (index, count) => {
-           if (count === 0) return 'bg-slate-700 text-slate-400';
-
-           // If we have multiple items, verify range
-           const max = leaderboard.value.length > 0 ? leaderboard.value[0].count : 0;
-           const min = leaderboard.value.length > 0 ? leaderboard.value[leaderboard.value.length - 1].count : 0;
-           if (count === max && max > 0) return 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
-           if (count === min && max !== min) return 'bg-red-500/20 text-red-400 border border-red-500/30';
-           return 'bg-slate-700 text-slate-200';
-        };
-
-        // Pill Logic for Feed
-        const getActionPillClass = (action) => {
-          const a = String(action).toLowerCase();
-          if (a.includes('assign')) return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
-          if (a.includes('override') || a.includes('reassign')) return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
-          if (a.includes('phone') || a.includes('undo')) return 'bg-purple-500/10 text-purple-400 border-purple-500/20';
-          return 'bg-slate-600/20 text-slate-400 border-slate-600/30';
-        };
-
         onMounted(() => {
           fetchData();
           setInterval(fetchData, 30000);
         });
 
-        return { stats, leaderboard, feed, loading, lastUpdated, getBadgeClass, getActionPillClass };
+        return {
+          meta,
+          groupTotals,
+          bdcReps,
+          salesRoster,
+          debug,
+          loading,
+          lastUpdated,
+          showDebug,
+          showDebugJson,
+          hasReassignments,
+          bdcRows,
+          salesRows,
+          debugJson,
+        };
       }
     }).mount('#app');
   </script>
