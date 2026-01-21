@@ -29,7 +29,7 @@ function doGet(e) {
 
 /**
  * Main API called by the frontend to get fresh dashboard data.
- * Returns { stats: {}, feed: [], leaderboard: [] }
+ * Returns { meta, groupTotals, bdcReps, salesRoster, debug }
  *
  * Caching Strategy (Cache-Aside):
  * 1) Attempt to read a previously computed payload from CacheService.
@@ -95,7 +95,7 @@ function getDashboardData() {
 function getDashboardCacheKey_(ss) {
   // Include Spreadsheet ID for safety in case this code is reused in multiple containers.
   const spreadsheetId = ss && typeof ss.getId === 'function' ? ss.getId() : 'unknown';
-  return `rr_dashboard_data::${spreadsheetId}::v1`;
+  return `rr_dashboard_data::${spreadsheetId}::v2`;
 }
 
 /** Returns the cache TTL in seconds (configurable via Script Properties). */
@@ -243,21 +243,27 @@ function safeJsonParse_(str) {
 /** Shape validation to avoid returning corrupted/partial cache entries. */
 function isValidDashboardData_(obj) {
   if (!obj || typeof obj !== 'object') return false;
-  if (!obj.stats || typeof obj.stats !== 'object') return false;
-  if (!Array.isArray(obj.feed)) return false;
-  if (!Array.isArray(obj.leaderboard)) return false;
+  if (!obj.meta || typeof obj.meta !== 'object') return false;
+  if (!obj.groupTotals || typeof obj.groupTotals !== 'object') return false;
+  if (!obj.groupTotals.bdc || typeof obj.groupTotals.bdc !== 'object') return false;
+  if (!Array.isArray(obj.bdcReps)) return false;
+  if (!Array.isArray(obj.salesRoster)) return false;
+  if (!obj.debug || typeof obj.debug !== 'object') return false;
+  if (!Array.isArray(obj.debug.warnings)) return false;
+  if (!Array.isArray(obj.debug.sources)) return false;
   return true;
 }
 
 function getAuditActions_() {
   if (typeof AUDIT_ACTIONS !== 'undefined') return AUDIT_ACTIONS;
   return {
-    NEW_APPOINTMENT: 'Assignment',
+    NEW_APPOINTMENT: 'New Appointment',
     REASSIGNMENT: 'Reassignment',
     MANUAL_OVERRIDE: 'Manual Override',
     PHONE_LEAD: 'Phone Lead',
     UNDO: 'Undo',
     POINTER_RESET: 'Pointer Reset',
+    POINTER_MANUAL_EDIT: 'Pointer Manual Edit',
   };
 }
 
@@ -266,173 +272,411 @@ function getAuditActions_() {
  * Kept separate from caching for clarity and testability.
  */
 function computeDashboardDataFromSpreadsheet_(ss) {
+  const spreadsheet = ss || SpreadsheetApp.getActiveSpreadsheet();
   const actions = getAuditActions_();
+  const tz = Session.getScriptTimeZone();
+  const now = new Date();
+  const windowStart = new Date(now);
+  windowStart.setHours(0, 0, 0, 0);
+  const windowEnd = new Date(windowStart);
+  windowEnd.setDate(windowEnd.getDate() + 1);
 
-  // ---------------------------------------------------------
-  // STEP 1: USER MAP (Strict Sheet Access)
-  // Source: Sheet 'RR_USERS' (Direct access, no named ranges)
-  // ---------------------------------------------------------
-  const userMap = {};
-  const usersSheet = ss.getSheetByName('RR_USERS');
+  const warnings = [];
+  const warningSet = new Set();
+  const sources = [];
 
-  if (usersSheet) {
-    const data = usersSheet.getDataRange().getValues();
+  const userData = getUsersData_(spreadsheet);
+  if (!userData.sheetFound) {
+    addWarning_(warnings, warningSet, `Users sheet "${userData.sheetName}" not found.`);
+  } else {
+    sources.push({ sheet: userData.sheetName, rows: userData.rows });
+  }
 
-    // Loop through all rows (safe to check all; sheet is expected to be small).
-    for (let i = 0; i < data.length; i++) {
-      const row = data[i];
+  const bdcRepNames = getBdcRepNames_(spreadsheet, userData);
+  const bdcNameMap = {};
+  bdcRepNames.forEach((name) => {
+    bdcNameMap[name.toLowerCase()] = name;
+  });
 
-      // Safety: Ensure row has at least 4 columns (Indices 0-3)
-      if (row.length >= 4) {
-        const name = String(row[0]).trim(); // Column A (Index 0)
-        const email = String(row[3]).trim().toLowerCase(); // Column D (Index 3)
+  const bdcStats = {};
+  bdcRepNames.forEach((name) => {
+    bdcStats[name] = {
+      name,
+      appointmentsAssigned: 0,
+      appointmentsReassigned: 0,
+      phoneLeadsAssigned: 0,
+    };
+  });
 
-        if (email && name && email.includes('@')) {
-          userMap[email] = name;
+  const rosterData = getRosterData_(spreadsheet);
+  if (!rosterData.sheetFound) {
+    addWarning_(warnings, warningSet, `Roster sheet "${rosterData.sheetName}" not found.`);
+  } else {
+    sources.push({ sheet: rosterData.sheetName, rows: rosterData.rows });
+  }
+
+  const rosterStats = {};
+  rosterData.roster.forEach((rep) => {
+    rosterStats[rep.name] = {
+      name: rep.name,
+      active: rep.active,
+      appointmentsAssigned: 0,
+      appointmentsReassignedFrom: 0,
+    };
+  });
+
+  const apptsSheetName = getAppointmentsSheetName_();
+  const apptsSheet = spreadsheet.getSheetByName(apptsSheetName);
+  if (!apptsSheet) {
+    addWarning_(warnings, warningSet, `Appointments sheet "${apptsSheetName}" not found.`);
+  } else {
+    const lastRow = apptsSheet.getLastRow();
+    const rowCount = Math.max(0, lastRow - 1);
+    sources.push({ sheet: apptsSheetName, rows: rowCount });
+    if (rowCount > 0) {
+      const createdCol = typeof COL_CREATED_TS !== 'undefined' ? COL_CREATED_TS : 1;
+      const assignedCol = typeof COL_ASSIGNED !== 'undefined' ? COL_ASSIGNED : 5;
+      const assignedByCol = typeof COL_ASSIGNED_BY !== 'undefined' ? COL_ASSIGNED_BY : 7;
+      const maxCol = Math.max(createdCol, assignedCol, assignedByCol);
+      const data = apptsSheet.getRange(2, 1, rowCount, maxCol).getValues();
+
+      for (let i = 0; i < data.length; i++) {
+        const row = data[i];
+        const createdDate = parseSheetDate_(row[createdCol - 1], tz);
+        if (!isWithinWindow_(createdDate, windowStart, windowEnd)) continue;
+
+        const assignedByRaw = String(row[assignedByCol - 1] || '').trim();
+        const bdcName = resolveBdcName_(assignedByRaw, userData.aliasToName, bdcNameMap);
+        if (bdcName && bdcStats[bdcName]) {
+          bdcStats[bdcName].appointmentsAssigned++;
+        }
+
+        const assignedToRaw = String(row[assignedCol - 1] || '').trim();
+        const rosterName = resolveNameAlias_(assignedToRaw, rosterData.nameMap);
+        if (rosterName && rosterStats[rosterName]) {
+          rosterStats[rosterName].appointmentsAssigned++;
         }
       }
     }
   }
 
-  // ---------------------------------------------------------
-  // STEP 2: INITIALIZE LEADERBOARD (repStats)
-  // Source: RR_ROSTER (Col A=Name) - Initialize everyone to 0
-  // ---------------------------------------------------------
-  const repStats = {};
-  const rosterSheet = ss.getSheetByName('RR_ROSTER');
-  if (rosterSheet) {
-    const lastRow = rosterSheet.getLastRow();
-    if (lastRow > 1) {
-      const rosterData = rosterSheet.getRange(2, 1, lastRow - 1, 1).getValues();
-      rosterData.forEach((r) => {
-        const name = String(r[0]).trim();
-        if (name) {
-          repStats[name] = 0;
+  const auditSheetName = getAuditSheetName_();
+  const auditSheet = spreadsheet.getSheetByName(auditSheetName);
+  if (!auditSheet) {
+    addWarning_(warnings, warningSet, `Audit sheet "${auditSheetName}" not found.`);
+  } else {
+    const lastAuditRow = auditSheet.getLastRow();
+    const auditRowCount = Math.max(0, lastAuditRow - 1);
+    sources.push({ sheet: auditSheetName, rows: auditRowCount });
+    if (auditRowCount > 0) {
+      const MAX_ROWS = 2000;
+      let startRow = 2;
+      if (lastAuditRow > MAX_ROWS + 1) {
+        startRow = lastAuditRow - MAX_ROWS + 1;
+      }
+
+      const numRows = lastAuditRow - startRow + 1;
+      const logData = auditSheet.getRange(startRow, 1, numRows, 5).getValues();
+
+      for (let i = 0; i < logData.length; i++) {
+        const row = logData[i];
+        const ts = parseSheetDate_(row[0], tz);
+        if (!isWithinWindow_(ts, windowStart, windowEnd)) continue;
+
+        const actorRaw = String(row[1] || '').trim();
+        const actionRaw = String(row[2] || '').trim();
+        const detailsRaw = String(row[4] || '').trim();
+        const action = normalizeAuditActionForDashboard_(actionRaw);
+        const details = parseDetailsString_(detailsRaw);
+
+        if (actorRaw && userData.sheetFound) {
+          const actorName = resolveNameAlias_(actorRaw, userData.aliasToName);
+          if (!actorName) {
+            addWarning_(
+              warnings,
+              warningSet,
+              `Audit actor "${actorRaw}" not found in ${userData.sheetName} list.`
+            );
+          }
         }
-      });
+
+        const bdcName = resolveBdcName_(actorRaw, userData.aliasToName, bdcNameMap);
+        const isReassignmentAction = action === actions.REASSIGNMENT;
+        const isManualOverrideAssignment =
+          action === actions.MANUAL_OVERRIDE &&
+          (details.oldAssignee || details.newAssignee || details.assignee);
+
+        if (bdcName && bdcStats[bdcName]) {
+          if (action === actions.PHONE_LEAD) {
+            bdcStats[bdcName].phoneLeadsAssigned++;
+          }
+          if (isReassignmentAction || isManualOverrideAssignment) {
+            bdcStats[bdcName].appointmentsReassigned++;
+          }
+        }
+
+        if (isReassignmentAction || isManualOverrideAssignment) {
+          const oldAssignee = String(details.oldAssignee || '').trim();
+          if (oldAssignee) {
+            const rosterName = resolveNameAlias_(oldAssignee, rosterData.nameMap);
+            if (rosterName && rosterStats[rosterName]) {
+              rosterStats[rosterName].appointmentsReassignedFrom++;
+            }
+          }
+        }
+      }
     }
   }
 
-  // ---------------------------------------------------------
-  // STEP 3: FETCH & PROCESS LOGS
-  // ---------------------------------------------------------
-  const auditSheet = ss.getSheetByName('RR_AUDIT');
-  if (!auditSheet) {
-    return {
-      stats: { totalAssignments: 0, manualOverrides: 0, activeUsersCount: 0 },
-      feed: [],
-      leaderboard: [],
-      lastUpdated: new Date().toLocaleTimeString(),
-    };
-  }
-
-  const lastAuditRow = auditSheet.getLastRow();
-  const MAX_ROWS = 1000;
-  let startRow = 2;
-  if (lastAuditRow > MAX_ROWS) {
-    startRow = lastAuditRow - MAX_ROWS + 1;
-  }
-
-  let logData = [];
-  if (lastAuditRow >= 2) {
-    const numRows = lastAuditRow - startRow + 1;
-    // Col A=Timestamp, B=User, C=Action, D=Reference, E=Details
-    logData = auditSheet.getRange(startRow, 1, numRows, 5).getValues();
-  }
-
-  // Setup for aggregation
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const stats = {
-    totalAssignments: 0,
-    manualOverrides: 0,
-    activeUsersCount: 0,
+  const groupTotals = {
+    bdc: {
+      appointmentsAssigned: 0,
+      phoneLeadsAssigned: 0,
+    },
   };
 
-  const feed = [];
-  const activeActors = new Set();
-
-  // Process logs in reverse (Newest First)
-  for (let i = logData.length - 1; i >= 0; i--) {
-    const row = logData[i];
-    const ts = new Date(row[0]);
-    const userEmail = String(row[1]).trim().toLowerCase();
-    const action = String(row[2]);
-    const reference = String(row[3]);
-    const detailsRaw = String(row[4]);
-
-    const isToday = ts >= today;
-
-    // 1) Resolve Actor Name using USER_MAP (fallback if unknown)
-    const actorName = userMap[userEmail] || mapEmailFallback_(userEmail);
-
-    // 2) Parse Details
-    const details = parseDetailsString_(detailsRaw);
-
-    if (isToday) {
-      // Manual Actions
-      const lowerAction = action.toLowerCase();
-      if (
-        action === actions.REASSIGNMENT ||
-        action === actions.MANUAL_OVERRIDE ||
-        lowerAction.includes('reassign') ||
-        lowerAction.includes('override')
-      ) {
-        stats.manualOverrides++;
-      }
-
-      // Assignments & Leaderboard
-      if (action === actions.NEW_APPOINTMENT || action === 'Assignment') {
-        stats.totalAssignments++;
-        const assignee = details['assignee'];
-        if (assignee) {
-          if (repStats[assignee] === undefined) {
-            repStats[assignee] = 0;
-          }
-          repStats[assignee]++;
-        }
-      }
-
-      // Active Users (Actors)
-      if (userEmail) activeActors.add(userEmail);
+  bdcRepNames.forEach((name) => {
+    const rep = bdcStats[name];
+    if (rep) {
+      groupTotals.bdc.appointmentsAssigned += rep.appointmentsAssigned;
+      groupTotals.bdc.phoneLeadsAssigned += rep.phoneLeadsAssigned;
     }
+  });
 
-    // Feed Construction (Limit 50)
-    if (feed.length < 50) {
-      feed.push({
-        time: formatTime_(ts),
-        actor: actorName,
-        action: action,
-        details: details,
-        message: buildFeedMessage_(actorName, action, details, reference),
-        isToday: isToday,
-      });
-    }
-  }
-
-  // ---------------------------------------------------------
-  // STEP 4: RESULT OBJECT
-  // ---------------------------------------------------------
-  const leaderboard = Object.keys(repStats).map((name) => ({
-    name: name,
-    count: repStats[name],
-  }));
-
-  leaderboard.sort((a, b) => b.count - a.count);
-  stats.activeUsersCount = activeActors.size;
+  const startIso = Utilities.formatDate(windowStart, tz, 'yyyy-MM-dd');
 
   return {
-    stats: stats,
-    feed: feed,
-    leaderboard: leaderboard,
-    lastUpdated: new Date().toLocaleTimeString(),
+    meta: {
+      generatedAt: Utilities.formatDate(now, tz, 'yyyy-MM-dd HH:mm:ss'),
+      timezone: tz,
+      window: { mode: 'today', startIso: startIso, endIso: startIso },
+    },
+    groupTotals: groupTotals,
+    bdcReps: bdcRepNames.map((name) => bdcStats[name]),
+    salesRoster: rosterData.roster.map((rep) => rosterStats[rep.name]),
+    debug: { warnings: warnings, sources: sources },
   };
 }
 
 // -----------------------------------------------------------------------------
 // HELPERS
 // -----------------------------------------------------------------------------
+
+function getUsersSheetName_() {
+  if (typeof SHEET_USERS !== 'undefined') return SHEET_USERS;
+  return 'RR_USERS';
+}
+
+function getAuditSheetName_() {
+  if (typeof SHEET_AUDIT !== 'undefined') return SHEET_AUDIT;
+  return 'RR_AUDIT';
+}
+
+function getAppointmentsSheetName_() {
+  if (typeof SHEET_APPOINTMENTS !== 'undefined') return SHEET_APPOINTMENTS;
+  if (typeof SHEET_APPTS !== 'undefined') return SHEET_APPTS;
+  return 'APPOINTMENTS';
+}
+
+function getRosterSheetName_() {
+  if (typeof SHEET_ROSTER !== 'undefined') return SHEET_ROSTER;
+  return 'RR_ROSTER';
+}
+
+function addWarning_(warnings, warningSet, message) {
+  if (!message) return;
+  if (warningSet && warningSet.has(message)) return;
+  if (warningSet) warningSet.add(message);
+  warnings.push(message);
+}
+
+function resolveNameAlias_(raw, aliasMap) {
+  const key = String(raw || '').trim().toLowerCase();
+  if (!key) return '';
+  if (aliasMap && aliasMap[key]) return aliasMap[key];
+  return '';
+}
+
+function resolveBdcName_(raw, aliasMap, bdcNameMap) {
+  const rawName = String(raw || '').trim();
+  if (!rawName) return '';
+  const alias = resolveNameAlias_(rawName, aliasMap);
+  if (alias) {
+    const aliasKey = alias.toLowerCase();
+    if (bdcNameMap && bdcNameMap[aliasKey]) return bdcNameMap[aliasKey];
+  }
+  const rawKey = rawName.toLowerCase();
+  if (bdcNameMap && bdcNameMap[rawKey]) return bdcNameMap[rawKey];
+  return '';
+}
+
+function getUsersData_(ss) {
+  const sheetName = getUsersSheetName_();
+  const result = {
+    sheetName,
+    rows: 0,
+    sheetFound: false,
+    bdcNames: [],
+    allNames: [],
+    aliasToName: {},
+  };
+
+  const spreadsheet = ss || SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = spreadsheet.getSheetByName(sheetName);
+  if (!sheet) return result;
+
+  result.sheetFound = true;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return result;
+
+  result.rows = lastRow - 1;
+  const data = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
+  const bdcSet = new Set();
+  const allSet = new Set();
+
+  data.forEach((row) => {
+    const name = String(row[0] || '').trim();
+    const role = String(row[2] || '').trim().toLowerCase();
+    const auditName = String(row[4] || '').trim();
+    const displayName = auditName || name;
+
+    if (displayName) {
+      const key = displayName.toLowerCase();
+      if (!allSet.has(key)) {
+        result.allNames.push(displayName);
+        allSet.add(key);
+      }
+    }
+
+    if (name) {
+      result.aliasToName[name.toLowerCase()] = displayName;
+    }
+
+    if (auditName) {
+      result.aliasToName[auditName.toLowerCase()] = displayName;
+    }
+
+    if (displayName && role === 'bdc') {
+      const key = displayName.toLowerCase();
+      if (!bdcSet.has(key)) {
+        result.bdcNames.push(displayName);
+        bdcSet.add(key);
+      }
+    }
+  });
+
+  return result;
+}
+
+function getBdcRepNames_(ss, userData) {
+  const data = userData && Array.isArray(userData.bdcNames) ? userData : getUsersData_(ss);
+  return data.bdcNames.slice();
+}
+
+function getRosterData_(ss) {
+  const sheetName = getRosterSheetName_();
+  const result = {
+    sheetName,
+    rows: 0,
+    sheetFound: false,
+    roster: [],
+    nameMap: {},
+  };
+
+  const spreadsheet = ss || SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = spreadsheet.getSheetByName(sheetName);
+  if (!sheet) return result;
+
+  result.sheetFound = true;
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return result;
+
+  result.rows = lastRow - 1;
+  const data = sheet.getRange(2, 1, lastRow - 1, 3).getValues();
+  const seen = new Set();
+
+  data.forEach((row) => {
+    const name = String(row[0] || '').trim();
+    if (!name) return;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.roster.push({ name: name, active: row[1] === true });
+    result.nameMap[key] = name;
+  });
+
+  return result;
+}
+
+function parseSheetDate_(value, tz) {
+  if (value instanceof Date && !isNaN(value.getTime())) return value;
+
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  const normalized =
+    raw.indexOf('T') === -1 && raw.indexOf(' ') !== -1 ? raw.replace(' ', 'T') : raw;
+  const parsed = new Date(normalized);
+  if (!isNaN(parsed.getTime())) return parsed;
+
+  const zone = tz || Session.getScriptTimeZone();
+  try {
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/.test(raw)) {
+      return Utilities.parseDate(raw, zone, 'yyyy-MM-dd HH:mm:ss.SSS');
+    }
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)) {
+      return Utilities.parseDate(raw, zone, 'yyyy-MM-dd HH:mm:ss');
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      return Utilities.parseDate(raw, zone, 'yyyy-MM-dd');
+    }
+  } catch (_) {
+    // ignore parse errors and fall through
+  }
+
+  return null;
+}
+
+function isWithinWindow_(dateObj, windowStart, windowEnd) {
+  if (!(dateObj instanceof Date) || isNaN(dateObj.getTime())) return false;
+  return dateObj >= windowStart && dateObj < windowEnd;
+}
+
+function normalizeAuditActionForDashboard_(action) {
+  const raw = String(action || '').trim();
+  if (!raw) return '';
+
+  if (typeof normalizeAuditAction_ === 'function') {
+    const normalized = normalizeAuditAction_(raw);
+    return normalized || raw;
+  }
+
+  const lower = raw.toLowerCase();
+  const actions = getAuditActions_();
+  if (lower === 'assignment' || lower === 'new appointment' || lower === 'assigned' ||
+      lower === 'auto-assigned') {
+    return actions.NEW_APPOINTMENT || 'New Appointment';
+  }
+  if (lower === 'reassignment' || lower === 'reassigned') {
+    return actions.REASSIGNMENT || 'Reassignment';
+  }
+  if (lower === 'manual override' || lower.includes('override')) {
+    return actions.MANUAL_OVERRIDE || 'Manual Override';
+  }
+  if (lower === 'phone lead' || lower === 'phone up' || lower.includes('phone')) {
+    return actions.PHONE_LEAD || 'Phone Lead';
+  }
+  if (lower === 'undo') {
+    return actions.UNDO || 'Undo';
+  }
+  if (lower === 'pointer reset' || lower === 'reset pointer') {
+    return actions.POINTER_RESET || 'Pointer Reset';
+  }
+  if (lower === 'pointer manual edit' || lower === 'pointer_manual_edit') {
+    return actions.POINTER_MANUAL_EDIT || 'Pointer Manual Edit';
+  }
+  return raw;
+}
 
 /**
  * Parses "key=value | key2=value2" into an object.
