@@ -27,6 +27,9 @@ const COL_ASSIGNED = 5; // E
 const COL_MODE = 6; // F
 const COL_ASSIGNED_BY = 7; // G
 const COL_NOTES = 8; // H
+const COL_APPOINTMENT_ID = 9; // I
+
+const APPOINTMENT_ID_HEADER = 'AppointmentId';
 
 // RR_STATE cells
 // B2: Numeric next-up index (legacy pointer; still maintained for compatibility/UI).
@@ -130,6 +133,145 @@ function getCellValueFromRow_(rowValues, index) {
   const value = rowValues[index];
   if (value === null || value === undefined) return '';
   return String(value).trim();
+}
+
+function normalizeAppointmentCustomerPart_(value) {
+  const raw = String(value || '').toUpperCase();
+  const cleaned = raw.replace(/[^A-Z0-9]+/g, ' ').trim();
+  if (!cleaned) return '';
+  return cleaned.replace(/\s+/g, '');
+}
+
+function parseAppointmentDate_(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) return value;
+
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  const parsed = new Date(raw);
+  if (!isNaN(parsed.getTime())) return parsed;
+
+  const tz = Session.getScriptTimeZone();
+  try {
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/.test(raw)) {
+      return Utilities.parseDate(raw, tz, 'yyyy-MM-dd HH:mm:ss.SSS');
+    }
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(raw)) {
+      return Utilities.parseDate(raw, tz, 'yyyy-MM-dd HH:mm:ss');
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      return Utilities.parseDate(raw, tz, 'yyyy-MM-dd');
+    }
+  } catch (_) {
+    // ignore parse failures
+  }
+
+  return null;
+}
+
+function getAppointmentIdDateParts_(value) {
+  const date = parseAppointmentDate_(value);
+  if (!date) return { datePart: '', timePart: '' };
+  const tz = Session.getScriptTimeZone();
+  return {
+    datePart: Utilities.formatDate(date, tz, 'yyyyMMdd'),
+    timePart: Utilities.formatDate(date, tz, 'HHmm'),
+  };
+}
+
+function hashAppointmentIdSeed_(value) {
+  const raw = String(value || '');
+  const digest = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    raw,
+    Utilities.Charset.UTF_8
+  );
+  return digest.map((b) => ('0' + (b & 0xff).toString(16)).slice(-2)).join('');
+}
+
+function buildAppointmentId_(customer, apptDt, createdTs, rowNum) {
+  const custPart = normalizeAppointmentCustomerPart_(customer);
+  const parts = getAppointmentIdDateParts_(apptDt);
+  if (custPart && parts.datePart && parts.timePart) {
+    return `${custPart}-${parts.datePart}-${parts.timePart}`;
+  }
+
+  const createdPart =
+    createdTs instanceof Date && !isNaN(createdTs.getTime())
+      ? createdTs.getTime()
+      : String(createdTs || '');
+  const fallbackSeed = [custPart || '', rowNum || '', createdPart, String(apptDt || '')].join('|');
+  const hash = hashAppointmentIdSeed_(fallbackSeed).slice(0, 10);
+  return `APT-${hash}`;
+}
+
+function ensureUniqueAppointmentId_(baseId, existingIds, fallbackSeed) {
+  if (!existingIds || !existingIds.has(baseId)) return baseId;
+  const hash = hashAppointmentIdSeed_(fallbackSeed).slice(0, 6);
+  let candidate = `${baseId}-${hash}`;
+  let suffix = 1;
+  while (existingIds.has(candidate)) {
+    candidate = `${baseId}-${hash}${suffix}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+function ensureAppointmentIdColumn_(sheet) {
+  if (!sheet) throw new Error('Appointments sheet missing.');
+  const headerMap = getHeaderMap_(sheet);
+  const idx = findHeaderIndex_(headerMap, [
+    'AppointmentId',
+    'Appointment ID',
+    'Appt ID',
+  ]);
+  if (idx >= 0) return idx + 1;
+
+  const lastCol = Math.max(sheet.getLastColumn(), COL_NOTES);
+  sheet.insertColumnAfter(lastCol);
+  const idCol = lastCol + 1;
+  sheet.getRange(1, idCol).setValue(APPOINTMENT_ID_HEADER);
+  return idCol;
+}
+
+function ensureAppointmentIdForRow_(sheet, row, rowValues, idCol, existingIds) {
+  if (!sheet) return '';
+  const column = idCol || ensureAppointmentIdColumn_(sheet);
+  let currentId = '';
+
+  if (rowValues && column <= rowValues.length) {
+    currentId = String(rowValues[column - 1] || '').trim();
+  }
+
+  if (!currentId) {
+    currentId = String(sheet.getRange(row, column).getValue() || '').trim();
+  }
+
+  if (currentId) return currentId;
+
+  const values =
+    rowValues && rowValues.length >= COL_NOTES
+      ? rowValues
+      : sheet.getRange(row, 1, 1, COL_NOTES).getValues()[0];
+  const customer = values[COL_CUST_NAME - 1];
+  const apptDt = values[COL_APPT_DT - 1];
+  const createdTs = values[COL_CREATED_TS - 1];
+
+  const baseId = buildAppointmentId_(customer, apptDt, createdTs, row);
+  const fallbackSeed = [baseId, row].join('|');
+  const finalId = ensureUniqueAppointmentId_(baseId, existingIds, fallbackSeed);
+  sheet.getRange(row, column).setValue(finalId);
+  return finalId;
+}
+
+function buildReassignmentDetailsJson_(appointmentId, fromAssignee, toAssignee, reason) {
+  const payload = {
+    appointmentId: appointmentId || '',
+    fromAssignee: fromAssignee || '',
+    toAssignee: toAssignee || '',
+  };
+  if (reason) payload.reason = reason;
+  return JSON.stringify(payload);
 }
 
 function getAuditLogNameMap_() {
@@ -329,6 +471,7 @@ function handleAppointmentEdit(e) {
     const includesAssignedCol = COL_ASSIGNED >= startCol && COL_ASSIGNED <= endCol;
     const isSingleAssignedCell =
       numRows === 1 && numCols === 1 && startCol === COL_ASSIGNED;
+    const idCol = ensureAppointmentIdColumn_(appts);
 
     // CASE 1: MANUAL OVERRIDE (Column E changed)
     if (includesAssignedCol) {
@@ -339,13 +482,25 @@ function handleAppointmentEdit(e) {
           ? e.value
           : rowValues[COL_ASSIGNED - 1];
         const oldAssignee = isSingleAssignedCell ? e.oldValue : '(unknown)';
+        const appointmentId = ensureAppointmentIdForRow_(appts, row, rowValues, idCol);
+        const reason =
+          numRows > 1 || numCols > 1 ? 'Bulk edit in sheet' : 'User manual edit in sheet';
 
         logRoundRobinEvent(AUDIT_ACTIONS.MANUAL_OVERRIDE, {
           row: row,
           oldAssignee: oldAssignee || '(empty)',
           newAssignee: newAssignee || '(empty)',
-          reason: numRows > 1 || numCols > 1 ? 'Bulk edit in sheet' : 'User manual edit in sheet',
+          fromAssignee: oldAssignee || '',
+          toAssignee: newAssignee || '',
+          appointmentId: appointmentId,
+          reason: reason,
           user: user,
+          _detailsJson: buildReassignmentDetailsJson_(
+            appointmentId,
+            oldAssignee,
+            newAssignee,
+            reason
+          ),
         });
 
         // Update Mode to "Manual" if not already (idempotent, side-effect only)
@@ -1019,7 +1174,7 @@ function formatAuditDetails_(detailsObj, options) {
   const excludeSet = new Set(excludeKeys);
 
   return Object.entries(detailsObj)
-    .filter(([key]) => !excludeSet.has(key))
+    .filter(([key]) => !excludeSet.has(key) && String(key).charAt(0) !== '_')
     .map(([k, v]) => {
       let valStr = String(v);
       valStr = valStr.replace(/[|=]/g, '-');
@@ -1351,6 +1506,63 @@ function menuResetPointer() {
   }
 }
 
+function menuBackfillAppointmentIds() {
+  try {
+    const result = backfillAppointmentIds_();
+    const message = `Backfilled ${result.updated} appointment IDs.`;
+    SpreadsheetApp.getActive().toast(message, 'Appointment IDs');
+    return result;
+  } catch (err) {
+    logError('menuBackfillAppointmentIds', err);
+    SpreadsheetApp.getUi().alert('Backfill failed: ' + err.message);
+    throw err;
+  }
+}
+
+function backfillAppointmentIds_() {
+  const sheet = getApptsSheet_();
+  const idCol = ensureAppointmentIdColumn_(sheet);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) {
+    return { updated: 0, total: 0 };
+  }
+
+  const numRows = lastRow - 1;
+  const values = sheet.getRange(2, 1, numRows, COL_NOTES).getValues();
+  const idValues = sheet.getRange(2, idCol, numRows, 1).getValues();
+  const existingIds = new Set();
+
+  for (let i = 0; i < idValues.length; i++) {
+    const raw = String(idValues[i][0] || '').trim();
+    if (raw) existingIds.add(raw);
+  }
+
+  let updated = 0;
+  for (let i = 0; i < values.length; i++) {
+    const rowNum = i + 2;
+    const currentId = String(idValues[i][0] || '').trim();
+    if (currentId) continue;
+
+    const rowValues = values[i];
+    const customer = rowValues[COL_CUST_NAME - 1];
+    const apptDt = rowValues[COL_APPT_DT - 1];
+    const createdTs = rowValues[COL_CREATED_TS - 1];
+    const baseId = buildAppointmentId_(customer, apptDt, createdTs, rowNum);
+    const fallbackSeed = [baseId, rowNum].join('|');
+    const finalId = ensureUniqueAppointmentId_(baseId, existingIds, fallbackSeed);
+
+    idValues[i][0] = finalId;
+    existingIds.add(finalId);
+    updated += 1;
+  }
+
+  if (updated > 0) {
+    sheet.getRange(2, idCol, numRows, 1).setValues(idValues);
+  }
+
+  return { updated: updated, total: numRows };
+}
+
 /**
  * Unified Service Function for Reassignments
  */
@@ -1394,6 +1606,8 @@ function assignRowAuto_(row, opts = {}) {
 
     const name = vals[COL_CUST_NAME - 1];
     const phone = vals[COL_PHONE - 1];
+    const idCol = ensureAppointmentIdColumn_(appts);
+    const appointmentId = ensureAppointmentIdForRow_(appts, row, vals, idCol);
 
     // Must have the minimal appointment info - reuse logic or stricter?
     // Check existing assignment
@@ -1418,15 +1632,33 @@ function assignRowAuto_(row, opts = {}) {
     const actionType = opts.forceReassign
       ? AUDIT_ACTIONS.REASSIGNMENT
       : AUDIT_ACTIONS.NEW_APPOINTMENT;
+    const fromAssignee = alreadyAssigned || '';
+    const reason = opts.details && opts.details.reason ? opts.details.reason : '';
+    const baseDetails = {
+      row: row,
+      customer: name,
+      notes: opts.forceReassign ? 'Reassignment (Force)' : 'New Assignment',
+      ...(opts.details || {}), // Merge custom details like 'reason'
+      ...(opts.auditUser ? { user: opts.auditUser } : {}),
+    };
+    if (opts.forceReassign) {
+      baseDetails.fromAssignee = fromAssignee;
+      baseDetails.appointmentId = appointmentId;
+    }
+
     const result = advanceRoundRobinPointerByName_(roster, {
       actionType: actionType,
-      details: {
-        row: row,
-        customer: name,
-        notes: opts.forceReassign ? 'Reassignment (Force)' : 'New Assignment',
-        ...(opts.details || {}), // Merge custom details like 'reason'
-        ...(opts.auditUser ? { user: opts.auditUser } : {})
-      },
+      details: baseDetails,
+      detailsBuilder: opts.forceReassign
+        ? (ctx) => ({
+            _detailsJson: buildReassignmentDetailsJson_(
+              appointmentId,
+              fromAssignee,
+              ctx.assignee,
+              reason
+            ),
+          })
+        : null,
     });
 
     const assignee = result.assignee;
@@ -1510,6 +1742,9 @@ function withDocumentLock_(fn) {
  */
 function advanceRoundRobinPointer_(roster, auditInfo) {
   if (!roster || roster.length === 0) throw new Error('Roster empty');
+  const ai = auditInfo || {};
+  const details = ai.details || {};
+  const detailsBuilder = typeof ai.detailsBuilder === 'function' ? ai.detailsBuilder : null;
 
   // Concurrency-safe pointer mutation (RR_STATE!B2)
   let pointerBefore = 0;
@@ -1528,13 +1763,23 @@ function advanceRoundRobinPointer_(roster, auditInfo) {
   // Log it
   const nextUp = roster[pointerAfter];
 
-  logRoundRobinEvent(auditInfo.actionType || AUDIT_ACTIONS.ADVANCE, {
+  const builtDetails = detailsBuilder
+    ? detailsBuilder({
+        assignee: assignee,
+        nextUp: nextUp,
+        pointerBefore: pointerBefore,
+        pointerAfter: pointerAfter,
+      })
+    : null;
+  const logDetails = Object.assign({}, details, builtDetails || {});
+
+  logRoundRobinEvent(ai.actionType || AUDIT_ACTIONS.ADVANCE, {
     pointerBefore: pointerBefore,
     pointerAfter: pointerAfter,
     assignee: assignee,
     nextUp: nextUp,
     rosterCount: roster.length,
-    ...auditInfo.details,
+    ...logDetails,
   });
 
   return {
@@ -1558,6 +1803,7 @@ function advanceRoundRobinPointerByName_(roster, auditInfo) {
 
   const ai = auditInfo || {};
   const details = ai.details || {};
+  const detailsBuilder = typeof ai.detailsBuilder === 'function' ? ai.detailsBuilder : null;
 
   let lastAssignedNameBefore = '';
   let pointerBefore = 0; // index assigned
@@ -1591,6 +1837,16 @@ function advanceRoundRobinPointerByName_(roster, auditInfo) {
     nextUp = roster[pointerAfter];
   });
 
+  const builtDetails = detailsBuilder
+    ? detailsBuilder({
+        assignee: assignee,
+        nextUp: nextUp,
+        pointerBefore: pointerBefore,
+        pointerAfter: pointerAfter,
+      })
+    : null;
+  const logDetails = Object.assign({}, details, builtDetails || {});
+
   logRoundRobinEvent(ai.actionType || AUDIT_ACTIONS.ADVANCE, {
     pointerBefore: pointerBefore,
     pointerAfter: pointerAfter,
@@ -1598,7 +1854,7 @@ function advanceRoundRobinPointerByName_(roster, auditInfo) {
     nextUp: nextUp,
     rosterCount: roster.length,
     lastAssignedNameBefore: lastAssignedNameBefore || '(blank)',
-    ...details,
+    ...logDetails,
   });
 
   return {
@@ -1642,8 +1898,10 @@ function logRoundRobinEvent(action, detailsObj) {
     const userEmail = detailsObj && detailsObj.user ? detailsObj.user : safeUserEmail_();
     const user = getAuditLogNameFromEmail_(userEmail);
 
-    // Format details
-    const detailsStr = formatAuditDetails_(detailsObj);
+    // Format details (allow raw JSON payloads for structured events)
+    const rawDetails =
+      detailsObj && typeof detailsObj === 'object' ? detailsObj._detailsJson : null;
+    const detailsStr = rawDetails ? String(rawDetails) : formatAuditDetails_(detailsObj);
 
     const reference = detailsObj && detailsObj.row ? `Row ${detailsObj.row}` : '';
 

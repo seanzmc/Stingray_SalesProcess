@@ -86,6 +86,8 @@ function createAppointmentFromSidebar(payload) {
     const now = new Date();
 
     const newRow = appts.getLastRow() + 1;
+    const appointmentId = buildAppointmentId_(customerName, apptDt, now, newRow);
+    const idCol = ensureAppointmentIdColumn_(appts);
 
     // Columns: A=Created, B=ApptDt, C=Customer, D=Phone, E=Assigned, F=Mode, G=AssignedBy, H=Notes
     // Ensure we are setting exactly 8 columns
@@ -103,6 +105,7 @@ function createAppointmentFromSidebar(payload) {
     ];
 
     appts.getRange(newRow, 1, 1, 8).setValues(rowValues);
+    appts.getRange(newRow, idCol).setValue(appointmentId);
 
     // PERSISTENCE: Save "Assigned By" for next time
     try {

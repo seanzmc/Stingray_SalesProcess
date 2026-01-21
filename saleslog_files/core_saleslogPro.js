@@ -3087,7 +3087,9 @@ function onOpen() {
       .addSeparator()
       .addItem('Rewind Pointer (Undo)', 'menuRewindPointer')
       .addSeparator()
-      .addItem('Reset Round Robin pointer to top', 'menuResetPointer');
+      .addItem('Reset Round Robin pointer to top', 'menuResetPointer')
+      .addSeparator()
+      .addItem('Backfill Appointment IDs', 'menuBackfillAppointmentIds');
 
     menu.addSubMenu(rrMenu).addSeparator();
 
