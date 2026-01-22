@@ -95,7 +95,7 @@ function getDashboardData() {
 function getDashboardCacheKey_(ss) {
   // Include Spreadsheet ID for safety in case this code is reused in multiple containers.
   const spreadsheetId = ss && typeof ss.getId === 'function' ? ss.getId() : 'unknown';
-  return `rr_dashboard_data::${spreadsheetId}::v2`;
+  return `rr_dashboard_data::${spreadsheetId}::v3`;
 }
 
 /** Returns the cache TTL in seconds (configurable via Script Properties). */
@@ -246,6 +246,31 @@ function isValidDashboardData_(obj) {
   if (!obj.meta || typeof obj.meta !== 'object') return false;
   if (!obj.groupTotals || typeof obj.groupTotals !== 'object') return false;
   if (!obj.groupTotals.bdc || typeof obj.groupTotals.bdc !== 'object') return false;
+  if (!obj.groupTotals.sales || typeof obj.groupTotals.sales !== 'object') return false;
+  if (
+    !obj.groupTotals.bdc.assignmentsCreated ||
+    typeof obj.groupTotals.bdc.assignmentsCreated !== 'object'
+  ) {
+    return false;
+  }
+  if (
+    !obj.groupTotals.bdc.reassignActions ||
+    typeof obj.groupTotals.bdc.reassignActions !== 'object'
+  ) {
+    return false;
+  }
+  if (
+    !obj.groupTotals.sales.assignmentsReceived ||
+    typeof obj.groupTotals.sales.assignmentsReceived !== 'object'
+  ) {
+    return false;
+  }
+  if (
+    !obj.groupTotals.sales.reassignmentsLost ||
+    typeof obj.groupTotals.sales.reassignmentsLost !== 'object'
+  ) {
+    return false;
+  }
   if (!Array.isArray(obj.bdcReps)) return false;
   if (!Array.isArray(obj.salesRoster)) return false;
   if (!obj.debug || typeof obj.debug !== 'object') return false;
@@ -303,9 +328,8 @@ function computeDashboardDataFromSpreadsheet_(ss) {
   bdcRepNames.forEach((name) => {
     bdcStats[name] = {
       name,
-      appointmentsAssigned: 0,
-      appointmentsReassigned: 0,
-      phoneLeadsAssigned: 0,
+      assignmentsCreated: { appointments: 0, phoneLeads: 0, total: 0 },
+      reassignActions: { appointments: 0, phoneLeads: 0, total: 0 },
     };
   });
 
@@ -321,8 +345,8 @@ function computeDashboardDataFromSpreadsheet_(ss) {
     rosterStats[rep.name] = {
       name: rep.name,
       active: rep.active,
-      appointmentsAssigned: 0,
-      appointmentsReassignedFrom: 0,
+      assignmentsReceived: { appointments: 0, phoneLeads: 0, total: 0 },
+      reassignmentsLost: { appointments: 0, phoneLeads: 0, total: 0 },
     };
   });
 
@@ -347,7 +371,7 @@ function computeDashboardDataFromSpreadsheet_(ss) {
   if (!apptsSheet) {
     addWarning_(warnings, warningSet, `Appointments sheet "${apptsSheetName}" not found.`);
     sources.push({
-      metric: 'appointmentsAssigned',
+      metric: 'appointmentsAssignments',
       sheet: apptsSheetName,
       ranges: {
         assigned: assignedRangeLabel,
@@ -393,7 +417,7 @@ function computeDashboardDataFromSpreadsheet_(ss) {
     }
 
     sources.push({
-      metric: 'appointmentsAssigned',
+      metric: 'appointmentsAssignments',
       sheet: apptsSheetName,
       ranges: {
         assigned: assignedRangeLabel,
@@ -414,14 +438,19 @@ function computeDashboardDataFromSpreadsheet_(ss) {
           if (!isWithinWindow_(dateObj, windowStart, windowEnd)) continue;
         }
 
+        const method = normalizeAssignmentMethod_(modeRange[i][0]);
+        const isAuto = method === 'auto';
+        const isManualReassign = method === 'manual reassign';
+        const shouldCountAssignment = isAuto || isManualReassign;
+        if (!shouldCountAssignment) continue;
+
         const assignedByRaw = assignedByRange[i][0];
         const assignedByKey = normalizeName_(assignedByRaw).toLowerCase();
         const bdcName = bdcNameMap[assignedByKey];
         if (bdcName && bdcStats[bdcName]) {
-          bdcStats[bdcName].appointmentsAssigned++;
-          const modeRaw = String(modeRange[i][0] || '').trim().toLowerCase();
-          if (modeRaw === 'manual reassign') {
-            bdcStats[bdcName].appointmentsReassigned++;
+          bdcStats[bdcName].assignmentsCreated.appointments++;
+          if (isManualReassign) {
+            bdcStats[bdcName].reassignActions.appointments++;
           }
         }
 
@@ -429,20 +458,21 @@ function computeDashboardDataFromSpreadsheet_(ss) {
         const salesAssigneeKey = normalizeName_(salesAssigneeRaw).toLowerCase();
         const salesName = rosterData.nameMap[salesAssigneeKey];
         if (salesName && rosterStats[salesName]) {
-          rosterStats[salesName].appointmentsAssigned++;
+          rosterStats[salesName].assignmentsReceived.appointments++;
         }
       }
     }
   }
 
-  let reassignFromUnknown = false;
-  let reassignAppointmentIdMissing = false;
+  let reassignmentKeyMissing = false;
+  let reassignmentFromMissing = false;
+  let phoneLeadAssigneeMissing = false;
   const auditSheetName = getAuditSheetName_();
   const auditSheet = spreadsheet.getSheetByName(auditSheetName);
   if (!auditSheet) {
     addWarning_(warnings, warningSet, `Audit sheet "${auditSheetName}" not found.`);
     sources.push({
-      metric: 'phoneLeadsAssigned',
+      metric: 'phoneLeadsAssignments',
       sheet: auditSheetName,
       range: 'A2:C',
       action: actions.PHONE_LEAD,
@@ -450,7 +480,7 @@ function computeDashboardDataFromSpreadsheet_(ss) {
       status: 'missing',
     });
     sources.push({
-      metric: 'appointmentsReassignedFrom',
+      metric: 'appointmentsReassignmentsLost',
       sheet: auditSheetName,
       range: 'A2:E',
       action: actions.REASSIGNMENT,
@@ -462,19 +492,19 @@ function computeDashboardDataFromSpreadsheet_(ss) {
     const auditRowCount = Math.max(0, lastAuditRow - 1);
     sources.push({ sheet: auditSheetName, rows: auditRowCount });
     sources.push({
-      metric: 'phoneLeadsAssigned',
+      metric: 'phoneLeadsAssignments',
       sheet: auditSheetName,
       range: 'A2:C',
       action: actions.PHONE_LEAD,
       window: 'today',
     });
     sources.push({
-      metric: 'appointmentsReassignedFrom',
+      metric: 'appointmentsReassignmentsLost',
       sheet: auditSheetName,
       range: 'A2:E',
       action: actions.REASSIGNMENT,
       window: 'today',
-      note: 'Uses reassignment/manual override details.from/oldAssignee or reference fallback.',
+      note: 'Uses details.fromAssignee (or last-known assignee by appointmentId/reference).',
     });
 
     if (auditRowCount > 0) {
@@ -486,6 +516,7 @@ function computeDashboardDataFromSpreadsheet_(ss) {
 
       const numRows = lastAuditRow - startRow + 1;
       const logData = auditSheet.getRange(startRow, 1, numRows, 5).getValues();
+      const lastAssigneeByKey = {};
 
       for (let i = 0; i < logData.length; i++) {
         const row = logData[i];
@@ -498,7 +529,17 @@ function computeDashboardDataFromSpreadsheet_(ss) {
         const detailsRaw = String(row[4] || '').trim();
         const action = normalizeAuditActionForDashboard_(actionRaw);
         const details = parseDetailsString_(detailsRaw);
-        const isPhoneLeadAction = actionRaw.toLowerCase() === 'phone lead';
+        const actionLower = String(actionRaw || '').trim().toLowerCase();
+        const isPhoneLeadAction =
+          action === actions.PHONE_LEAD || actionLower === 'phone lead';
+        const isReassignmentAction =
+          action === actions.REASSIGNMENT || actionLower === 'reassignment';
+        const isManualOverrideAction =
+          action === actions.MANUAL_OVERRIDE || actionLower === 'manual override';
+        const isReassignmentLike = isReassignmentAction || isManualOverrideAction;
+        const recordKey = getAuditRecordKey_(details, referenceRaw);
+        const isPhoneLeadTarget =
+          isReassignmentLike && isPhoneLeadTarget_(details, actions);
 
         if (actorRaw && userData.sheetFound) {
           const actorName = resolveNameAlias_(actorRaw, userData.aliasToName);
@@ -512,87 +553,154 @@ function computeDashboardDataFromSpreadsheet_(ss) {
         }
 
         const bdcName = resolveBdcName_(actorRaw, userData.aliasToName, bdcNameMap);
-        const isReassignmentAction = action === actions.REASSIGNMENT;
-        const isManualOverrideAssignment =
-          action === actions.MANUAL_OVERRIDE &&
-          (details.oldAssignee ||
-            details.newAssignee ||
-            details.from ||
-            details.fromAssignee ||
-            details.toAssignee);
-        if (isReassignmentAction || isManualOverrideAssignment) {
-          if (!details.appointmentId) {
-            reassignAppointmentIdMissing = true;
+
+        if (isPhoneLeadAction) {
+          if (bdcName && bdcStats[bdcName]) {
+            bdcStats[bdcName].assignmentsCreated.phoneLeads++;
           }
-          const fromNameRaw = getReassignmentFromName_(details, referenceRaw);
-          if (fromNameRaw) {
-            const fromKey = normalizeName_(fromNameRaw).toLowerCase();
-            const salesName = rosterData.nameMap[fromKey];
-            if (
-              salesName &&
-              rosterStats[salesName] &&
-              rosterStats[salesName].appointmentsReassignedFrom !== null
-            ) {
-              rosterStats[salesName].appointmentsReassignedFrom++;
-            }
+
+          const toNameRaw = getPhoneLeadToName_(details);
+          if (!toNameRaw) {
+            phoneLeadAssigneeMissing = true;
           } else {
-            reassignFromUnknown = true;
+            const toKey = normalizeName_(toNameRaw).toLowerCase();
+            const salesName = rosterData.nameMap[toKey];
+            if (salesName && rosterStats[salesName]) {
+              rosterStats[salesName].assignmentsReceived.phoneLeads++;
+            } else {
+              phoneLeadAssigneeMissing = true;
+            }
           }
         }
 
-        if (bdcName && bdcStats[bdcName]) {
-          if (isPhoneLeadAction) {
-            bdcStats[bdcName].phoneLeadsAssigned++;
+        if (isReassignmentLike && !isPhoneLeadTarget) {
+          if (!recordKey) {
+            reassignmentKeyMissing = true;
+          }
+
+          let fromNameRaw = getReassignmentFromName_(details, referenceRaw);
+          if (!fromNameRaw && recordKey && lastAssigneeByKey[recordKey]) {
+            fromNameRaw = lastAssigneeByKey[recordKey];
+          }
+
+          if (fromNameRaw) {
+            const fromKey = normalizeName_(fromNameRaw).toLowerCase();
+            const salesName = rosterData.nameMap[fromKey];
+            if (salesName && rosterStats[salesName]) {
+              rosterStats[salesName].reassignmentsLost.appointments++;
+            } else {
+              reassignmentFromMissing = true;
+            }
+          } else {
+            reassignmentFromMissing = true;
+          }
+
+          const toNameRaw = getAssigneeFromDetails_(details);
+          if (recordKey && toNameRaw) {
+            lastAssigneeByKey[recordKey] = toNameRaw;
+          }
+        }
+
+        if (recordKey && action === actions.NEW_APPOINTMENT) {
+          const toNameRaw = getAssigneeFromDetails_(details);
+          if (toNameRaw) {
+            lastAssigneeByKey[recordKey] = toNameRaw;
           }
         }
       }
     }
   }
 
-  if (reassignAppointmentIdMissing) {
+  if (reassignmentKeyMissing) {
     addWarning_(
       warnings,
       warningSet,
-      'Reassignment audit entries missing appointmentId; backfill recommended.'
+      'Reassignment audit entries missing appointmentId/reference; reassignment attribution may be incomplete.'
     );
   }
 
-  if (reassignFromUnknown) {
+  if (reassignmentFromMissing) {
     addWarning_(
       warnings,
       warningSet,
-      'Need appointmentId and structured from/to in audit details.'
+      'Reassignment audit entries missing reassigned-from assignee; sales reassignments lost may be undercounted.'
     );
-    rosterData.roster.forEach((rep) => {
-      if (rosterStats[rep.name]) {
-        rosterStats[rep.name].appointmentsReassignedFrom = null;
-      }
-    });
+  }
+
+  if (phoneLeadAssigneeMissing) {
+    addWarning_(
+      warnings,
+      warningSet,
+      'Phone Lead audit entries missing assignee or not in roster; cannot count sales recipients.'
+    );
   }
 
   const groupTotals = {
     bdc: {
-      appointmentsAssigned: 0,
-      appointmentsReassigned: 0,
-      phoneLeadsAssigned: 0,
+      assignmentsCreated: { appointments: 0, phoneLeads: 0, total: 0 },
+      reassignActions: { appointments: 0, phoneLeads: 0, total: 0 },
+    },
+    sales: {
+      assignmentsReceived: { appointments: 0, phoneLeads: 0, total: 0 },
+      reassignmentsLost: { appointments: 0, phoneLeads: 0, total: 0 },
     },
   };
 
   bdcRepNames.forEach((name) => {
     const rep = bdcStats[name];
-    if (rep) {
-      groupTotals.bdc.appointmentsAssigned += rep.appointmentsAssigned;
-      groupTotals.bdc.appointmentsReassigned += rep.appointmentsReassigned;
-      groupTotals.bdc.phoneLeadsAssigned += rep.phoneLeadsAssigned;
-    }
+    if (!rep) return;
+    rep.assignmentsCreated.total =
+      rep.assignmentsCreated.appointments + rep.assignmentsCreated.phoneLeads;
+    rep.reassignActions.total =
+      rep.reassignActions.appointments + rep.reassignActions.phoneLeads;
+
+    groupTotals.bdc.assignmentsCreated.appointments +=
+      rep.assignmentsCreated.appointments;
+    groupTotals.bdc.assignmentsCreated.phoneLeads +=
+      rep.assignmentsCreated.phoneLeads;
+    groupTotals.bdc.reassignActions.appointments +=
+      rep.reassignActions.appointments;
+    groupTotals.bdc.reassignActions.phoneLeads +=
+      rep.reassignActions.phoneLeads;
   });
+
+  rosterData.roster.forEach((rep) => {
+    const stats = rosterStats[rep.name];
+    if (!stats) return;
+    stats.assignmentsReceived.total =
+      stats.assignmentsReceived.appointments + stats.assignmentsReceived.phoneLeads;
+    stats.reassignmentsLost.total =
+      stats.reassignmentsLost.appointments + stats.reassignmentsLost.phoneLeads;
+
+    groupTotals.sales.assignmentsReceived.appointments +=
+      stats.assignmentsReceived.appointments;
+    groupTotals.sales.assignmentsReceived.phoneLeads +=
+      stats.assignmentsReceived.phoneLeads;
+    groupTotals.sales.reassignmentsLost.appointments +=
+      stats.reassignmentsLost.appointments;
+    groupTotals.sales.reassignmentsLost.phoneLeads +=
+      stats.reassignmentsLost.phoneLeads;
+  });
+
+  groupTotals.bdc.assignmentsCreated.total =
+    groupTotals.bdc.assignmentsCreated.appointments +
+    groupTotals.bdc.assignmentsCreated.phoneLeads;
+  groupTotals.bdc.reassignActions.total =
+    groupTotals.bdc.reassignActions.appointments +
+    groupTotals.bdc.reassignActions.phoneLeads;
+  groupTotals.sales.assignmentsReceived.total =
+    groupTotals.sales.assignmentsReceived.appointments +
+    groupTotals.sales.assignmentsReceived.phoneLeads;
+  groupTotals.sales.reassignmentsLost.total =
+    groupTotals.sales.reassignmentsLost.appointments +
+    groupTotals.sales.reassignmentsLost.phoneLeads;
 
   const startIso = Utilities.formatDate(windowStart, tz, 'yyyy-MM-dd');
 
   const bdcReps = bdcRepNames.map((name) => bdcStats[name]);
   bdcReps.sort((a, b) => {
-    if (b.appointmentsAssigned !== a.appointmentsAssigned) {
-      return b.appointmentsAssigned - a.appointmentsAssigned;
+    if (b.assignmentsCreated.total !== a.assignmentsCreated.total) {
+      return b.assignmentsCreated.total - a.assignmentsCreated.total;
     }
     return a.name.localeCompare(b.name);
   });
@@ -656,11 +764,34 @@ function normalizeName_(value) {
   return String(value || '').trim().replace(/\s+/g, ' ');
 }
 
+function normalizeAssignmentMethod_(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const normalized = raw
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  if (normalized === 'auto') return 'auto';
+  if (
+    normalized === 'manual reassign' ||
+    normalized === 'manual re assign' ||
+    normalized === 'manual reassignment'
+  ) {
+    return 'manual reassign';
+  }
+  return normalized;
+}
+
 function getReassignmentFromName_(details, reference) {
   if (details && details.fromAssignee) return details.fromAssignee;
+  if (details && details.lastAssignedNameBefore) return details.lastAssignedNameBefore;
   if (details && details.from) return details.from;
-  if (details && details.oldAssignee) return details.oldAssignee;
   return parseFromReference_(reference);
+}
+
+function getPhoneLeadToName_(details) {
+  return getAssigneeFromDetails_(details);
 }
 
 function parseFromReference_(reference) {
@@ -917,6 +1048,97 @@ function normalizeAuditActionForDashboard_(action) {
   return raw;
 }
 
+function normalizeDetailsKey_(key) {
+  const trimmed = String(key || '').trim();
+  if (!trimmed) return '';
+  const compact = trimmed.replace(/[\s_-]+/g, '').toLowerCase();
+
+  switch (compact) {
+    case 'appointmentid':
+      return 'appointmentId';
+    case 'assignee':
+    case 'assigned':
+    case 'assignedto':
+    case 'salesperson':
+    case 'salesrep':
+    case 'rep':
+      return 'assignee';
+    case 'toassignee':
+    case 'to':
+    case 'newassignee':
+    case 'tosalesperson':
+      return 'toAssignee';
+    case 'fromassignee':
+    case 'from':
+    case 'oldassignee':
+    case 'previousassignee':
+    case 'reassignedfrom':
+    case 'reassignedfromassignee':
+      return 'fromAssignee';
+    case 'lastassignednamebefore':
+    case 'lastassignedbefore':
+    case 'lastassigned':
+      return 'lastAssignedNameBefore';
+    case 'method':
+      return 'method';
+    case 'reason':
+      return 'reason';
+    case 'target':
+      return 'target';
+    case 'row':
+      return 'row';
+    case 'user':
+      return 'user';
+    default:
+      return trimmed;
+  }
+}
+
+function normalizeDetailsObject_(obj) {
+  if (!obj || typeof obj !== 'object') return {};
+  const normalized = {};
+  Object.keys(obj).forEach((key) => {
+    const normalizedKey = normalizeDetailsKey_(key);
+    if (!normalizedKey) return;
+    const value = obj[key];
+    const existing = Object.prototype.hasOwnProperty.call(normalized, normalizedKey)
+      ? String(normalized[normalizedKey] || '').trim()
+      : '';
+    if (!existing) {
+      normalized[normalizedKey] = value;
+    }
+  });
+  return normalized;
+}
+
+function getAssigneeFromDetails_(details) {
+  if (!details) return '';
+  if (details.toAssignee) return details.toAssignee;
+  if (details.assignee) return details.assignee;
+  if (details.newAssignee) return details.newAssignee;
+  if (details.to) return details.to;
+  if (details.salesperson) return details.salesperson;
+  return '';
+}
+
+function getAuditRecordKey_(details, reference) {
+  const appointmentId = details && details.appointmentId
+    ? String(details.appointmentId).trim()
+    : '';
+  if (appointmentId) return appointmentId;
+  const ref = String(reference || '').trim();
+  return ref ? ref : '';
+}
+
+function isPhoneLeadTarget_(details, actions) {
+  if (!details || !details.target) return false;
+  const targetRaw = String(details.target || '').trim();
+  if (!targetRaw) return false;
+  const normalized = normalizeAuditActionForDashboard_(targetRaw);
+  if (normalized === actions.PHONE_LEAD) return true;
+  return targetRaw.toLowerCase().includes('phone');
+}
+
 /**
  * Parses "key=value | key2=value2" into an object.
  */
@@ -927,7 +1149,9 @@ function parseDetailsString_(str) {
   if (trimmed[0] === '{' && trimmed[trimmed.length - 1] === '}') {
     try {
       const parsed = JSON.parse(trimmed);
-      return parsed && typeof parsed === 'object' ? parsed : { raw: str };
+      return parsed && typeof parsed === 'object'
+        ? normalizeDetailsObject_(parsed)
+        : { raw: str };
     } catch (_) {
       // fall through to key/value parsing
     }
@@ -937,16 +1161,22 @@ function parseDetailsString_(str) {
   const obj = {};
   const parts = trimmed.split('|');
 
-  parts.forEach(part => {
-    const split = part.split('=');
-    if (split.length >= 2) {
-      const key = split[0].trim();
-      // Join rest in case value has = in it, though unlikely with our sanitizer
-      const val = split.slice(1).join('=').trim();
-      obj[key] = val;
+  parts.forEach((part) => {
+    const eqIndex = part.indexOf('=');
+    if (eqIndex === -1) return;
+    const keyRaw = part.slice(0, eqIndex).trim();
+    const val = part.slice(eqIndex + 1).trim();
+    if (!keyRaw) return;
+    const normalizedKey = normalizeDetailsKey_(keyRaw);
+    if (!normalizedKey) return;
+    const existing = Object.prototype.hasOwnProperty.call(obj, normalizedKey)
+      ? String(obj[normalizedKey] || '').trim()
+      : '';
+    if (!existing) {
+      obj[normalizedKey] = val;
     }
   });
-  return obj;
+  return Object.keys(obj).length ? obj : { raw: str };
 }
 
 /**
@@ -969,11 +1199,12 @@ function formatTime_(dateObj) {
 
 function buildFeedMessage_(actor, action, details, reference) {
   const actions = getAuditActions_();
+  const assignee = getAssigneeFromDetails_(details);
   if (action === actions.NEW_APPOINTMENT || action === 'Assignment') {
-    return `${details.assignee || 'Someone'} received a lead.`;
+    return `${assignee || 'Someone'} received a lead.`;
   }
   if (action === actions.PHONE_LEAD) {
-    return `${details.assignee || 'Someone'} received a phone lead.`;
+    return `${assignee || 'Someone'} received a phone lead.`;
   }
   if (action === actions.UNDO) {
     const target = details.target || details.type || 'action';
@@ -985,10 +1216,62 @@ function buildFeedMessage_(actor, action, details, reference) {
     action.includes('Override') ||
     action.includes('Reassign')
   ) {
-    const target = details.newAssignee || details.assignee || 'someone';
+    const target = assignee || details.newAssignee || details.assignee || 'someone';
     return `Manual action affecting ${target}.`;
   }
   // Default
   const raw = details.raw || Object.keys(details).map(k => `${k}:${details[k]}`).join(' ');
   return `${reference ? reference + ' - ' : ''}${raw}`;
+}
+
+// Dev-only: run manually to sanity check dashboard data + backfill removal.
+function devSanityCheckDashboard_() {
+  const backfillChecks = [
+    ['menuBackfillAppointmentIds', typeof menuBackfillAppointmentIds === 'function'],
+    ['menuBackfillAuditAppointmentIds', typeof menuBackfillAuditAppointmentIds === 'function'],
+    ['backfillAppointmentIds_', typeof backfillAppointmentIds_ === 'function'],
+    ['backfillAuditAppointmentIds_', typeof backfillAuditAppointmentIds_ === 'function'],
+    ['menuBackfillReconKeys', typeof menuBackfillReconKeys === 'function'],
+    ['backfillReconSourceKeys_', typeof backfillReconSourceKeys_ === 'function'],
+  ];
+  const stillDefined = backfillChecks
+    .filter((entry) => entry[1])
+    .map((entry) => entry[0]);
+
+  if (stillDefined.length) {
+    Logger.log(
+      'Sanity check: unexpected backfill functions still defined: ' +
+      stillDefined.join(', ')
+    );
+  } else {
+    Logger.log('Sanity check: backfill functions removed (expected).');
+  }
+
+  try {
+    const data = getDashboardData();
+    if (data && data.error) {
+      Logger.log('Sanity check: getDashboardData error: ' + data.error);
+      return;
+    }
+    const bdcName =
+      data && Array.isArray(data.bdcReps) && data.bdcReps.length
+        ? data.bdcReps[0].name
+        : '';
+    const salesName =
+      data && Array.isArray(data.salesRoster) && data.salesRoster.length
+        ? data.salesRoster[0].name
+        : '';
+    if (bdcName && salesName) {
+      Logger.log(
+        'Sanity check: dashboard data loaded. Sample BDC=' +
+        bdcName +
+        ', Sales=' +
+        salesName
+      );
+    } else {
+      Logger.log('Sanity check: dashboard data loaded but BDC/Sales missing.');
+    }
+  } catch (e) {
+    Logger.log('Sanity check: getDashboardData threw: ' + e);
+  }
 }

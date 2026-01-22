@@ -264,13 +264,15 @@ function ensureAppointmentIdForRow_(sheet, row, rowValues, idCol, existingIds) {
   return finalId;
 }
 
-function buildReassignmentDetailsJson_(appointmentId, fromAssignee, toAssignee, reason) {
+function buildReassignmentDetailsJson_(appointmentId, fromAssignee, toAssignee, reason, method) {
   const payload = {
+    // appointmentId is required for deterministic reassignment tracking on the dashboard.
     appointmentId: appointmentId || '',
     fromAssignee: fromAssignee || '',
     toAssignee: toAssignee || '',
   };
   if (reason) payload.reason = reason;
+  if (method) payload.method = method;
   return JSON.stringify(payload);
 }
 
@@ -485,6 +487,7 @@ function handleAppointmentEdit(e) {
         const appointmentId = ensureAppointmentIdForRow_(appts, row, rowValues, idCol);
         const reason =
           numRows > 1 || numCols > 1 ? 'Bulk edit in sheet' : 'User manual edit in sheet';
+        const method = 'Manual Override';
 
         logRoundRobinEvent(AUDIT_ACTIONS.MANUAL_OVERRIDE, {
           row: row,
@@ -494,12 +497,14 @@ function handleAppointmentEdit(e) {
           toAssignee: newAssignee || '',
           appointmentId: appointmentId,
           reason: reason,
+          method: method,
           user: user,
           _detailsJson: buildReassignmentDetailsJson_(
             appointmentId,
             oldAssignee,
             newAssignee,
-            reason
+            reason,
+            method
           ),
         });
 
@@ -1506,63 +1511,6 @@ function menuResetPointer() {
   }
 }
 
-function menuBackfillAppointmentIds() {
-  try {
-    const result = backfillAppointmentIds_();
-    const message = `Backfilled ${result.updated} appointment IDs.`;
-    SpreadsheetApp.getActive().toast(message, 'Appointment IDs');
-    return result;
-  } catch (err) {
-    logError('menuBackfillAppointmentIds', err);
-    SpreadsheetApp.getUi().alert('Backfill failed: ' + err.message);
-    throw err;
-  }
-}
-
-function backfillAppointmentIds_() {
-  const sheet = getApptsSheet_();
-  const idCol = ensureAppointmentIdColumn_(sheet);
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) {
-    return { updated: 0, total: 0 };
-  }
-
-  const numRows = lastRow - 1;
-  const values = sheet.getRange(2, 1, numRows, COL_NOTES).getValues();
-  const idValues = sheet.getRange(2, idCol, numRows, 1).getValues();
-  const existingIds = new Set();
-
-  for (let i = 0; i < idValues.length; i++) {
-    const raw = String(idValues[i][0] || '').trim();
-    if (raw) existingIds.add(raw);
-  }
-
-  let updated = 0;
-  for (let i = 0; i < values.length; i++) {
-    const rowNum = i + 2;
-    const currentId = String(idValues[i][0] || '').trim();
-    if (currentId) continue;
-
-    const rowValues = values[i];
-    const customer = rowValues[COL_CUST_NAME - 1];
-    const apptDt = rowValues[COL_APPT_DT - 1];
-    const createdTs = rowValues[COL_CREATED_TS - 1];
-    const baseId = buildAppointmentId_(customer, apptDt, createdTs, rowNum);
-    const fallbackSeed = [baseId, rowNum].join('|');
-    const finalId = ensureUniqueAppointmentId_(baseId, existingIds, fallbackSeed);
-
-    idValues[i][0] = finalId;
-    existingIds.add(finalId);
-    updated += 1;
-  }
-
-  if (updated > 0) {
-    sheet.getRange(2, idCol, numRows, 1).setValues(idValues);
-  }
-
-  return { updated: updated, total: numRows };
-}
-
 /**
  * Unified Service Function for Reassignments
  */
@@ -1607,6 +1555,7 @@ function assignRowAuto_(row, opts = {}) {
     const name = vals[COL_CUST_NAME - 1];
     const phone = vals[COL_PHONE - 1];
     const idCol = ensureAppointmentIdColumn_(appts);
+    // Ensure appointmentId is stored before audit logging so reassignment tracking is deterministic.
     const appointmentId = ensureAppointmentIdForRow_(appts, row, vals, idCol);
 
     // Must have the minimal appointment info - reuse logic or stricter?
@@ -1651,11 +1600,14 @@ function assignRowAuto_(row, opts = {}) {
       details: baseDetails,
       detailsBuilder: opts.forceReassign
         ? (ctx) => ({
+            toAssignee: ctx.assignee,
+            method: opts.mode || '',
             _detailsJson: buildReassignmentDetailsJson_(
               appointmentId,
               fromAssignee,
               ctx.assignee,
-              reason
+              reason,
+              opts.mode
             ),
           })
         : null,

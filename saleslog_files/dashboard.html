@@ -43,20 +43,37 @@
     </header>
 
     <!-- METRICS CARDS -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 shrink-0">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 shrink-0">
       <div class="glass-panel rounded-xl p-4 border-l-4 border-emerald-500">
-        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">Total Appointments Assigned Today</div>
-        <div class="text-3xl font-bold text-white mt-1">{{ groupTotals.bdc.appointmentsAssigned }}</div>
+        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">BDC Assignments Created Today</div>
+        <div class="text-3xl font-bold text-white mt-1">{{ groupTotals.bdc.assignmentsCreated.total }}</div>
+        <div class="text-[10px] text-slate-500 mt-2">
+          Appts {{ groupTotals.bdc.assignmentsCreated.appointments }} | Phone {{ groupTotals.bdc.assignmentsCreated.phoneLeads }}
+        </div>
       </div>
 
       <div class="glass-panel rounded-xl p-4 border-l-4 border-amber-500">
-        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">Total Phone Leads Assigned Today</div>
-        <div class="text-3xl font-bold text-white mt-1">{{ groupTotals.bdc.phoneLeadsAssigned }}</div>
+        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">BDC Reassign Actions Today</div>
+        <div class="text-3xl font-bold text-white mt-1">{{ groupTotals.bdc.reassignActions.total }}</div>
+        <div class="text-[10px] text-slate-500 mt-2">
+          Appts {{ groupTotals.bdc.reassignActions.appointments }} | Phone {{ groupTotals.bdc.reassignActions.phoneLeads }}
+        </div>
       </div>
 
-      <div v-if="hasReassignments" class="glass-panel rounded-xl p-4 border-l-4 border-blue-500">
-        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">Total Reassignments Today</div>
-        <div class="text-3xl font-bold text-white mt-1">{{ groupTotals.bdc.appointmentsReassigned }}</div>
+      <div class="glass-panel rounded-xl p-4 border-l-4 border-pink-500">
+        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">Sales Assignments Received Today</div>
+        <div class="text-3xl font-bold text-white mt-1">{{ groupTotals.sales.assignmentsReceived.total }}</div>
+        <div class="text-[10px] text-slate-500 mt-2">
+          Appts {{ groupTotals.sales.assignmentsReceived.appointments }} | Phone {{ groupTotals.sales.assignmentsReceived.phoneLeads }}
+        </div>
+      </div>
+
+      <div class="glass-panel rounded-xl p-4 border-l-4 border-blue-500">
+        <div class="text-xs text-slate-400 uppercase font-bold tracking-wider">Sales Reassignments Lost Today</div>
+        <div class="text-3xl font-bold text-white mt-1">{{ groupTotals.sales.reassignmentsLost.total }}</div>
+        <div class="text-[10px] text-slate-500 mt-2">
+          Appts {{ groupTotals.sales.reassignmentsLost.appointments }} | Phone {{ groupTotals.sales.reassignmentsLost.phoneLeads }}
+        </div>
       </div>
     </div>
 
@@ -67,7 +84,7 @@
       <div class="glass-panel rounded-xl flex flex-col overflow-hidden">
         <div class="p-4 bg-slate-800/50 border-b border-white/5 font-semibold text-white flex justify-between items-center">
           <span>BDC Rep Activity</span>
-          <span class="text-xs text-slate-500">Sorted by Appointments</span>
+          <span class="text-xs text-slate-500">Sorted by Assignments</span>
         </div>
         <div class="flex-1 overflow-y-auto scrollbar-thin p-2">
           <table class="w-full text-left border-collapse">
@@ -75,26 +92,34 @@
               <tr>
                 <th class="p-3 w-16 text-center">Rank</th>
                 <th class="p-3">Rep Name</th>
-                <th class="p-3 w-28 text-right">Appointments</th>
-                <th class="p-3 w-24 text-right">Reassigned</th>
-                <th class="p-3 w-24 text-right">Phone Leads</th>
+                <th class="p-3 w-28 text-right">Assignments</th>
+                <th class="p-3 w-28 text-right">Reassign Actions</th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="(item, idx) in bdcRows" :key="item.name" class="border-b border-slate-700/50 hover:bg-white/5 transition">
                 <td class="p-3 text-center font-mono text-slate-500">
-                  <span v-if="idx===0 && item.appointmentsAssigned > 0">🥇</span>
-                  <span v-else-if="idx===1 && item.appointmentsAssigned > 0">🥈</span>
-                  <span v-else-if="idx===2 && item.appointmentsAssigned > 0">🥉</span>
+                  <span v-if="idx===0 && item.assignmentsCreated.total > 0">🥇</span>
+                  <span v-else-if="idx===1 && item.assignmentsCreated.total > 0">🥈</span>
+                  <span v-else-if="idx===2 && item.assignmentsCreated.total > 0">🥉</span>
                   <span v-else>{{ idx + 1 }}</span>
                 </td>
                 <td class="p-3 font-medium text-slate-200">{{ item.name }}</td>
-                <td class="p-3 text-right font-mono">{{ item.appointmentsAssigned }}</td>
-                <td class="p-3 text-right font-mono">{{ item.appointmentsReassigned }}</td>
-                <td class="p-3 text-right font-mono">{{ item.phoneLeadsAssigned }}</td>
+                <td class="p-3 text-right">
+                  <div class="font-mono">{{ item.assignmentsCreated.total }}</div>
+                  <div class="text-[10px] text-slate-500">
+                    Appts {{ item.assignmentsCreated.appointments }} | Phone {{ item.assignmentsCreated.phoneLeads }}
+                  </div>
+                </td>
+                <td class="p-3 text-right">
+                  <div class="font-mono">{{ item.reassignActions.total }}</div>
+                  <div class="text-[10px] text-slate-500">
+                    Appts {{ item.reassignActions.appointments }} | Phone {{ item.reassignActions.phoneLeads }}
+                  </div>
+                </td>
               </tr>
               <tr v-if="bdcRows.length === 0">
-                <td colspan="5" class="p-8 text-center text-slate-500 italic">No data available</td>
+                <td colspan="4" class="p-8 text-center text-slate-500 italic">No data available</td>
               </tr>
             </tbody>
           </table>
@@ -105,7 +130,7 @@
       <div class="glass-panel rounded-xl flex flex-col overflow-hidden">
         <div class="p-4 bg-slate-800/50 border-b border-white/5 font-semibold text-white flex justify-between items-center">
           <span>Sales Roster</span>
-          <span class="text-xs text-slate-500">Reassigned From = moved off rep</span>
+          <span class="text-xs text-slate-500">Reassignments Lost = moved off rep</span>
         </div>
         <div class="flex-1 overflow-y-auto scrollbar-thin p-2">
           <table class="w-full text-left border-collapse">
@@ -113,8 +138,8 @@
               <tr>
                 <th class="p-3">Rep Name</th>
                 <th class="p-3 w-20 text-center">Active</th>
-                <th class="p-3 w-28 text-right">Appointments</th>
-                <th class="p-3 w-32 text-right">Reassigned From</th>
+                <th class="p-3 w-36 text-right">Assignments Received</th>
+                <th class="p-3 w-32 text-right">Reassignments Lost</th>
               </tr>
             </thead>
             <tbody>
@@ -128,10 +153,17 @@
                     {{ rep.active ? 'Yes' : 'No' }}
                   </span>
                 </td>
-                <td class="p-3 text-right font-mono">{{ rep.appointmentsAssigned }}</td>
-                <td class="p-3 text-right font-mono">
-                  <span v-if="rep.appointmentsReassignedFrom === null" class="text-slate-500">N/A</span>
-                  <span v-else>{{ rep.appointmentsReassignedFrom }}</span>
+                <td class="p-3 text-right">
+                  <div class="font-mono">{{ rep.assignmentsReceived.total }}</div>
+                  <div class="text-[10px] text-slate-500">
+                    Appts {{ rep.assignmentsReceived.appointments }} | Phone {{ rep.assignmentsReceived.phoneLeads }}
+                  </div>
+                </td>
+                <td class="p-3 text-right">
+                  <div class="font-mono">{{ rep.reassignmentsLost.total }}</div>
+                  <div class="text-[10px] text-slate-500">
+                    Appts {{ rep.reassignmentsLost.appointments }} | Phone {{ rep.reassignmentsLost.phoneLeads }}
+                  </div>
                 </td>
               </tr>
               <tr v-if="salesRows.length === 0">
@@ -181,7 +213,16 @@
     createApp({
       setup() {
         const meta = ref({ generatedAt: '', timezone: '', window: { mode: 'today', startIso: '', endIso: '' } });
-        const groupTotals = ref({ bdc: { appointmentsAssigned: 0, phoneLeadsAssigned: 0, appointmentsReassigned: null } });
+        const groupTotals = ref({
+          bdc: {
+            assignmentsCreated: { appointments: 0, phoneLeads: 0, total: 0 },
+            reassignActions: { appointments: 0, phoneLeads: 0, total: 0 }
+          },
+          sales: {
+            assignmentsReceived: { appointments: 0, phoneLeads: 0, total: 0 },
+            reassignmentsLost: { appointments: 0, phoneLeads: 0, total: 0 }
+          }
+        });
         const bdcReps = ref([]);
         const salesRoster = ref([]);
         const debug = ref({ warnings: [], sources: [] });
@@ -191,18 +232,11 @@
         const showDebug = ref(false);
         const showDebugJson = ref(false);
 
-        const hasReassignments = computed(() => {
-          const val = groupTotals.value && groupTotals.value.bdc
-            ? groupTotals.value.bdc.appointmentsReassigned
-            : null;
-          return val !== null && val !== undefined;
-        });
-
         const bdcRows = computed(() => {
           const rows = Array.isArray(bdcReps.value) ? bdcReps.value.slice() : [];
           return rows.sort((a, b) => {
-            const aVal = Number(a.appointmentsAssigned || 0);
-            const bVal = Number(b.appointmentsAssigned || 0);
+            const aVal = Number(a.assignmentsCreated ? a.assignmentsCreated.total : 0);
+            const bVal = Number(b.assignmentsCreated ? b.assignmentsCreated.total : 0);
             if (bVal !== aVal) return bVal - aVal;
             return String(a.name || '').localeCompare(String(b.name || ''));
           });
@@ -259,7 +293,6 @@
           lastUpdated,
           showDebug,
           showDebugJson,
-          hasReassignments,
           bdcRows,
           salesRows,
           debugJson,
