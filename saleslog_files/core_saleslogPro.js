@@ -1123,7 +1123,12 @@ function getRequiredCol_(headerMap, headerName) {
 }
 
 function normalizeSourceKey_(value) {
-  return String(value == null ? '' : value).trim();
+  return String(value == null ? '' : value)
+    .replace(/\u00A0/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+    .toUpperCase();
 }
 
 function getReconSheet_(spreadsheet) {
