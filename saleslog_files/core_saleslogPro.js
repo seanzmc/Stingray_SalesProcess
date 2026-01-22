@@ -719,7 +719,7 @@ function menuExportTradesToReconLogDryRun() {
 
 function authorizeReconAccess() {
   const reconSS = SpreadsheetApp.openById(RECON_SPREADSHEET_ID);
-  let reconSheet = reconSS.getSheetByName(RECON_SHEET_NAME);
+  let reconSheet = getReconSheet_(reconSS);
   if (!reconSheet) {
     reconSheet = reconSS.insertSheet(RECON_SHEET_NAME);
   }
@@ -1091,6 +1091,50 @@ function formatReconDealDate_(dealDateDisplay, dateISO) {
   );
 }
 
+function normalizeHeader_(header) {
+  return String(header == null ? '' : header)
+    .trim()
+    .toLowerCase();
+}
+
+function getHeaderMap_(sheet, headerRow) {
+  const rowIndex = headerRow || 1;
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 1) return {};
+  const headerValues = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0] || [];
+  const headerMap = {};
+  headerValues.forEach((header, idx) => {
+    const normalized = normalizeHeader_(header);
+    if (!normalized || headerMap[normalized]) return;
+    headerMap[normalized] = idx + 1;
+  });
+  return headerMap;
+}
+
+function getRequiredCol_(headerMap, headerName) {
+  const normalized = normalizeHeader_(headerName);
+  const colIndex = headerMap[normalized];
+  if (!colIndex) {
+    const message = `Destination sheet is missing "${headerName}" header in row 1.`;
+    logWarning('getRequiredCol_', message);
+    throw new Error(message);
+  }
+  return colIndex;
+}
+
+function normalizeSourceKey_(value) {
+  return String(value == null ? '' : value).trim();
+}
+
+function getReconSheet_(spreadsheet) {
+  const direct = spreadsheet.getSheetByName(RECON_SHEET_NAME);
+  if (direct) return direct;
+  const targetName = normalizeHeader_(RECON_SHEET_NAME);
+  return spreadsheet
+    .getSheets()
+    .find((sheet) => normalizeHeader_(sheet.getName()) === targetName);
+}
+
 function buildTradeExportCandidatesFromRow_(row, dealDateDisplay, side) {
   const result = [];
   const fiFlag =
@@ -1223,34 +1267,29 @@ function appendTradesToRecon_(candidates, options) {
   }
 
   const reconSS = SpreadsheetApp.openById(RECON_SPREADSHEET_ID);
-  const reconSheet = reconSS.getSheetByName(RECON_SHEET_NAME);
+  const reconSheet = getReconSheet_(reconSS);
   if (!reconSheet) {
     throw new Error(`Missing destination sheet: ${RECON_SHEET_NAME}`);
   }
 
-  const maxCols = reconSheet.getMaxColumns();
-  if (!dryRun && maxCols < 14) {
-    reconSheet.insertColumnsAfter(maxCols, 14 - maxCols);
-  }
-
-  if (!dryRun && reconSheet.getMaxColumns() >= 14) {
-    const headerRange = reconSheet.getRange(1, 13, 1, 2);
-    const headerValues = headerRange.getValues();
-    const headerRow = headerValues[0] || [];
-    if (
-      headerRow[0] !== RECON_SOURCEKEY_HEADER ||
-      headerRow[1] !== RECON_IMPORTEDAT_HEADER
-    ) {
-      headerRange.setValues([[RECON_SOURCEKEY_HEADER, RECON_IMPORTEDAT_HEADER]]);
-    }
+  const lastCol = reconSheet.getLastColumn();
+  const headerMap = getHeaderMap_(reconSheet, 1);
+  const sourceKeyCol = getRequiredCol_(headerMap, RECON_SOURCEKEY_HEADER);
+  if (!headerMap[normalizeHeader_(RECON_IMPORTEDAT_HEADER)]) {
+    logWarning(
+      'appendTradesToRecon_',
+      `Destination sheet is missing "${RECON_IMPORTEDAT_HEADER}" header in row 1. ImportedAt will be blank.`
+    );
   }
 
   const lastRow = reconSheet.getLastRow();
   const existingKeys = new Set();
-  if (lastRow >= 2 && reconSheet.getMaxColumns() >= 13) {
-    const keyValues = reconSheet.getRange(2, 13, lastRow - 1, 1).getValues();
+  if (lastRow >= 2) {
+    const keyValues = reconSheet
+      .getRange(2, sourceKeyCol, lastRow - 1, 1)
+      .getValues();
     keyValues.forEach((row) => {
-      const key = String(row[0] || '').trim();
+      const key = normalizeSourceKey_(row[0]);
       if (key) existingKeys.add(key);
     });
   }
@@ -1265,7 +1304,7 @@ function appendTradesToRecon_(candidates, options) {
   );
 
   candidates.forEach((candidate) => {
-    const key = candidate && candidate.key ? String(candidate.key).trim() : '';
+    const key = normalizeSourceKey_(candidate && candidate.key);
     const isInvalid = !!(candidate && candidate.isInvalid);
     if (!key || existingKeys.has(key)) {
       skippedDuplicates++;
@@ -1279,29 +1318,47 @@ function appendTradesToRecon_(candidates, options) {
       formatReconDealDate_(candidate.dateDisplay, candidate.dateISO) ||
       candidate.dateISO ||
       '';
-    rowsToAppend.push([
-      reconDateDisplay,
-      candidate.stock || '',
-      candidate.salesperson || '',
-      '',
-      '',
-      '',
-      '',
-      'Plant City',
-      '',
-      '',
-      '',
-      notes,
-      key,
-      importedAt,
-    ]);
+    const rowData = {
+      DealDate: reconDateDisplay,
+      Stock: candidate.stock || '',
+      Salesperson: candidate.salesperson || '',
+      Location: 'Plant City',
+      Notes: notes,
+    };
+    rowData[RECON_SOURCEKEY_HEADER] = key;
+    rowData[RECON_IMPORTEDAT_HEADER] = importedAt;
+    const rowValues = new Array(lastCol).fill('');
+    Object.keys(rowData).forEach((headerName) => {
+      const colIndex = headerMap[normalizeHeader_(headerName)];
+      if (colIndex) rowValues[colIndex - 1] = rowData[headerName];
+    });
+    rowsToAppend.push(rowValues);
   });
 
   if (rowsToAppend.length && !dryRun) {
     const appendRow = Math.max(2, reconSheet.getLastRow() + 1);
-    reconSheet.getRange(appendRow, 1, rowsToAppend.length, 14).setValues(rowsToAppend);
+    reconSheet
+      .getRange(appendRow, 1, rowsToAppend.length, lastCol)
+      .setValues(rowsToAppend);
     try {
-      reconSheet.hideColumns(13, 2);
+      const sourceKeyColToHide = headerMap[normalizeHeader_(RECON_SOURCEKEY_HEADER)];
+      const importedAtColToHide =
+        headerMap[normalizeHeader_(RECON_IMPORTEDAT_HEADER)];
+      if (sourceKeyColToHide && importedAtColToHide) {
+        if (Math.abs(sourceKeyColToHide - importedAtColToHide) === 1) {
+          reconSheet.hideColumns(
+            Math.min(sourceKeyColToHide, importedAtColToHide),
+            2
+          );
+        } else {
+          reconSheet.hideColumns(sourceKeyColToHide);
+          reconSheet.hideColumns(importedAtColToHide);
+        }
+      } else if (sourceKeyColToHide) {
+        reconSheet.hideColumns(sourceKeyColToHide);
+      } else if (importedAtColToHide) {
+        reconSheet.hideColumns(importedAtColToHide);
+      }
     } catch (_) {
       // Ignore if hiding is not permitted.
     }
