@@ -1184,6 +1184,23 @@ function buildAuditDetailsString_(detailsObj) {
   return formatAuditDetails_(detailsObj);
 }
 
+function buildReassignmentAuditDetails_(details) {
+  const source = details || {};
+  const output = {};
+  const addField = (key) => {
+    const value = String(source[key] || '').trim();
+    if (value) output[key] = value;
+  };
+
+  addField('appointmentId');
+  addField('fromAssignee');
+  addField('toAssignee');
+  addField('method');
+  addField('reason');
+
+  return output;
+}
+
 function validateUndoStateTokenOrThrow_(stateToken, live) {
   if (!stateToken || typeof stateToken !== 'object') return;
   const expectedPointerBefore = stateToken.pointerBefore;
@@ -1715,15 +1732,24 @@ function advanceRoundRobinPointer_(roster, auditInfo) {
       })
     : null;
   const logDetails = Object.assign({}, details, builtDetails || {});
+  const actionType = ai.actionType || AUDIT_ACTIONS.ADVANCE;
+  const normalizedAction = normalizeAuditAction_(actionType);
 
-  logRoundRobinEvent(ai.actionType || AUDIT_ACTIONS.ADVANCE, {
-    pointerBefore: pointerBefore,
-    pointerAfter: pointerAfter,
-    assignee: assignee,
-    nextUp: nextUp,
-    rosterCount: roster.length,
-    ...logDetails,
-  });
+  if (normalizedAction === AUDIT_ACTIONS.REASSIGNMENT) {
+    const reassignmentDetails = buildReassignmentAuditDetails_(logDetails);
+    if (logDetails.row) reassignmentDetails.row = logDetails.row;
+    if (logDetails.user) reassignmentDetails.user = logDetails.user;
+    logRoundRobinEvent(actionType, reassignmentDetails);
+  } else {
+    logRoundRobinEvent(actionType, {
+      pointerBefore: pointerBefore,
+      pointerAfter: pointerAfter,
+      assignee: assignee,
+      nextUp: nextUp,
+      rosterCount: roster.length,
+      ...logDetails,
+    });
+  }
 
   return {
     assignee,
@@ -1789,16 +1815,25 @@ function advanceRoundRobinPointerByName_(roster, auditInfo) {
       })
     : null;
   const logDetails = Object.assign({}, details, builtDetails || {});
+  const actionType = ai.actionType || AUDIT_ACTIONS.ADVANCE;
+  const normalizedAction = normalizeAuditAction_(actionType);
 
-  logRoundRobinEvent(ai.actionType || AUDIT_ACTIONS.ADVANCE, {
-    pointerBefore: pointerBefore,
-    pointerAfter: pointerAfter,
-    assignee: assignee,
-    nextUp: nextUp,
-    rosterCount: roster.length,
-    lastAssignedNameBefore: lastAssignedNameBefore || '(blank)',
-    ...logDetails,
-  });
+  if (normalizedAction === AUDIT_ACTIONS.REASSIGNMENT) {
+    const reassignmentDetails = buildReassignmentAuditDetails_(logDetails);
+    if (logDetails.row) reassignmentDetails.row = logDetails.row;
+    if (logDetails.user) reassignmentDetails.user = logDetails.user;
+    logRoundRobinEvent(actionType, reassignmentDetails);
+  } else {
+    logRoundRobinEvent(actionType, {
+      pointerBefore: pointerBefore,
+      pointerAfter: pointerAfter,
+      assignee: assignee,
+      nextUp: nextUp,
+      rosterCount: roster.length,
+      lastAssignedNameBefore: lastAssignedNameBefore || '(blank)',
+      ...logDetails,
+    });
+  }
 
   return {
     assignee,
