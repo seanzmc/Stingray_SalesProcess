@@ -480,33 +480,24 @@ function handleAppointmentEdit(e) {
       for (let i = 0; i < rowCount; i++) {
         const row = dataRowStart + i;
         const rowValues = values[i];
-        const newAssignee = isSingleAssignedCell
-          ? e.value
-          : rowValues[COL_ASSIGNED - 1];
-        const oldAssignee = isSingleAssignedCell ? e.oldValue : '(unknown)';
+        const newAssignee = String(
+          isSingleAssignedCell ? e.value : rowValues[COL_ASSIGNED - 1] || ''
+        ).trim();
+        const oldAssignee = String(isSingleAssignedCell ? e.oldValue : '' || '').trim();
         const appointmentId = ensureAppointmentIdForRow_(appts, row, rowValues, idCol);
         const reason =
           numRows > 1 || numCols > 1 ? 'Bulk edit in sheet' : 'User manual edit in sheet';
         const method = 'Manual Override';
 
-        logRoundRobinEvent(AUDIT_ACTIONS.MANUAL_OVERRIDE, {
-          row: row,
-          oldAssignee: oldAssignee || '(empty)',
-          newAssignee: newAssignee || '(empty)',
-          fromAssignee: oldAssignee || '',
-          toAssignee: newAssignee || '',
-          appointmentId: appointmentId,
-          reason: reason,
-          method: method,
-          user: user,
-          _detailsJson: buildReassignmentDetailsJson_(
-            appointmentId,
-            oldAssignee,
-            newAssignee,
-            reason,
-            method
-          ),
-        });
+        const auditDetails = { row: row };
+        if (appointmentId) auditDetails.appointmentId = appointmentId;
+        if (oldAssignee) auditDetails.fromAssignee = oldAssignee;
+        if (newAssignee) auditDetails.toAssignee = newAssignee;
+        if (method) auditDetails.method = method;
+        if (reason) auditDetails.reason = reason;
+        if (user) auditDetails.user = user;
+
+        logRoundRobinEvent(AUDIT_ACTIONS.MANUAL_OVERRIDE, auditDetails);
 
         // Update Mode to "Manual" if not already (idempotent, side-effect only)
         try {
@@ -1583,33 +1574,33 @@ function assignRowAuto_(row, opts = {}) {
       : AUDIT_ACTIONS.NEW_APPOINTMENT;
     const fromAssignee = alreadyAssigned || '';
     const reason = opts.details && opts.details.reason ? opts.details.reason : '';
-    const baseDetails = {
-      row: row,
-      customer: name,
-      notes: opts.forceReassign ? 'Reassignment (Force)' : 'New Assignment',
-      ...(opts.details || {}), // Merge custom details like 'reason'
-      ...(opts.auditUser ? { user: opts.auditUser } : {}),
-    };
+    let baseDetails = {};
     if (opts.forceReassign) {
-      baseDetails.fromAssignee = fromAssignee;
-      baseDetails.appointmentId = appointmentId;
+      baseDetails = { row: row };
+      if (appointmentId) baseDetails.appointmentId = appointmentId;
+      if (fromAssignee) baseDetails.fromAssignee = fromAssignee;
+      if (opts.auditUser) baseDetails.user = opts.auditUser;
+    } else {
+      baseDetails = {
+        row: row,
+        customer: name,
+        notes: opts.forceReassign ? 'Reassignment (Force)' : 'New Assignment',
+        ...(opts.details || {}), // Merge custom details like 'reason'
+        ...(opts.auditUser ? { user: opts.auditUser } : {}),
+      };
     }
 
     const result = advanceRoundRobinPointerByName_(roster, {
       actionType: actionType,
       details: baseDetails,
       detailsBuilder: opts.forceReassign
-        ? (ctx) => ({
-            toAssignee: ctx.assignee,
-            method: opts.mode || '',
-            _detailsJson: buildReassignmentDetailsJson_(
-              appointmentId,
-              fromAssignee,
-              ctx.assignee,
-              reason,
-              opts.mode
-            ),
-          })
+        ? (ctx) => {
+            const detailExtras = {};
+            if (ctx.assignee) detailExtras.toAssignee = ctx.assignee;
+            if (opts.mode) detailExtras.method = opts.mode;
+            if (reason) detailExtras.reason = reason;
+            return detailExtras;
+          }
         : null,
     });
 

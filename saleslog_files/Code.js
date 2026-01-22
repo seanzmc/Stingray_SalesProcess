@@ -504,7 +504,7 @@ function computeDashboardDataFromSpreadsheet_(ss) {
       range: 'A2:E',
       action: actions.REASSIGNMENT,
       window: 'today',
-      note: 'Uses details.fromAssignee (or last-known assignee by appointmentId/reference).',
+      note: 'Uses details.fromAssignee, then from/oldAssignee, then lastAssignedNameBefore, then reference.',
     });
 
     if (auditRowCount > 0) {
@@ -516,7 +516,6 @@ function computeDashboardDataFromSpreadsheet_(ss) {
 
       const numRows = lastAuditRow - startRow + 1;
       const logData = auditSheet.getRange(startRow, 1, numRows, 5).getValues();
-      const lastAssigneeByKey = {};
 
       for (let i = 0; i < logData.length; i++) {
         const row = logData[i];
@@ -578,33 +577,24 @@ function computeDashboardDataFromSpreadsheet_(ss) {
             reassignmentKeyMissing = true;
           }
 
-          let fromNameRaw = getReassignmentFromName_(details, referenceRaw);
-          if (!fromNameRaw && recordKey && lastAssigneeByKey[recordKey]) {
-            fromNameRaw = lastAssigneeByKey[recordKey];
+          const hasFromAssignee = Boolean(
+            details && String(details.fromAssignee || '').trim()
+          );
+          const hasLastAssigned = Boolean(
+            details && String(details.lastAssignedNameBefore || '').trim()
+          );
+          if (!hasFromAssignee && !hasLastAssigned) {
+            reassignmentFromMissing = true;
           }
+
+          const fromNameRaw = getReassignmentFromName_(details, referenceRaw);
 
           if (fromNameRaw) {
             const fromKey = normalizeName_(fromNameRaw).toLowerCase();
             const salesName = rosterData.nameMap[fromKey];
             if (salesName && rosterStats[salesName]) {
               rosterStats[salesName].reassignmentsLost.appointments++;
-            } else {
-              reassignmentFromMissing = true;
             }
-          } else {
-            reassignmentFromMissing = true;
-          }
-
-          const toNameRaw = getAssigneeFromDetails_(details);
-          if (recordKey && toNameRaw) {
-            lastAssigneeByKey[recordKey] = toNameRaw;
-          }
-        }
-
-        if (recordKey && action === actions.NEW_APPOINTMENT) {
-          const toNameRaw = getAssigneeFromDetails_(details);
-          if (toNameRaw) {
-            lastAssigneeByKey[recordKey] = toNameRaw;
           }
         }
       }
@@ -623,7 +613,7 @@ function computeDashboardDataFromSpreadsheet_(ss) {
     addWarning_(
       warnings,
       warningSet,
-      'Reassignment audit entries missing reassigned-from assignee; sales reassignments lost may be undercounted.'
+      'Reassignment entries missing fromAssignee; cannot count reassigned-from reliably.'
     );
   }
 
@@ -785,8 +775,9 @@ function normalizeAssignmentMethod_(value) {
 
 function getReassignmentFromName_(details, reference) {
   if (details && details.fromAssignee) return details.fromAssignee;
-  if (details && details.lastAssignedNameBefore) return details.lastAssignedNameBefore;
   if (details && details.from) return details.from;
+  if (details && details.oldAssignee) return details.oldAssignee;
+  if (details && details.lastAssignedNameBefore) return details.lastAssignedNameBefore;
   return parseFromReference_(reference);
 }
 
