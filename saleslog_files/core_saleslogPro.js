@@ -1502,6 +1502,9 @@ function appendTradesToRecon_(candidates, options) {
     'Location',
     RECON_SOURCEKEY_HEADER,
   ]);
+  const headers = reconSheet
+    .getRange(headerRow, 1, 1, lastCol)
+    .getDisplayValues()[0] || [];
   const headerMap = getHeaderMap_(reconSheet, headerRow);
 
   const sourceKeyCol = detectSourceKeyCol_(
@@ -1515,32 +1518,35 @@ function appendTradesToRecon_(candidates, options) {
 
   // Debug log: print the detected header row and visible headers in that row.
   try {
-    const headerPreview = reconSheet.getRange(headerRow, 1, 1, lastCol).getDisplayValues()[0] || [];
-    Logger.log('appendTradesToRecon_: detected headerRow=' + headerRow + ' headers=' + JSON.stringify(headerPreview));
+    Logger.log('appendTradesToRecon_: detected headerRow=' + headerRow + ' headers=' + JSON.stringify(headers));
   } catch (e) {
     Logger.log('appendTradesToRecon_: header preview failed: ' + e);
   }
 
 
   // Resolve required destination columns by header name (robust to column moves).
-const headers = reconSheet
-  .getRange(headerRow, 1, 1, lastCol)
-  .getDisplayValues()[0];
-
-function findColExact_(headers, name) {
-  const target = name.trim().toLowerCase();
-  for (let i = 0; i < headers.length; i++) {
-    if (String(headers[i]).trim().toLowerCase() === target) {
-      return i + 1; // 1-based
+  function findHeaderCol_(headers, label) {
+    const target = String(label).trim().toLowerCase();
+    for (let i = 0; i < headers.length; i++) {
+      if (String(headers[i]).trim().toLowerCase() === target) {
+        return i + 1; // 1-based
+      }
     }
+    return 0;
   }
-  throw new Error(`Missing required column: ${name}`);
-}
 
-const dealDateCol     = findColExact_(headers, 'Deal Date');
-const stockCol        = findColExact_(headers, 'Stock #');
-const salespersonCol  = findColExact_(headers, 'Salesperson');
-const locationCol     = findColExact_(headers, 'Location');
+  function requireHeaderCol_(headers, label) {
+    const col = findHeaderCol_(headers, label);
+    if (!col) throw new Error(`Missing required column: ${label}`);
+    return col;
+  }
+
+  const dealDateCol     = requireHeaderCol_(headers, 'Deal Date');
+  const stockCol        = findHeaderCol_(headers, 'Stock #');
+  const salespersonCol  = requireHeaderCol_(headers, 'Salesperson');
+  const locationCol     = requireHeaderCol_(headers, 'Location');
+  const notesCol        = 0;
+  if (!stockCol) throw new Error('Missing required column: Stock #');
 
   // If headerMap says SourceKey is a different column than our detected sourceKeyCol, prefer detection.
   // (Detection is based on actual key pattern in the data.)
@@ -1556,6 +1562,31 @@ const locationCol     = findColExact_(headers, 'Location');
     });
   }
 
+  const maxRows = reconSheet.getMaxRows();
+  const scanEndRow = Math.min(maxRows, 3000);
+  let lastDataRow = 0;
+  if (scanEndRow >= 2) {
+    const stockValues = reconSheet
+      .getRange(2, stockCol, scanEndRow - 1, 1)
+      .getDisplayValues();
+    for (let i = stockValues.length - 1; i >= 0; i--) {
+      if (String(stockValues[i][0]).trim()) {
+        lastDataRow = i + 2;
+        break;
+      }
+    }
+  }
+  const appendRow = lastDataRow ? lastDataRow + 1 : 2;
+  Logger.log(
+    'appendTradesToRecon_: stockCol=' +
+      stockCol +
+      ' appendRow=' +
+      appendRow +
+      ' lastDataRow=' +
+      lastDataRow +
+      ' headerRow=' +
+      headerRow
+  );
 
   const rowsToAppend = [];
   let skippedDuplicates = 0;
@@ -1611,12 +1642,11 @@ const locationCol     = findColExact_(headers, 'Location');
   });
 
   if (rowsToAppend.length && !dryRun) {
-    const appendRow = Math.max(2, reconSheet.getLastRow() + 1);
     reconSheet
       .getRange(appendRow, 1, rowsToAppend.length, lastCol)
       .setValues(rowsToAppend);
     try {
-      const sourceKeyColToHide = headerMap[normalizeHeader_(RECON_SOURCEKEY_HEADER)];
+      const sourceKeyColToHide = sourceKeyCol;
       const importedAtColToHide =
         headerMap[normalizeHeader_(RECON_IMPORTEDAT_HEADER)];
       if (sourceKeyColToHide && importedAtColToHide) {
