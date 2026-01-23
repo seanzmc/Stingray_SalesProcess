@@ -80,6 +80,7 @@ const RECON_SPREADSHEET_ID = '1REAs1ySLZFAHylXWrvoG8N3cvj_iLlNiPVWArT3EEvw';
 const RECON_SHEET_NAME = 'RECON_IMPORT';
 const RECON_SOURCEKEY_HEADER = 'SourceKey';
 const RECON_IMPORTEDAT_HEADER = 'ImportedAt';
+const RECON_SOURCEKEY_COL_CACHE_KEY = 'RECON_SOURCEKEY_COL_CACHE';
 
 // Default color constants (used as fallbacks if configuration not available)
 const DEFAULT_COLORS = {
@@ -985,27 +986,37 @@ function summarizeRows(rows) {
 }
 
 function parseTradeStocksDetailed(cellValue) {
-  const raw = String(cellValue || '').trim();
+  const raw = String(cellValue == null ? '' : cellValue).trim();
   if (!raw) return { valid: [], invalid: [] };
-  if (raw.toUpperCase() === 'NT') return { valid: [], invalid: [] };
 
-  const normalized = raw.toUpperCase();
-  const cleaned = normalized.replace(/[^A-Z0-9]+/g, ' ');
+  const upper = raw.toUpperCase();
+  if (upper === 'NT') return { valid: [], invalid: [] };
+
+  // Convert any non-alphanumeric separators to spaces, then extract tokens.
+  // This handles commas, slashes, ampersands, newlines, and plain spaces.
+  const cleaned = upper.replace(/[^A-Z0-9]+/g, ' ');
   const tokens = cleaned.match(/[A-Z0-9]+/g) || [];
-  const valid = new Set();
-  const invalid = new Set();
+
+  const validSet = new Set();
+  const invalidSet = new Set();
 
   tokens.forEach((token) => {
-    const trimmed = String(token || '').trim();
-    if (!trimmed) return;
-    if (trimmed.length === 8) {
-      valid.add(trimmed);
-    } else if (trimmed.length >= 4 && trimmed.length <= 12) {
-      invalid.add(trimmed);
+    const t = String(token || '').trim();
+    if (!t) return;
+    if (t.length === 8) {
+      validSet.add(t);
+      return;
+    }
+    // If it looks like an attempted stock number, track it as invalid so we can flag it.
+    if (t.length >= 4 && t.length <= 12) {
+      invalidSet.add(t);
     }
   });
 
-  return { valid: Array.from(valid), invalid: Array.from(invalid) };
+  return {
+    valid: Array.from(validSet),
+    invalid: Array.from(invalidSet),
+  };
 }
 
 function parseTradeStocks(cellValue) {
@@ -1101,21 +1112,49 @@ function getHeaderMap_(sheet, headerRow) {
   const rowIndex = headerRow || 1;
   const lastCol = sheet.getLastColumn();
   if (lastCol < 1) return {};
-  const headerValues = sheet.getRange(rowIndex, 1, 1, lastCol).getValues()[0] || [];
+  const headerValues = sheet.getRange(rowIndex, 1, 1, lastCol).getDisplayValues()[0] || [];
   const headerMap = {};
   headerValues.forEach((header, idx) => {
     const normalized = normalizeHeader_(header);
-    if (!normalized || headerMap[normalized]) return;
+    if (!normalized) return;
+    // Prefer the last occurrence so duplicated headers after column moves don't break mapping.
     headerMap[normalized] = idx + 1;
   });
   return headerMap;
+}
+
+function findReconHeaderRow_(sheet, requiredHeaders) {
+  const required = (requiredHeaders || []).map((h) => normalizeHeader_(h)).filter(Boolean);
+  const lastCol = sheet.getLastColumn();
+  if (lastCol < 1) return 1;
+
+  // Scan first few rows to find the row that contains the most required headers.
+  const maxScanRows = Math.min(10, sheet.getLastRow() || 10);
+  let bestRow = 1;
+  let bestScore = -1;
+
+  for (let r = 1; r <= maxScanRows; r++) {
+    const rowValues = sheet.getRange(r, 1, 1, lastCol).getDisplayValues()[0] || [];
+    const rowSet = new Set(rowValues.map((v) => normalizeHeader_(v)).filter(Boolean));
+    let score = 0;
+    required.forEach((h) => {
+      if (rowSet.has(h)) score++;
+    });
+    if (score > bestScore) {
+      bestScore = score;
+      bestRow = r;
+      if (bestScore === required.length) break; // perfect match
+    }
+  }
+
+  return bestRow;
 }
 
 function getRequiredCol_(headerMap, headerName) {
   const normalized = normalizeHeader_(headerName);
   const colIndex = headerMap[normalized];
   if (!colIndex) {
-    const message = `Destination sheet is missing "${headerName}" header in row 1.`;
+    const message = `Destination sheet is missing "${headerName}" header (normalized="${normalized}").`;
     logWarning('getRequiredCol_', message);
     throw new Error(message);
   }
@@ -1129,6 +1168,118 @@ function normalizeSourceKey_(value) {
     .replace(/\s+/g, '')
     .trim()
     .toUpperCase();
+}
+
+function detectSourceKeyCol_(sheet, lastRow, lastCol, headerMap) {
+  const headerMappedCol = headerMap[normalizeHeader_(RECON_SOURCEKEY_HEADER)] || 0;
+  const sheetId = sheet.getSheetId();
+  const props = PropertiesService.getScriptProperties();
+  const keyPattern = /^\d{4}-\d{2}-\d{2}\|[A-Z0-9]{8}$/;
+  const sampleLimit = Math.min(lastRow, 200);
+  const scanLimit = Math.min(lastRow, 250);
+  const sampleRowCount = Math.max(0, sampleLimit - 1);
+  const scanRowCount = Math.max(0, scanLimit - 1);
+
+  const matchesSampleThreshold_ = (matchCount, nonEmptyCount) => {
+    if (matchCount >= 10) return true;
+    return nonEmptyCount > 0 && matchCount / nonEmptyCount >= 0.2;
+  };
+
+  const sampleColumn_ = (colIndex) => {
+    if (!colIndex || colIndex < 1 || colIndex > lastCol || sampleRowCount < 1) {
+      return { matches: 0, nonEmpty: 0 };
+    }
+    const values = sheet
+      .getRange(2, colIndex, sampleRowCount, 1)
+      .getDisplayValues();
+    let matches = 0;
+    let nonEmpty = 0;
+    for (let i = 0; i < values.length; i++) {
+      const raw = String(values[i][0] == null ? '' : values[i][0]).trim();
+      if (raw) nonEmpty++;
+      const normalized = normalizeSourceKey_(raw);
+      if (normalized && keyPattern.test(normalized)) matches++;
+    }
+    return { matches: matches, nonEmpty: nonEmpty };
+  };
+
+  if (lastRow < 2) {
+    if (headerMappedCol) return headerMappedCol;
+    throw new Error(
+      `Unable to detect SourceKey column: ${sheet.getName()} has no data rows.`
+    );
+  }
+
+  const cachedStr = props.getProperty(RECON_SOURCEKEY_COL_CACHE_KEY);
+  if (cachedStr) {
+    try {
+      const cached = JSON.parse(cachedStr);
+      if (cached && cached.sheetId === sheetId) {
+        const cachedCol = Number(cached.col);
+        const cachedSample = sampleColumn_(cachedCol);
+        if (matchesSampleThreshold_(cachedSample.matches, cachedSample.nonEmpty)) {
+          Logger.log(
+            `Detected SourceKey column = ${cachedCol} (matches=${cachedSample.matches}, headerMapped=${headerMappedCol}).`
+          );
+          return cachedCol;
+        }
+      }
+    } catch (e) {
+      Logger.log('detectSourceKeyCol_: cache parse failed: ' + e);
+    }
+  }
+
+  if (headerMappedCol) {
+    const headerSample = sampleColumn_(headerMappedCol);
+    if (matchesSampleThreshold_(headerSample.matches, headerSample.nonEmpty)) {
+      props.setProperty(
+        RECON_SOURCEKEY_COL_CACHE_KEY,
+        JSON.stringify({ col: headerMappedCol, sheetId: sheetId, ts: Date.now() })
+      );
+      Logger.log(
+        `Detected SourceKey column = ${headerMappedCol} (matches=${headerSample.matches}, headerMapped=${headerMappedCol}).`
+      );
+      return headerMappedCol;
+    }
+  }
+
+  if (scanRowCount < 1 || lastCol < 1) {
+    throw new Error(
+      `Unable to detect SourceKey column: ${sheet.getName()} has no scannable data.`
+    );
+  }
+
+  const allValues = sheet.getRange(2, 1, scanRowCount, lastCol).getDisplayValues();
+  let bestCol = 0;
+  let bestMatches = 0;
+  for (let c = 0; c < lastCol; c++) {
+    let matches = 0;
+    for (let r = 0; r < scanRowCount; r++) {
+      const raw = String(allValues[r][c] == null ? '' : allValues[r][c]).trim();
+      if (!raw) continue;
+      const normalized = normalizeSourceKey_(raw);
+      if (normalized && keyPattern.test(normalized)) matches++;
+    }
+    if (matches > bestMatches) {
+      bestMatches = matches;
+      bestCol = c + 1;
+    }
+  }
+
+  if (!bestCol || bestMatches <= 0) {
+    throw new Error(
+      `Unable to detect SourceKey column in ${sheet.getName()}: no matching keys found.`
+    );
+  }
+
+  props.setProperty(
+    RECON_SOURCEKEY_COL_CACHE_KEY,
+    JSON.stringify({ col: bestCol, sheetId: sheetId, ts: Date.now() })
+  );
+  Logger.log(
+    `Detected SourceKey column = ${bestCol} (matches=${bestMatches}, headerMapped=${headerMappedCol}).`
+  );
+  return bestCol;
 }
 
 function getReconSheet_(spreadsheet) {
@@ -1277,26 +1428,142 @@ function appendTradesToRecon_(candidates, options) {
     throw new Error(`Missing destination sheet: ${RECON_SHEET_NAME}`);
   }
 
+  const lastRow = reconSheet.getLastRow();
   const lastCol = reconSheet.getLastColumn();
-  const headerMap = getHeaderMap_(reconSheet, 1);
-  const sourceKeyCol = getRequiredCol_(headerMap, RECON_SOURCEKEY_HEADER);
-  if (!headerMap[normalizeHeader_(RECON_IMPORTEDAT_HEADER)]) {
-    logWarning(
-      'appendTradesToRecon_',
-      `Destination sheet is missing "${RECON_IMPORTEDAT_HEADER}" header in row 1. ImportedAt will be blank.`
-    );
+
+  // Header row can move (service may insert rows / rename sections). Detect it dynamically.
+  const headerRow = findReconHeaderRow_(reconSheet, [
+    'Deal Date',
+    'Stock #',
+    'Salesperson',
+    'Location',
+    RECON_SOURCEKEY_HEADER,
+  ]);
+  const headerMap = getHeaderMap_(reconSheet, headerRow);
+
+  const sourceKeyCol = detectSourceKeyCol_(
+    reconSheet,
+    lastRow,
+    lastCol,
+    headerMap
+  );
+  // ImportedAt is optional; do not warn if the destination sheet doesn't use it.
+  const hasImportedAt = !!headerMap[normalizeHeader_(RECON_IMPORTEDAT_HEADER)];
+
+  // Debug log: print the detected header row and visible headers in that row.
+  try {
+    const headerPreview = reconSheet.getRange(headerRow, 1, 1, lastCol).getDisplayValues()[0] || [];
+    Logger.log('appendTradesToRecon_: detected headerRow=' + headerRow + ' headers=' + JSON.stringify(headerPreview));
+  } catch (e) {
+    Logger.log('appendTradesToRecon_: header preview failed: ' + e);
   }
 
-  const lastRow = reconSheet.getLastRow();
+  // Resolve required destination columns by header name (robust to column moves).
+  const dealDateCol = getRequiredCol_(headerMap, 'Deal Date');
+  const stockCol = getRequiredCol_(headerMap, 'Stock #');
+  const salespersonCol = getRequiredCol_(headerMap, 'Salesperson');
+  const locationCol = getRequiredCol_(headerMap, 'Location');
+
+  // Notes is optional (service may rename/remove); only write if present.
+  const notesCol = headerMap[normalizeHeader_('Notes')] || 0;
+
+  // If headerMap says SourceKey is a different column than our detected sourceKeyCol, prefer detection.
+  // (Detection is based on actual key pattern in the data.)
   const existingKeys = new Set();
+
+  // Read SourceKey column as the primary source of truth.
+  let keyValues = [];
   if (lastRow >= 2) {
-    const keyValues = reconSheet
-      .getRange(2, sourceKeyCol, lastRow - 1, 1)
-      .getValues();
+    keyValues = reconSheet.getRange(2, sourceKeyCol, lastRow - 1, 1).getValues();
     keyValues.forEach((row) => {
       const key = normalizeSourceKey_(row[0]);
       if (key) existingKeys.add(key);
     });
+  }
+
+  // DEBUG: show what we actually read from the SourceKey column.
+  try {
+    const debugValues = keyValues;
+    let rawNonEmptyCount = 0;
+    let normalizedNonEmptyCount = 0;
+    const rawSamples = [];
+    const displaySamples = [];
+    const normalizedSamples = [];
+
+    for (let i = 0; i < Math.min(20, debugValues.length); i++) {
+      const rawValue = debugValues[i][0];
+      rawSamples.push(rawValue);
+      normalizedSamples.push(normalizeSourceKey_(rawValue));
+    }
+
+    // Also read display values for the first 20 rows to catch "looks filled" cases.
+    if (lastRow >= 2) {
+      const disp = reconSheet
+        .getRange(2, sourceKeyCol, Math.min(20, lastRow - 1), 1)
+        .getDisplayValues()
+        .map((r) => r[0]);
+      displaySamples.push(...disp);
+    }
+
+    (debugValues || []).forEach((row) => {
+      const rawTrimmed = String(row[0] == null ? '' : row[0]).trim();
+      if (rawTrimmed) rawNonEmptyCount++;
+      const normalizedValue = normalizeSourceKey_(row[0]);
+      if (normalizedValue) normalizedNonEmptyCount++;
+    });
+
+    Logger.log(
+      'appendTradesToRecon_ DEBUG: sourceKeyCol=' +
+        sourceKeyCol +
+        ' rawNonEmptyCount=' +
+        rawNonEmptyCount +
+        ' normalizedNonEmptyCount=' +
+        normalizedNonEmptyCount +
+        ' existingKeys=' +
+        existingKeys.size
+    );
+    Logger.log('appendTradesToRecon_ DEBUG: rawSamples=' + JSON.stringify(rawSamples));
+    Logger.log('appendTradesToRecon_ DEBUG: displaySamples=' + JSON.stringify(displaySamples));
+    Logger.log('appendTradesToRecon_ DEBUG: normalizedSamples=' + JSON.stringify(normalizedSamples));
+  } catch (e) {
+    Logger.log('appendTradesToRecon_ DEBUG: failed to compute debug stats: ' + e);
+  }
+
+  // DEBUG: help diagnose duplicate detection issues
+  try {
+    Logger.log(
+      `appendTradesToRecon_: sheet=${reconSheet.getName()} lastRow=${lastRow} lastCol=${lastCol} sourceKeyCol=${sourceKeyCol} existingKeys.size=${existingKeys.size}`
+    );
+    Logger.log(
+      'appendTradesToRecon_: resolved cols => dealDate=' +
+        dealDateCol +
+        ' stock=' +
+        stockCol +
+        ' salesperson=' +
+        salespersonCol +
+        ' location=' +
+        locationCol +
+        ' notes=' +
+        (notesCol || 0) +
+        ' sourceKey(detected)=' +
+        sourceKeyCol
+    );
+    if (existingKeys.size === 0 && lastRow >= 2) {
+      const sampleRaw = reconSheet
+        .getRange(2, sourceKeyCol, Math.min(10, lastRow - 1), 1)
+        .getValues()
+        .map((r) => r[0]);
+      Logger.log(
+        'appendTradesToRecon_: first raw SourceKey samples=' +
+          JSON.stringify(sampleRaw)
+      );
+      Logger.log(
+        'appendTradesToRecon_: first normalized SourceKey samples=' +
+          JSON.stringify(sampleRaw.map((v) => normalizeSourceKey_(v)).filter(Boolean))
+      );
+    }
+  } catch (e) {
+    Logger.log('appendTradesToRecon_: debug logging failed: ' + e);
   }
   const rowsToAppend = [];
   let skippedDuplicates = 0;
@@ -1307,7 +1574,19 @@ function appendTradesToRecon_(candidates, options) {
     Session.getScriptTimeZone(),
     'yyyy-MM-dd HH:mm:ss'
   );
-
+  // DEBUG: log first normalized candidate keys
+  try {
+    const sampleCandidateKeys = (candidates || [])
+      .slice(0, 10)
+      .map((c) => normalizeSourceKey_(c && c.key))
+      .filter(Boolean);
+    Logger.log(
+      'appendTradesToRecon_: first normalized candidate keys=' +
+        JSON.stringify(sampleCandidateKeys)
+    );
+  } catch (e) {
+    Logger.log('appendTradesToRecon_: candidate debug failed: ' + e);
+  }
   candidates.forEach((candidate) => {
     const key = normalizeSourceKey_(candidate && candidate.key);
     const isInvalid = !!(candidate && candidate.isInvalid);
@@ -1318,25 +1597,37 @@ function appendTradesToRecon_(candidates, options) {
     }
     existingKeys.add(key);
     if (isInvalid) invalidAppended++;
+
     const notes = candidate && candidate.notes ? String(candidate.notes) : '';
+
+    // Deal date formatting for recon sheet (no time / timezone).
     const reconDateDisplay =
       formatReconDealDate_(candidate.dateDisplay, candidate.dateISO) ||
       candidate.dateISO ||
       '';
-    const rowData = {
-      DealDate: reconDateDisplay,
-      Stock: candidate.stock || '',
-      Salesperson: candidate.salesperson || '',
-      Location: 'Plant City',
-      Notes: notes,
-    };
-    rowData[RECON_SOURCEKEY_HEADER] = key;
-    rowData[RECON_IMPORTEDAT_HEADER] = importedAt;
+
     const rowValues = new Array(lastCol).fill('');
-    Object.keys(rowData).forEach((headerName) => {
-      const colIndex = headerMap[normalizeHeader_(headerName)];
-      if (colIndex) rowValues[colIndex - 1] = rowData[headerName];
-    });
+
+    // Always write SourceKey to the detected SourceKey column.
+    rowValues[sourceKeyCol - 1] = key;
+
+    // Write required fields by resolved header columns.
+    rowValues[dealDateCol - 1] = reconDateDisplay;
+    rowValues[stockCol - 1] = candidate.stock || '';
+    rowValues[salespersonCol - 1] = candidate.salesperson || '';
+
+    // Default location for all imported rows.
+    rowValues[locationCol - 1] = 'Plant City';
+
+    // Notes is optional.
+    if (notesCol) rowValues[notesCol - 1] = notes;
+
+    // ImportedAt is optional.
+    if (hasImportedAt) {
+      const importedAtCol = headerMap[normalizeHeader_(RECON_IMPORTEDAT_HEADER)];
+      if (importedAtCol) rowValues[importedAtCol - 1] = importedAt;
+    }
+
     rowsToAppend.push(rowValues);
   });
 
