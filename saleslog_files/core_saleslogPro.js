@@ -1103,7 +1103,15 @@ function formatReconDealDate_(dealDateDisplay, dateISO) {
 }
 
 function normalizeHeader_(header) {
+  return _normalizeHeaderImpl_(header);
+}
+
+function _normalizeHeaderImpl_(header) {
   return String(header == null ? '' : header)
+    .normalize('NFKC')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\s+/g, ' ')
     .trim()
     .toLowerCase();
 }
@@ -1112,14 +1120,28 @@ function getHeaderMap_(sheet, headerRow) {
   const rowIndex = headerRow || 1;
   const lastCol = sheet.getLastColumn();
   if (lastCol < 1) return {};
-  const headerValues = sheet.getRange(rowIndex, 1, 1, lastCol).getDisplayValues()[0] || [];
+
+  const headerValues =
+    sheet.getRange(rowIndex, 1, 1, lastCol).getDisplayValues()[0] || [];
+
   const headerMap = {};
-  headerValues.forEach((header, idx) => {
-    const normalized = normalizeHeader_(header);
-    if (!normalized) return;
-    // Prefer the last occurrence so duplicated headers after column moves don't break mapping.
-    headerMap[normalized] = idx + 1;
+
+  // Deterministic mapping: normalized header -> 1-based column index.
+  // We intentionally overwrite on duplicates so the *last* occurrence wins.
+  for (let i = 0; i < headerValues.length; i++) {
+    const normalized = _normalizeHeaderImpl_(headerValues[i]);
+    if (!normalized) continue;
+    const col = i + 1;
+    headerMap[normalized] = col;
+  }
+
+  // Final sanity: remove any impossible values (should never happen, but keeps callers safe).
+  Object.keys(headerMap).forEach((k) => {
+    const v = Number(headerMap[k]);
+    if (!v || v < 1) delete headerMap[k];
+    else headerMap[k] = v;
   });
+
   return headerMap;
 }
 
@@ -1151,13 +1173,54 @@ function findReconHeaderRow_(sheet, requiredHeaders) {
 }
 
 function getRequiredCol_(headerMap, headerName) {
-  const normalized = normalizeHeader_(headerName);
-  const colIndex = headerMap[normalized];
-  if (!colIndex) {
-    const message = `Destination sheet is missing "${headerName}" header (normalized="${normalized}").`;
-    logWarning('getRequiredCol_', message);
+  if (!headerMap || typeof headerMap !== 'object') {
+    throw new Error(`Missing required column: ${headerName}. Header map not available.`);
+  }
+
+  const normalized = _normalizeHeaderImpl_(headerName);
+  const compact = normalized.replace(/[^a-z0-9]/g, '');
+
+  // 1) Fast path: direct key lookup.
+  if (Object.prototype.hasOwnProperty.call(headerMap, normalized)) {
+    const direct = Number(headerMap[normalized]);
+    if (direct && direct >= 1) return direct;
+  }
+
+  // 2) Robust path: iterate keys and compare normalized forms.
+  // This defends against hidden/unusual whitespace or unicode edge cases.
+  let matchedKey = null;
+  const keys = Object.keys(headerMap);
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i];
+    if (!k) continue;
+    const kn = _normalizeHeaderImpl_(k);
+    if (kn === normalized) {
+      matchedKey = k;
+      break;
+    }
+  }
+
+  // 3) Fallback: compact comparison (ignores spaces/punctuation).
+  if (!matchedKey) {
+    matchedKey = keys.find((k) => {
+      const kn = _normalizeHeaderImpl_(k);
+      return kn && kn.replace(/[^a-z0-9]/g, '') === compact;
+    });
+  }
+
+  const colIndex = matchedKey ? Number(headerMap[matchedKey]) : 0;
+  if (!colIndex || colIndex < 1) {
+    const keysPreview = keys.slice(0, 50).join(', ');
+    const message = `Missing required column: ${headerName}. Available normalized headers: ${keysPreview}`;
+    logWarning('getRequiredCol_', message, {
+      headerName,
+      normalized,
+      compact,
+      matchedKey: matchedKey || null,
+    });
     throw new Error(message);
   }
+
   return colIndex;
 }
 
@@ -1458,14 +1521,26 @@ function appendTradesToRecon_(candidates, options) {
     Logger.log('appendTradesToRecon_: header preview failed: ' + e);
   }
 
-  // Resolve required destination columns by header name (robust to column moves).
-  const dealDateCol = getRequiredCol_(headerMap, 'Deal Date');
-  const stockCol = getRequiredCol_(headerMap, 'Stock #');
-  const salespersonCol = getRequiredCol_(headerMap, 'Salesperson');
-  const locationCol = getRequiredCol_(headerMap, 'Location');
 
-  // Notes is optional (service may rename/remove); only write if present.
-  const notesCol = headerMap[normalizeHeader_('Notes')] || 0;
+  // Resolve required destination columns by header name (robust to column moves).
+const headers = reconSheet
+  .getRange(headerRow, 1, 1, lastCol)
+  .getDisplayValues()[0];
+
+function findColExact_(headers, name) {
+  const target = name.trim().toLowerCase();
+  for (let i = 0; i < headers.length; i++) {
+    if (String(headers[i]).trim().toLowerCase() === target) {
+      return i + 1; // 1-based
+    }
+  }
+  throw new Error(`Missing required column: ${name}`);
+}
+
+const dealDateCol     = findColExact_(headers, 'Deal Date');
+const stockCol        = findColExact_(headers, 'Stock #');
+const salespersonCol  = findColExact_(headers, 'Salesperson');
+const locationCol     = findColExact_(headers, 'Location');
 
   // If headerMap says SourceKey is a different column than our detected sourceKeyCol, prefer detection.
   // (Detection is based on actual key pattern in the data.)
@@ -1481,90 +1556,7 @@ function appendTradesToRecon_(candidates, options) {
     });
   }
 
-  // DEBUG: show what we actually read from the SourceKey column.
-  try {
-    const debugValues = keyValues;
-    let rawNonEmptyCount = 0;
-    let normalizedNonEmptyCount = 0;
-    const rawSamples = [];
-    const displaySamples = [];
-    const normalizedSamples = [];
 
-    for (let i = 0; i < Math.min(20, debugValues.length); i++) {
-      const rawValue = debugValues[i][0];
-      rawSamples.push(rawValue);
-      normalizedSamples.push(normalizeSourceKey_(rawValue));
-    }
-
-    // Also read display values for the first 20 rows to catch "looks filled" cases.
-    if (lastRow >= 2) {
-      const disp = reconSheet
-        .getRange(2, sourceKeyCol, Math.min(20, lastRow - 1), 1)
-        .getDisplayValues()
-        .map((r) => r[0]);
-      displaySamples.push(...disp);
-    }
-
-    (debugValues || []).forEach((row) => {
-      const rawTrimmed = String(row[0] == null ? '' : row[0]).trim();
-      if (rawTrimmed) rawNonEmptyCount++;
-      const normalizedValue = normalizeSourceKey_(row[0]);
-      if (normalizedValue) normalizedNonEmptyCount++;
-    });
-
-    Logger.log(
-      'appendTradesToRecon_ DEBUG: sourceKeyCol=' +
-        sourceKeyCol +
-        ' rawNonEmptyCount=' +
-        rawNonEmptyCount +
-        ' normalizedNonEmptyCount=' +
-        normalizedNonEmptyCount +
-        ' existingKeys=' +
-        existingKeys.size
-    );
-    Logger.log('appendTradesToRecon_ DEBUG: rawSamples=' + JSON.stringify(rawSamples));
-    Logger.log('appendTradesToRecon_ DEBUG: displaySamples=' + JSON.stringify(displaySamples));
-    Logger.log('appendTradesToRecon_ DEBUG: normalizedSamples=' + JSON.stringify(normalizedSamples));
-  } catch (e) {
-    Logger.log('appendTradesToRecon_ DEBUG: failed to compute debug stats: ' + e);
-  }
-
-  // DEBUG: help diagnose duplicate detection issues
-  try {
-    Logger.log(
-      `appendTradesToRecon_: sheet=${reconSheet.getName()} lastRow=${lastRow} lastCol=${lastCol} sourceKeyCol=${sourceKeyCol} existingKeys.size=${existingKeys.size}`
-    );
-    Logger.log(
-      'appendTradesToRecon_: resolved cols => dealDate=' +
-        dealDateCol +
-        ' stock=' +
-        stockCol +
-        ' salesperson=' +
-        salespersonCol +
-        ' location=' +
-        locationCol +
-        ' notes=' +
-        (notesCol || 0) +
-        ' sourceKey(detected)=' +
-        sourceKeyCol
-    );
-    if (existingKeys.size === 0 && lastRow >= 2) {
-      const sampleRaw = reconSheet
-        .getRange(2, sourceKeyCol, Math.min(10, lastRow - 1), 1)
-        .getValues()
-        .map((r) => r[0]);
-      Logger.log(
-        'appendTradesToRecon_: first raw SourceKey samples=' +
-          JSON.stringify(sampleRaw)
-      );
-      Logger.log(
-        'appendTradesToRecon_: first normalized SourceKey samples=' +
-          JSON.stringify(sampleRaw.map((v) => normalizeSourceKey_(v)).filter(Boolean))
-      );
-    }
-  } catch (e) {
-    Logger.log('appendTradesToRecon_: debug logging failed: ' + e);
-  }
   const rowsToAppend = [];
   let skippedDuplicates = 0;
   let invalidSkippedDuplicates = 0;
@@ -1574,19 +1566,6 @@ function appendTradesToRecon_(candidates, options) {
     Session.getScriptTimeZone(),
     'yyyy-MM-dd HH:mm:ss'
   );
-  // DEBUG: log first normalized candidate keys
-  try {
-    const sampleCandidateKeys = (candidates || [])
-      .slice(0, 10)
-      .map((c) => normalizeSourceKey_(c && c.key))
-      .filter(Boolean);
-    Logger.log(
-      'appendTradesToRecon_: first normalized candidate keys=' +
-        JSON.stringify(sampleCandidateKeys)
-    );
-  } catch (e) {
-    Logger.log('appendTradesToRecon_: candidate debug failed: ' + e);
-  }
   candidates.forEach((candidate) => {
     const key = normalizeSourceKey_(candidate && candidate.key);
     const isInvalid = !!(candidate && candidate.isInvalid);
@@ -3368,3 +3347,6 @@ function onOpen() {
     Logger.log('[onOpen] Trigger execution completed');
   }
 }
+
+// Duplicate normalizeHeader_ definitions: replace with delegating one-liners to _normalizeHeaderImpl_
+// (If any exist elsewhere in the file, e.g., function normalizeHeader_(header) { ... }, replace body with the below)
