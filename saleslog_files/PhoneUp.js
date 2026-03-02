@@ -284,14 +284,44 @@ function getSpanishRoster_() {
   }
 
   const roster = [];
+  const invalidValueRows = [];
   for (let i = 1; i < values.length; i++) {
     const name = String(values[i][0] || '').trim();
-    const spanishFlag = String(values[i][4] || '').trim();
+    const rawSpanishFlag = values[i][4];
+    const spanishFlag = normalizeSpanishSpeakerFlag_(rawSpanishFlag);
+    if (spanishFlag === null) {
+      invalidValueRows.push(`${i + 1} ("${String(rawSpanishFlag || '').trim()}")`);
+      continue;
+    }
     if (name && spanishFlag === 'TRUE') {
       roster.push(name);
     }
   }
+
+  if (invalidValueRows.length) {
+    throw new Error(
+      `Invalid RR_ROSTER ${SPANISH_RR_HEADER} values at row(s): ${invalidValueRows.join(', ')}. ` +
+      'Allowed values are "TRUE" or "FALSE" (case-insensitive, surrounding spaces allowed).'
+    );
+  }
+
   return roster;
+}
+
+/**
+ * Normalizes Spanish speaker flag values.
+ * @param {*} value
+ * @return {string|null} "TRUE", "FALSE", "" (blank), or null for invalid.
+ */
+function normalizeSpanishSpeakerFlag_(value) {
+  const raw = String(value === null || value === undefined ? '' : value).trim();
+  if (!raw) return '';
+
+  const upper = raw.toUpperCase();
+  if (upper === 'TRUE' || upper === 'FALSE') {
+    return upper;
+  }
+  return null;
 }
 
 /**
@@ -342,4 +372,87 @@ function setSpanishAssignmentState_(lastAssigned, history) {
  */
 function getSpanishScriptProperties_() {
   return PropertiesService.getScriptProperties();
+}
+
+/**
+ * Manual debug helper. Does not run automatically.
+ * Logs the Spanish roster names and count.
+ * @return {{count: number, names: string[]}}
+ */
+function testSpanishRosterRead_() {
+  const roster = getSpanishRoster_();
+  const message = `[testSpanishRosterRead_] count=${roster.length} names=${roster.join(', ') || '(none)'}`;
+  console.info(message);
+  Logger.log(message);
+  return {
+    count: roster.length,
+    names: roster,
+  };
+}
+
+/**
+ * Manual debug helper. Does not run automatically.
+ * Simulates assign -> assign -> undo and logs Spanish RR state transitions.
+ * Restores prior Spanish RR state when finished.
+ * @return {Object}
+ */
+function testSpanishAssignUndo_() {
+  const snapshot = {
+    lastAssigned: getSpanishLastAssigned_(),
+    history: getSpanishAssignmentHistory_().slice(),
+  };
+
+  const transitions = {
+    before: {
+      lastAssigned: snapshot.lastAssigned,
+      history: snapshot.history.slice(),
+    },
+  };
+
+  try {
+    const assigned1 = assignSpanishSpeaker();
+    transitions.afterAssign1 = {
+      assigned: assigned1,
+      lastAssigned: getSpanishLastAssigned_(),
+      history: getSpanishAssignmentHistory_(),
+    };
+
+    const assigned2 = assignSpanishSpeaker();
+    transitions.afterAssign2 = {
+      assigned: assigned2,
+      lastAssigned: getSpanishLastAssigned_(),
+      history: getSpanishAssignmentHistory_(),
+    };
+
+    const undoMessage = undoSpanishSpeakerAssignment();
+    transitions.afterUndo = {
+      message: undoMessage,
+      lastAssigned: getSpanishLastAssigned_(),
+      history: getSpanishAssignmentHistory_(),
+    };
+
+    const message = `[testSpanishAssignUndo_] ${JSON.stringify(transitions)}`;
+    console.info(message);
+    Logger.log(message);
+    return transitions;
+  } finally {
+    restoreSpanishAssignmentStateForTest_(snapshot.lastAssigned, snapshot.history);
+  }
+}
+
+/**
+ * Restores Spanish RR state for manual debug helpers.
+ * @param {string} lastAssigned
+ * @param {string[]} history
+ */
+function restoreSpanishAssignmentStateForTest_(lastAssigned, history) {
+  const lockResult = acquireScriptLockWithRetry();
+  if (!lockResult.success) {
+    throw new Error('System busy (Lock Timeout) while restoring Spanish RR test state.');
+  }
+  try {
+    setSpanishAssignmentState_(lastAssigned, history);
+  } finally {
+    lockResult.lock.releaseLock();
+  }
 }
