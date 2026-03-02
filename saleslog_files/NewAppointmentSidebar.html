@@ -116,23 +116,27 @@
         }
 
         /* Phone Lead container */
-        #phone-lead-container {
+        #phone-lead-container,
+        #spanish-lead-container {
             margin-bottom: 20px;
             padding: 10px;
             border: 1px solid #ccc;
             border-radius: 4px;
         }
 
-        #phone-lead-container {
+        #phone-lead-container,
+        #spanish-lead-container {
             background-color: #f0f8ff;
         }
 
         /* Phone Lead styling */
-        #phone-lead-container h4 {
+        #phone-lead-container h4,
+        #spanish-lead-container h4 {
             margin: 0 0 10px 0;
         }
 
-        #phone-lead-container label {
+        #phone-lead-container label,
+        #spanish-lead-container label {
             margin-top: 0;
             font-weight: 400;
         }
@@ -151,7 +155,22 @@
             font-size: 13px;
         }
 
-        #phoneLeadResult {
+        #assignSpanishBtn {
+            margin-top: 5px;
+            background-color: #2196F3;
+            color: white;
+        }
+
+        #undoSpanishBtn {
+            margin-top: 8px;
+            background-color: #FF5252;
+            color: white;
+            padding: 6px;
+            font-size: 13px;
+        }
+
+        #phoneLeadResult,
+        #spanishLeadResult {
             margin-top: 8px;
             font-weight: bold;
             color: #d32f2f;
@@ -191,7 +210,7 @@
         <button type="button" class="tab-btn active" data-tab="tab-appointment" aria-controls="tab-appointment"
             aria-selected="true" onclick="setActiveTab('tab-appointment')">Appointment</button>
         <button type="button" class="tab-btn" data-tab="tab-phone-lead" aria-controls="tab-phone-lead"
-            aria-selected="false" onclick="setActiveTab('tab-phone-lead')">Phone Lead</button>
+            aria-selected="false" onclick="setActiveTab('tab-phone-lead')">Assign Lead/ Spanish Sales</button>
     </div>
 
     <div id="tab-appointment" class="tab-panel" role="tabpanel">
@@ -240,6 +259,12 @@
             <button id="getLeadBtn" type="button" onclick="getPhoneLead()">Assign Phone Lead</button>
             <button id="undoLeadBtn" type="button" onclick="undoPhoneLead()">↺ Recall / Undo Last Assignment</button>
             <div id="phoneLeadResult"></div>
+        </div>
+        <div id="spanish-lead-container">
+            <h4>Need Spanish Speaking Sales?</h4>
+            <button id="assignSpanishBtn" type="button" onclick="assignSpanishSpeaker()">Assign Spanish Speaker</button>
+            <button id="undoSpanishBtn" type="button" onclick="undoSpanishSpeaker()">Undo/Recall last assignment</button>
+            <div id="spanishLeadResult"></div>
         </div>
     </div>
 
@@ -429,6 +454,57 @@
                     resultDiv.style.color = '#d32f2f'; // Red
                 })
                 .undoLastPhoneUp();
+        }
+
+        function assignSpanishSpeaker() {
+            const btn = document.getElementById('assignSpanishBtn');
+            const resultDiv = document.getElementById('spanishLeadResult');
+
+            btn.disabled = true;
+            btn.textContent = 'Assigning...';
+            resultDiv.textContent = '';
+            resultDiv.style.color = '#d32f2f';
+
+            google.script.run
+                .withSuccessHandler((assignedName) => {
+                    btn.disabled = false;
+                    btn.textContent = 'Assign Spanish Speaker';
+                    resultDiv.textContent = 'Assigned: ' + assignedName;
+                    resultDiv.style.color = '#388E3C';
+                })
+                .withFailureHandler((err) => {
+                    btn.disabled = false;
+                    btn.textContent = 'Assign Spanish Speaker';
+                    resultDiv.textContent = 'Error: ' + (err.message || err);
+                    resultDiv.style.color = '#d32f2f';
+                })
+                .assignSpanishSpeaker();
+        }
+
+        function undoSpanishSpeaker() {
+            if (!confirm('Are you sure you want to undo/recall the last Spanish assignment?')) return;
+
+            const btn = document.getElementById('undoSpanishBtn');
+            const resultDiv = document.getElementById('spanishLeadResult');
+
+            btn.disabled = true;
+            btn.textContent = 'Undoing...';
+            resultDiv.textContent = '';
+
+            google.script.run
+                .withSuccessHandler((msg) => {
+                    btn.disabled = false;
+                    btn.textContent = 'Undo/Recall last assignment';
+                    resultDiv.textContent = msg;
+                    resultDiv.style.color = '#388E3C';
+                })
+                .withFailureHandler((err) => {
+                    btn.disabled = false;
+                    btn.textContent = 'Undo/Recall last assignment';
+                    resultDiv.textContent = 'Error: ' + (err.message || err);
+                    resultDiv.style.color = '#d32f2f';
+                })
+                .undoSpanishSpeakerAssignment();
         }
 
         // Tab switching

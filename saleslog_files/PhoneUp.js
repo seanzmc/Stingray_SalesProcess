@@ -15,6 +15,11 @@
 // and are available globally in the project.
 
 const CELL_LAST_ASSIGNED_PHONE = "C2"; // Phone Up Pointer
+const SPANISH_RR_NAME = 'Spanish Speaking Sales RR';
+const SPANISH_RR_HEADER = 'SPANISH SPEAKER';
+const SPANISH_RR_LAST_ASSIGNED_KEY = 'RR:SPANISH:LAST_ASSIGNED';
+const SPANISH_RR_HISTORY_KEY = 'RR:SPANISH:HISTORY';
+const SPANISH_RR_HISTORY_LIMIT = 200;
 
 /**
  * Menu trigger function.
@@ -162,4 +167,179 @@ function executePhoneUpAssignment_() {
   });
 
   return assignedName;
+}
+
+/**
+ * Assign the next salesperson from the Spanish-only roster.
+ * Uses isolated state in Script Properties (RR:SPANISH:*).
+ */
+function assignSpanishSpeaker() {
+  const lockResult = acquireScriptLockWithRetry();
+
+  if (!lockResult.success) {
+    throw new Error('System busy (Lock Timeout). Please try again.');
+  }
+
+  try {
+    return executeSpanishSpeakerAssignment_();
+  } finally {
+    lockResult.lock.releaseLock();
+  }
+}
+
+/**
+ * Undo/recall the most recent Spanish assignment.
+ * Rewinds Spanish RR state to the previous assignee using Spanish-only history.
+ */
+function undoSpanishSpeakerAssignment() {
+  const lockResult = acquireScriptLockWithRetry();
+
+  if (!lockResult.success) {
+    throw new Error('System busy (Lock Timeout). Please try again.');
+  }
+
+  try {
+    const roster = getSpanishRoster_();
+    if (!roster.length) {
+      throw new Error('No Spanish speakers available in RR_ROSTER (SPANISH SPEAKER = "TRUE").');
+    }
+
+    const history = getSpanishAssignmentHistory_();
+    if (!history.length) {
+      return 'No Spanish assignment history available to undo.';
+    }
+
+    const recalledAssignee = history.pop();
+    const previousAssignee = history.length ? history[history.length - 1] : '';
+    setSpanishAssignmentState_(previousAssignee, history);
+
+    logRoundRobinEvent(AUDIT_ACTIONS.UNDO, {
+      target: SPANISH_RR_NAME,
+      assigneeBefore: recalledAssignee,
+      assigneeAfter: previousAssignee || '(none)',
+      method: 'Spanish RR Undo',
+    });
+
+    if (previousAssignee) {
+      return `Recalled ${recalledAssignee}. Last assigned is now ${previousAssignee}.`;
+    }
+    return `Recalled ${recalledAssignee}. Spanish rotation is now reset (no previous assignee).`;
+  } catch (e) {
+    logError('undoSpanishSpeakerAssignment', e);
+    throw e;
+  } finally {
+    lockResult.lock.releaseLock();
+  }
+}
+
+/**
+ * Internal worker for Spanish assignment. Assumes lock is already acquired.
+ * @return {string} Assigned salesperson name.
+ */
+function executeSpanishSpeakerAssignment_() {
+  const roster = getSpanishRoster_();
+  if (!roster.length) {
+    throw new Error('No Spanish speakers available in RR_ROSTER (SPANISH SPEAKER = "TRUE").');
+  }
+
+  const lastAssignedName = getSpanishLastAssigned_();
+  let nextIndex = 0;
+
+  if (lastAssignedName) {
+    const lastIndex = roster.indexOf(lastAssignedName);
+    nextIndex = lastIndex !== -1 ? (lastIndex + 1) % roster.length : 0;
+  }
+
+  const assignedName = roster[nextIndex];
+  const nextUp = roster[(nextIndex + 1) % roster.length];
+  const history = getSpanishAssignmentHistory_();
+  history.push(assignedName);
+  setSpanishAssignmentState_(assignedName, history);
+
+  logRoundRobinEvent(SPANISH_RR_NAME, {
+    assignee: assignedName,
+    nextUp: nextUp,
+    method: 'System Rotation',
+    rosterCount: roster.length,
+  });
+
+  return assignedName;
+}
+
+/**
+ * Reads RR_ROSTER and returns names where column E (SPANISH SPEAKER) == "TRUE".
+ * Uses a single batched sheet read.
+ * @return {string[]}
+ */
+function getSpanishRoster_() {
+  const sheet = getSheetOrThrow_(SHEET_ROSTER);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) return [];
+
+  // Read A:E in one call: A=name ... E=SPANISH SPEAKER
+  const values = sheet.getRange(1, 1, lastRow, 5).getValues();
+  const header = String(values[0][4] || '').trim();
+  if (header !== SPANISH_RR_HEADER) {
+    throw new Error(`RR_ROSTER column E header must be exactly "${SPANISH_RR_HEADER}".`);
+  }
+
+  const roster = [];
+  for (let i = 1; i < values.length; i++) {
+    const name = String(values[i][0] || '').trim();
+    const spanishFlag = String(values[i][4] || '').trim();
+    if (name && spanishFlag === 'TRUE') {
+      roster.push(name);
+    }
+  }
+  return roster;
+}
+
+/**
+ * Returns the Spanish RR last-assigned name.
+ * @return {string}
+ */
+function getSpanishLastAssigned_() {
+  return String(getSpanishScriptProperties_().getProperty(SPANISH_RR_LAST_ASSIGNED_KEY) || '').trim();
+}
+
+/**
+ * Returns the Spanish RR assignment history stack.
+ * @return {string[]}
+ */
+function getSpanishAssignmentHistory_() {
+  const raw = getSpanishScriptProperties_().getProperty(SPANISH_RR_HISTORY_KEY);
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((name) => String(name || '').trim())
+      .filter((name) => name !== '');
+  } catch (e) {
+    logError('getSpanishAssignmentHistory_', e);
+    return [];
+  }
+}
+
+/**
+ * Persists Spanish RR state keys in one write.
+ * @param {string} lastAssigned
+ * @param {string[]} history
+ */
+function setSpanishAssignmentState_(lastAssigned, history) {
+  const safeHistory = Array.isArray(history)
+    ? history.slice(-SPANISH_RR_HISTORY_LIMIT)
+    : [];
+  getSpanishScriptProperties_().setProperties({
+    [SPANISH_RR_LAST_ASSIGNED_KEY]: String(lastAssigned || '').trim(),
+    [SPANISH_RR_HISTORY_KEY]: JSON.stringify(safeHistory),
+  });
+}
+
+/**
+ * @return {GoogleAppsScript.Properties.Properties}
+ */
+function getSpanishScriptProperties_() {
+  return PropertiesService.getScriptProperties();
 }
