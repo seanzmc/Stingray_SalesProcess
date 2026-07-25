@@ -3275,27 +3275,6 @@ function onOpen() {
   try {
     const ss = SpreadsheetApp.getActiveSpreadsheet();
 
-    // Round Robin: protect pointer cell (RR_STATE!B2) - idempotent
-    try {
-      ensureRRStatePointerProtection_();
-    } catch (protErr) {
-      // Fail gracefully; user may need to authorize protections.
-      try {
-        if (typeof logWarning === 'function') {
-          logWarning('onOpen', 'RR_STATE protection not applied', {
-            error: protErr && protErr.message ? protErr.message : String(protErr),
-          });
-        } else {
-          Logger.log(
-            '[onOpen] RR_STATE protection not applied: ' +
-            (protErr && protErr.message ? protErr.message : String(protErr))
-          );
-        }
-      } catch (_) {
-        // ignore
-      }
-    }
-
     // Check required sheets (keep your existing logic if you use it elsewhere)
     const hasAllSheets =
       ss.getSheetByName('TODAY') &&
@@ -3304,28 +3283,9 @@ function onOpen() {
       ss.getSheetByName('DEPOSITS');
 
     const ui = SpreadsheetApp.getUi();
-    const menu = ui.createMenu('BDC Appts');
+    const menu = ui.createMenu('Sales Log Pro');
 
-    // 1. Top Item: New Appointment
-    menu
-      .addItem('New Appointment…', 'showNewAppointmentSidebar')
-      .addSeparator();
-
-    // 2. Round Robin Submenu (Admin Tools)
-    const rrMenu = ui.createMenu('Round Robin');
-    rrMenu
-      .addItem(
-        'Reassign to next available sales',
-        'menuSkipAndReassignSelectedRow'
-      )
-      .addSeparator()
-      .addItem('Rewind Pointer (Undo)', 'menuRewindPointer')
-      .addSeparator()
-      .addItem('Reset Round Robin pointer to top', 'menuResetPointer');
-
-    menu.addSubMenu(rrMenu).addSeparator();
-
-    // 3. SalesLog Tools (admin) Submenu
+    // 1. SalesLog Tools (admin) Submenu
     const analyticsMenu = ui.createMenu('SalesLog Tools (admin)');
     analyticsMenu
       .addItem("Log Yesterday's Sales", 'processDaily')
@@ -3338,7 +3298,7 @@ function onOpen() {
 
     menu.addSubMenu(analyticsMenu).addSeparator();
 
-    // 4. Service Tools Submenu
+    // 2. Service Tools Submenu
     const serviceMenu = ui.createMenu('Service Tools');
     serviceMenu
       .addItem('Authorize Recon Access', 'authorizeReconAccess')
