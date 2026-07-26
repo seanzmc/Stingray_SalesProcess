@@ -1669,8 +1669,10 @@ function appendTradesToRecon_(candidates, options) {
         } else if (importedAtColToHide) {
           reconSheet.hideColumns(importedAtColToHide);
         }
-      } catch (_) {
-        // Ignore if hiding is not permitted.
+      } catch (e) {
+        logWarning('appendTradesToRecon_', 'Column hide failed; continuing.', {
+          error: String(e),
+        });
       }
     }
 
