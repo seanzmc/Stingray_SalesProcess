@@ -42,7 +42,7 @@ Finding is **confirmed unchanged in scope and location**. Proceeding with implem
 - Consumes: `reconSheet` (Sheet object), `lastRow` (number, already computed at line 1494 via `reconSheet.getLastRow()`), `stockCol` (number, already computed at line 1545), `headerRow` (number, already computed at line 1498) — all already in scope inside `appendTradesToRecon_()`.
 - Produces: `appendRow` (number) — consumed unchanged by the write at line 1646 (`reconSheet.getRange(appendRow, 1, rowsToAppend.length, lastCol)`). No other function calls this scan logic, so no downstream signature changes.
 
-- [ ] **Step 1: Read the current block to confirm exact text before editing**
+- [x] **Step 1: Read the current block to confirm exact text before editing**
 
 Current code (lines 1565-1579):
 
@@ -64,7 +64,7 @@ Current code (lines 1565-1579):
   const appendRow = lastDataRow ? lastDataRow + 1 : 2;
 ```
 
-- [ ] **Step 2: Replace the cap with the sheet's real last row, and floor the fallback at `headerRow + 1`**
+- [x] **Step 2: Replace the cap with the sheet's real last row, and floor the fallback at `headerRow + 1`**
 
 ```javascript
   // Scan the full used range of the Stock column (bounded by the sheet's actual
@@ -89,7 +89,7 @@ Notes on this change:
 - `maxRows`/`scanEndRow` are removed entirely — `lastRow` (already computed at line 1494 from `reconSheet.getLastRow()`) is the correct, uncapped bound. `getLastRow()` reflects the sheet's actual used range, so this removes the silent 3,000-row cap without introducing a new unbounded read risk (a Recon log sheet's used range is bounded by real data, not by `getMaxRows()`'s allocated-but-empty rows).
 - The fallback when the Stock column is entirely blank changes from hardcoded `2` to `headerRow + 1`, so a header row that has moved (per `findReconHeaderRow_()`'s dynamic detection, already handled elsewhere in this function) doesn't cause a write directly on top of the header.
 
-- [ ] **Step 3: Apply the edit**
+- [x] **Step 3: Apply the edit**
 
 Use the Edit tool to replace the Step 1 block with the Step 2 block in `saleslog_files/core_saleslogPro.js`.
 
@@ -97,7 +97,7 @@ Use the Edit tool to replace the Step 1 block with the Step 2 block in `saleslog
 
 Run `clasp push`, then from the Sheet's `SalesLog Tools` menu run **Service Tools → Recon Export (Dry Run)** (`menuExportTradesToReconLogDryRun()`, line 699) against the real Recon spreadsheet. Confirm in the Apps Script execution log (`Logger.log` output at line ~1580, `appendTradesToRecon_: stockCol=... appendRow=... lastDataRow=... headerRow=...`) that `appendRow` equals the true next empty row (i.e. one past whatever the last populated Stock-column row actually is), not row 2, when the Recon sheet has data beyond row 3,000. If the live Recon sheet does not currently have 3,000+ rows, this can also be verified by temporarily pointing `RECON_SPREADSHEET_ID` (line 79) at a scratch copy seeded with a populated Stock cell at e.g. row 4000 — do this only in a disposable test spreadsheet, never the production `RECON_SPREADSHEET_ID`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add saleslog_files/core_saleslogPro.js
@@ -117,11 +117,11 @@ git commit -m "fix: bound Recon export append-row scan by actual last row, not 3
 
 Rationale: the audit's finding-1 fix list explicitly requires "revalidate immediately before writing while holding a lock" — a read of `lastRow`/`lastDataRow` taken outside a lock can go stale if a second export runs concurrently between the read and the write (finding 3's "some writers never acquire the lock" cites this exact function at line 681's call path). Folding the read-detect-write section into `withScriptLock()` closes both gaps with one change, since finding 3's full remediation (auditing every writer) is out of scope for this finding-1-only plan.
 
-- [ ] **Step 1: Confirm dry-run behavior must NOT acquire the lock**
+- [x] **Step 1: Confirm dry-run behavior must NOT acquire the lock**
 
 `appendTradesToRecon_()` is also called with `{dryRun: true}` from `menuExportTradesToReconLogDryRun()` (line 699) for previewing without writing. Acquiring a lock for a pure read is unnecessary overhead and would serialize dry-run previews behind real exports for no benefit. Only the mutating path (duplicate-key check → scan → write) needs the lock, and it needs to be re-checked *inside* the lock in case another export landed rows between the initial read and lock acquisition.
 
-- [ ] **Step 2: Restructure the function so the existing-keys scan, stock-column scan, and write all happen inside one `withScriptLock()` call for non-dry-run executions**
+- [x] **Step 2: Restructure the function so the existing-keys scan, stock-column scan, and write all happen inside one `withScriptLock()` call for non-dry-run executions**
 
 Current structure (post-Task-1) reads `existingKeys` (lines 1553-1563) and `lastDataRow`/`appendRow` (Task 1's block) once, then writes later (line 1644 `if (rowsToAppend.length && !dryRun)`). Move the read of `existingKeys`, the read of `lastDataRow`/`appendRow`, and the write into a single lock-protected closure so nothing else can append between the scan and the write. Wrap only this section — not header detection or candidate-list building, which don't need lock protection and would otherwise hold the lock during expensive `candidates.forEach()` mapping.
 
@@ -240,7 +240,7 @@ Current structure (post-Task-1) reads `existingKeys` (lines 1553-1563) and `last
 
 **Caveat surfaced by writing this out (resolve in Step 3 below):** `runMutatingSection` as drafted always calls `setValues()` when `rowsToAppend.length` — it no longer checks `!dryRun` internally (that check moved to the outer `if`/`else`), but dry-run must still *compute* `rowsToAppend`/`appendRow` for the preview return value *without writing*. Step 3 fixes this properly rather than papering over it with a flag threaded through the closure.
 
-- [ ] **Step 3: Fix the dry-run/write split cleanly — pass a `write` boolean into the closure instead of branching on which closure to call**
+- [x] **Step 3: Fix the dry-run/write split cleanly — pass a `write` boolean into the closure instead of branching on which closure to call**
 
 Replace the two-branch call at the bottom of Step 2 with a single lock-aware dispatch that only takes the lock when a write will actually happen:
 
@@ -263,7 +263,7 @@ Replace the two-branch call at the bottom of Step 2 with a single lock-aware dis
 
 This preserves current dry-run semantics exactly (compute and return counts, never write, never lock) while giving the real write path both the lock and a same-transaction re-read of `existingKeys`/`lastDataRow` immediately before `setValues()`.
 
-- [ ] **Step 4: Apply the edit**
+- [x] **Step 4: Apply the edit**
 
 Use the Edit tool to restructure `appendTradesToRecon_()` in `saleslog_files/core_saleslogPro.js` per Step 3's final form (fold Step 2's body in with the `shouldWrite` parameter, keep everything above `existingKeys` — header detection, column resolution — outside the closure since it's read-only and needed for both dry-run and real runs).
 
@@ -274,7 +274,7 @@ Use the Edit tool to restructure `appendTradesToRecon_()` in `saleslog_files/cor
 3. Run **Service Tools → Recon Export** (real) once — confirm rows append at the correct row and the execution log shows `Script lock acquired on attempt ...` (from `withScriptLock()` at line ~822) during the export.
 4. If feasible, trigger two exports back-to-back (e.g. re-run the menu item twice quickly) and confirm the second either serializes behind the first (lock wait logged) rather than both computing the same `appendRow` and colliding.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add saleslog_files/core_saleslogPro.js
