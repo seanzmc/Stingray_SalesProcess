@@ -11,3 +11,4 @@ audit_report.md
 pro_audit_0.9.md
 audit_md_docs/*
 .env
+.claude/settings.local.json
