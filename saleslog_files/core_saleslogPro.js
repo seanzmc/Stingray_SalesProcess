@@ -3290,7 +3290,7 @@ function onOpen() {
     analyticsMenu
       .addItem("Log Yesterday's Sales", 'processDaily')
       .addSeparator()
-      .addItem('Recalculate Sales #'s', 'recalcMtdFromMonthly')
+      .addItem('Recalculate Sales Numbers', 'recalcMtdFromMonthly')
       .addSeparator()
       .addItem('Start New Month (Rollover)', 'rolloverMonth')
       .addSeparator()
