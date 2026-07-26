@@ -1562,12 +1562,13 @@ function appendTradesToRecon_(candidates, options) {
     });
   }
 
-  const maxRows = reconSheet.getMaxRows();
-  const scanEndRow = Math.min(maxRows, 3000);
+  // Scan the full used range of the Stock column (bounded by the sheet's actual
+  // last row, not an arbitrary cap) so real data past row 3,000 is never
+  // mistaken for an empty sheet and overwritten.
   let lastDataRow = 0;
-  if (scanEndRow >= 2) {
+  if (lastRow >= 2) {
     const stockValues = reconSheet
-      .getRange(2, stockCol, scanEndRow - 1, 1)
+      .getRange(2, stockCol, lastRow - 1, 1)
       .getDisplayValues();
     for (let i = stockValues.length - 1; i >= 0; i--) {
       if (String(stockValues[i][0]).trim()) {
@@ -1576,7 +1577,7 @@ function appendTradesToRecon_(candidates, options) {
       }
     }
   }
-  const appendRow = lastDataRow ? lastDataRow + 1 : 2;
+  const appendRow = lastDataRow ? lastDataRow + 1 : headerRow + 1;
   Logger.log(
     'appendTradesToRecon_: stockCol=' +
       stockCol +
