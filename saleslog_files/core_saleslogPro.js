@@ -1551,12 +1551,15 @@ function appendTradesToRecon_(candidates, options) {
   // If headerMap says SourceKey is a different column than our detected sourceKeyCol, prefer detection.
   // (Detection is based on actual key pattern in the data.)
   const runSection = (shouldWrite) => {
+    // Re-read under the lock (or at call time for dry runs) so rows appended by a
+    // concurrent export during setup are visible to both scans below.
+    const lockedLastRow = reconSheet.getLastRow();
     const existingKeys = new Set();
 
     // Read SourceKey column as the primary source of truth.
     let keyValues = [];
-    if (lastRow >= 2) {
-      keyValues = reconSheet.getRange(2, sourceKeyCol, lastRow - 1, 1).getValues();
+    if (lockedLastRow >= 2) {
+      keyValues = reconSheet.getRange(2, sourceKeyCol, lockedLastRow - 1, 1).getValues();
       keyValues.forEach((row) => {
         const key = normalizeSourceKey_(row[0]);
         if (key) existingKeys.add(key);
@@ -1567,9 +1570,9 @@ function appendTradesToRecon_(candidates, options) {
     // last row, not an arbitrary cap) so real data past row 3,000 is never
     // mistaken for an empty sheet and overwritten.
     let lastDataRow = 0;
-    if (lastRow >= 2) {
+    if (lockedLastRow >= 2) {
       const stockValues = reconSheet
-        .getRange(2, stockCol, lastRow - 1, 1)
+        .getRange(2, stockCol, lockedLastRow - 1, 1)
         .getDisplayValues();
       for (let i = stockValues.length - 1; i >= 0; i--) {
         if (String(stockValues[i][0]).trim()) {
