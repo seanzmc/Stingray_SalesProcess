@@ -1550,133 +1550,140 @@ function appendTradesToRecon_(candidates, options) {
 
   // If headerMap says SourceKey is a different column than our detected sourceKeyCol, prefer detection.
   // (Detection is based on actual key pattern in the data.)
-  const existingKeys = new Set();
+  const runSection = (shouldWrite) => {
+    const existingKeys = new Set();
 
-  // Read SourceKey column as the primary source of truth.
-  let keyValues = [];
-  if (lastRow >= 2) {
-    keyValues = reconSheet.getRange(2, sourceKeyCol, lastRow - 1, 1).getValues();
-    keyValues.forEach((row) => {
-      const key = normalizeSourceKey_(row[0]);
-      if (key) existingKeys.add(key);
-    });
-  }
+    // Read SourceKey column as the primary source of truth.
+    let keyValues = [];
+    if (lastRow >= 2) {
+      keyValues = reconSheet.getRange(2, sourceKeyCol, lastRow - 1, 1).getValues();
+      keyValues.forEach((row) => {
+        const key = normalizeSourceKey_(row[0]);
+        if (key) existingKeys.add(key);
+      });
+    }
 
-  // Scan the full used range of the Stock column (bounded by the sheet's actual
-  // last row, not an arbitrary cap) so real data past row 3,000 is never
-  // mistaken for an empty sheet and overwritten.
-  let lastDataRow = 0;
-  if (lastRow >= 2) {
-    const stockValues = reconSheet
-      .getRange(2, stockCol, lastRow - 1, 1)
-      .getDisplayValues();
-    for (let i = stockValues.length - 1; i >= 0; i--) {
-      if (String(stockValues[i][0]).trim()) {
-        lastDataRow = i + 2;
-        break;
+    // Scan the full used range of the Stock column (bounded by the sheet's actual
+    // last row, not an arbitrary cap) so real data past row 3,000 is never
+    // mistaken for an empty sheet and overwritten.
+    let lastDataRow = 0;
+    if (lastRow >= 2) {
+      const stockValues = reconSheet
+        .getRange(2, stockCol, lastRow - 1, 1)
+        .getDisplayValues();
+      for (let i = stockValues.length - 1; i >= 0; i--) {
+        if (String(stockValues[i][0]).trim()) {
+          lastDataRow = i + 2;
+          break;
+        }
       }
     }
-  }
-  const appendRow = lastDataRow ? lastDataRow + 1 : headerRow + 1;
-  Logger.log(
-    'appendTradesToRecon_: stockCol=' +
-      stockCol +
-      ' appendRow=' +
-      appendRow +
-      ' lastDataRow=' +
-      lastDataRow +
-      ' headerRow=' +
-      headerRow
-  );
+    const appendRow = lastDataRow ? lastDataRow + 1 : headerRow + 1;
+    Logger.log(
+      'appendTradesToRecon_: stockCol=' +
+        stockCol +
+        ' appendRow=' +
+        appendRow +
+        ' lastDataRow=' +
+        lastDataRow +
+        ' headerRow=' +
+        headerRow
+    );
 
-  const rowsToAppend = [];
-  let skippedDuplicates = 0;
-  let invalidSkippedDuplicates = 0;
-  let invalidAppended = 0;
-  const importedAt = Utilities.formatDate(
-    new Date(),
-    Session.getScriptTimeZone(),
-    'yyyy-MM-dd HH:mm:ss'
-  );
-  candidates.forEach((candidate) => {
-    const key = normalizeSourceKey_(candidate && candidate.key);
-    const isInvalid = !!(candidate && candidate.isInvalid);
-    if (!key || existingKeys.has(key)) {
-      skippedDuplicates++;
-      if (isInvalid) invalidSkippedDuplicates++;
-      return;
-    }
-    existingKeys.add(key);
-    if (isInvalid) invalidAppended++;
+    const rowsToAppend = [];
+    let skippedDuplicates = 0;
+    let invalidSkippedDuplicates = 0;
+    let invalidAppended = 0;
+    const importedAt = Utilities.formatDate(
+      new Date(),
+      Session.getScriptTimeZone(),
+      'yyyy-MM-dd HH:mm:ss'
+    );
+    candidates.forEach((candidate) => {
+      const key = normalizeSourceKey_(candidate && candidate.key);
+      const isInvalid = !!(candidate && candidate.isInvalid);
+      if (!key || existingKeys.has(key)) {
+        skippedDuplicates++;
+        if (isInvalid) invalidSkippedDuplicates++;
+        return;
+      }
+      existingKeys.add(key);
+      if (isInvalid) invalidAppended++;
 
-    const notes = candidate && candidate.notes ? String(candidate.notes) : '';
+      const notes = candidate && candidate.notes ? String(candidate.notes) : '';
 
-    // Deal date formatting for recon sheet (no time / timezone).
-    const reconDateDisplay =
-      formatReconDealDate_(candidate.dateDisplay, candidate.dateISO) ||
-      candidate.dateISO ||
-      '';
+      // Deal date formatting for recon sheet (no time / timezone).
+      const reconDateDisplay =
+        formatReconDealDate_(candidate.dateDisplay, candidate.dateISO) ||
+        candidate.dateISO ||
+        '';
 
-    const rowValues = new Array(lastCol).fill('');
+      const rowValues = new Array(lastCol).fill('');
 
-    // Always write SourceKey to the detected SourceKey column.
-    rowValues[sourceKeyCol - 1] = key;
+      // Always write SourceKey to the detected SourceKey column.
+      rowValues[sourceKeyCol - 1] = key;
 
-    // Write required fields by resolved header columns.
-    rowValues[dealDateCol - 1] = reconDateDisplay;
-    rowValues[stockCol - 1] = candidate.stock || '';
-    rowValues[salespersonCol - 1] = candidate.salesperson || '';
+      // Write required fields by resolved header columns.
+      rowValues[dealDateCol - 1] = reconDateDisplay;
+      rowValues[stockCol - 1] = candidate.stock || '';
+      rowValues[salespersonCol - 1] = candidate.salesperson || '';
 
-    // Default location for all imported rows.
-    rowValues[locationCol - 1] = 'Plant City';
+      // Default location for all imported rows.
+      rowValues[locationCol - 1] = 'Plant City';
 
-    // Notes is optional.
-    if (notesCol) rowValues[notesCol - 1] = notes;
+      // Notes is optional.
+      if (notesCol) rowValues[notesCol - 1] = notes;
 
-    // ImportedAt is optional.
-    if (hasImportedAt) {
-      const importedAtCol = headerMap[normalizeHeader_(RECON_IMPORTEDAT_HEADER)];
-      if (importedAtCol) rowValues[importedAtCol - 1] = importedAt;
-    }
+      // ImportedAt is optional.
+      if (hasImportedAt) {
+        const importedAtCol = headerMap[normalizeHeader_(RECON_IMPORTEDAT_HEADER)];
+        if (importedAtCol) rowValues[importedAtCol - 1] = importedAt;
+      }
 
-    rowsToAppend.push(rowValues);
-  });
+      rowsToAppend.push(rowValues);
+    });
 
-  if (rowsToAppend.length && !dryRun) {
-    reconSheet
-      .getRange(appendRow, 1, rowsToAppend.length, lastCol)
-      .setValues(rowsToAppend);
-    try {
-      const sourceKeyColToHide = sourceKeyCol;
-      const importedAtColToHide =
-        headerMap[normalizeHeader_(RECON_IMPORTEDAT_HEADER)];
-      if (sourceKeyColToHide && importedAtColToHide) {
-        if (Math.abs(sourceKeyColToHide - importedAtColToHide) === 1) {
-          reconSheet.hideColumns(
-            Math.min(sourceKeyColToHide, importedAtColToHide),
-            2
-          );
-        } else {
+    if (rowsToAppend.length && shouldWrite) {
+      reconSheet
+        .getRange(appendRow, 1, rowsToAppend.length, lastCol)
+        .setValues(rowsToAppend);
+      try {
+        const sourceKeyColToHide = sourceKeyCol;
+        const importedAtColToHide =
+          headerMap[normalizeHeader_(RECON_IMPORTEDAT_HEADER)];
+        if (sourceKeyColToHide && importedAtColToHide) {
+          if (Math.abs(sourceKeyColToHide - importedAtColToHide) === 1) {
+            reconSheet.hideColumns(
+              Math.min(sourceKeyColToHide, importedAtColToHide),
+              2
+            );
+          } else {
+            reconSheet.hideColumns(sourceKeyColToHide);
+            reconSheet.hideColumns(importedAtColToHide);
+          }
+        } else if (sourceKeyColToHide) {
           reconSheet.hideColumns(sourceKeyColToHide);
+        } else if (importedAtColToHide) {
           reconSheet.hideColumns(importedAtColToHide);
         }
-      } else if (sourceKeyColToHide) {
-        reconSheet.hideColumns(sourceKeyColToHide);
-      } else if (importedAtColToHide) {
-        reconSheet.hideColumns(importedAtColToHide);
+      } catch (_) {
+        // Ignore if hiding is not permitted.
       }
-    } catch (_) {
-      // Ignore if hiding is not permitted.
     }
-  }
 
-  return {
-    appended: rowsToAppend.length,
-    skippedDuplicates: skippedDuplicates,
-    invalidAppended: invalidAppended,
-    invalidSkippedDuplicates: invalidSkippedDuplicates,
-    totalCandidates: candidates.length,
+    return {
+      appended: rowsToAppend.length,
+      skippedDuplicates: skippedDuplicates,
+      invalidAppended: invalidAppended,
+      invalidSkippedDuplicates: invalidSkippedDuplicates,
+      totalCandidates: candidates.length,
+    };
   };
+
+  if (dryRun) {
+    return runSection(false);
+  }
+  return withScriptLock(() => runSection(true));
 }
 
 function exportTradesToReconLog(options) {
