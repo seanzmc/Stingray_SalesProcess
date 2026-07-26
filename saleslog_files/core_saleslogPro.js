@@ -3283,18 +3283,18 @@ function onOpen() {
       ss.getSheetByName('DEPOSITS');
 
     const ui = SpreadsheetApp.getUi();
-    const menu = ui.createMenu('Sales Log Pro');
+    const menu = ui.createMenu('SalesLog Tools');
 
     // 1. SalesLog Tools (admin) Submenu
-    const analyticsMenu = ui.createMenu('SalesLog Tools (admin)');
+    const analyticsMenu = ui.createMenu('Sales Tools');
     analyticsMenu
       .addItem("Log Yesterday's Sales", 'processDaily')
       .addSeparator()
-      .addItem('Recalculate MTD & Check Formats', 'recalcMtdFromMonthly')
+      .addItem('Recalculate Sales #'s', 'recalcMtdFromMonthly')
       .addSeparator()
       .addItem('Start New Month (Rollover)', 'rolloverMonth')
       .addSeparator()
-      .addItem('Refresh Leaderboard', 'manualRefreshLeaderboard');
+      .addItem('Refresh Salespeople List', 'manualRefreshLeaderboard');
 
     menu.addSubMenu(analyticsMenu).addSeparator();
 
