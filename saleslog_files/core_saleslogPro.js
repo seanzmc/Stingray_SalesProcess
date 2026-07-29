@@ -2707,7 +2707,7 @@ function processDaily() {
 /**
  * Reapplies conditional formatting rules to the TODAY sheet.
  */
-function reapplyCF() {
+function reapplyCF({ throwOnError = false } = {}) {
   try {
     // Get configured colors and thresholds
     const LEADERBOARD_ZERO_BG_COLOR = getColor('leaderboardZeroMtdBgColor');
@@ -2986,19 +2986,21 @@ function reapplyCF() {
     };
   } catch (e) {
     logError('reapplyCF', e);
+    if (throwOnError) {
+      throw e;
+    }
     alertError('Error reapplying CF: ' + e.toString(), 'CF Error');
+    return null;
   }
 }
 
 function recalcMtdFromMonthly() {
-  withScriptLock(() => {
-    toastInfo(
-      "Recalculating MTD & checking 'MONTHLY' sheet formats...",
-      'Working'
-    );
-    let totalSalespersonErrors = 0;
-
-    try {
+  try {
+    const result = withScriptLock(() => {
+      toastInfo(
+        "Recalculating MTD, checking 'MONTHLY' formats, and updating analytics...",
+        'Working'
+      );
       const sheets = getSheets();
       const monthlySheet = sheets.monthly;
       const todaySheet = sheets.today;
@@ -3006,24 +3008,23 @@ function recalcMtdFromMonthly() {
       const maxColsMonthly = monthlySheet.getMaxColumns();
 
       if (maxColsMonthly < 14) {
-        alertError('"MONTHLY" sheet needs at least 14 columns (A:N).');
-        return;
+        throw new Error('"MONTHLY" sheet needs at least 14 columns (A:N).');
       }
       if (lastRowMonthly < 2) {
         todaySheet.getRange(RANGES.mtd).clearContent();
-        reapplyCF();
-        toastInfo(
-          "MTD Cleared. No data in 'MONTHLY' to recalculate.",
-          'Recalc Info'
-        );
-        return;
+        reapplyCF({ throwOnError: true });
+        return {
+          status: 'empty',
+          message: "MTD cleared. No data in 'MONTHLY' to recalculate.",
+        };
       }
 
       const { aliasMap } = getSalespersonMaps();
-      const monthlyValues = monthlySheet
-        .getRange(2, 1, lastRowMonthly - 1, maxColsMonthly)
+      const allMonthlyContent = monthlySheet
+        .getRange(1, 1, lastRowMonthly, maxColsMonthly)
         .getValues();
-      toastInfo('Reading MONTHLY sheet data...', 'Working (1/6)');
+      const monthlyValues = allMonthlyContent.slice(1);
+      toastInfo('Reading MONTHLY sheet data...', 'Working (1/7)');
 
       const salespersonErrorRowsFound = applyMonthlyRowFormatting(
         monthlySheet,
@@ -3031,15 +3032,12 @@ function recalcMtdFromMonthly() {
         2,
         aliasMap
       );
-      totalSalespersonErrors = salespersonErrorRowsFound.length;
+      const totalSalespersonErrors = salespersonErrorRowsFound.length;
       toastInfo(
         'Applying formatting and checking for errors...',
-        'Working (2/6)'
+        'Working (2/7)'
       );
 
-      const allMonthlyContent = monthlySheet
-        .getRange(1, 1, lastRowMonthly, maxColsMonthly)
-        .getValues();
       const mergedRanges = monthlySheet
         .getRange(1, 1, lastRowMonthly, 1)
         .getMergedRanges();
@@ -3050,12 +3048,12 @@ function recalcMtdFromMonthly() {
         )
         .map((mr) => mr.getRow())
         .sort((a, b) => a - b);
-      toastInfo('Identifying date sections...', 'Working (3/6)');
+      toastInfo('Identifying date sections...', 'Working (3/7)');
 
       if (dateHeaderRows.length > 0) {
         let startDataRowIdx = dateHeaderRows[0];
         for (let i = 1; i < dateHeaderRows.length; i++) {
-          let endDataRowIdx = dateHeaderRows[i] - 1;
+          const endDataRowIdx = dateHeaderRows[i] - 1;
           if (startDataRowIdx < endDataRowIdx) {
             actualDataRows = actualDataRows.concat(
               allMonthlyContent.slice(startDataRowIdx, endDataRowIdx)
@@ -3075,15 +3073,15 @@ function recalcMtdFromMonthly() {
         if (lastRowMonthly > 1) actualDataRows = monthlyValues;
       }
 
-      toastInfo('Extracting sales data...', 'Working (4/6)');
+      toastInfo('Extracting sales data...', 'Working (4/7)');
       if (!actualDataRows.length) {
         todaySheet.getRange(RANGES.mtd).clearContent();
-        reapplyCF();
-        toastInfo(
-          "MTD Cleared. No data rows found in 'MONTHLY' after filtering headers.",
-          'Recalc Info'
-        );
-        return;
+        reapplyCF({ throwOnError: true });
+        return {
+          status: 'empty',
+          message:
+            "MTD cleared. No data rows found in 'MONTHLY' after filtering headers.",
+        };
       }
 
       const sidesToTally = [
@@ -3099,128 +3097,69 @@ function recalcMtdFromMonthly() {
       const lbRange = todaySheet.getRange(RANGES.leaderboard);
       updateLeaderboardFromCounts_(lbRange, countsByFullName, { mode: 'set' });
       todaySheet.getRange(RANGES.mtd).setNumberFormat('0.#');
-      toastInfo('Updating leaderboard counts...', 'Working (5/6)');
-      reapplyCF();
-      toastInfo('Reapplying conditional formatting...', 'Working (6/6)');
+      toastInfo('Updating leaderboard counts...', 'Working (5/7)');
+      reapplyCF({ throwOnError: true });
+      toastInfo('Reapplying conditional formatting...', 'Working (6/7)');
+      toastInfo('Refreshing monthly analytics...', 'Working (7/7)');
+      const analyticsResult = refreshAnalyticsInternal(sheets);
 
-      toastInfo(
-        `MTD recalculated. Found ${totalSalespersonErrors} salesperson code errors in 'MONTHLY'. Non-delivered deals also highlighted.`,
-        'Recalc & Format Complete',
-        5
-      );
-      // === NEW: Analytics Prompt and Execution ===
-      // Get UI reference
-      const ui = SpreadsheetApp.getUi();
+      return {
+        status: 'complete',
+        totalSalespersonErrors,
+        analyticsResult,
+      };
+    });
 
-      // Prompt user to refresh analytics
-      const analyticsResponse = ui.alert(
-        'Update Monthly Analytics?',
-        'MTD recalculation complete!\n\n' +
-        'Would you like to refresh the monthly analytics now?\n\n' +
-        'This will update the comprehensive sales metrics in columns S-X ' +
-        'of the MONTHLY sheet, including:\n' +
-        '• Total delivered units (new/used breakdown)\n' +
-        '• Per-salesperson sales counts\n' +
-        '• Team performance metrics\n\n' +
-        'This typically takes 5-10 seconds.',
-        ui.ButtonSet.YES_NO
-      );
-
-      if (analyticsResponse === ui.Button.YES) {
-        try {
-          toastInfo('Refreshing analytics...', 'Working', 5);
-
-          // Call the internal analytics helper (imported from sales_analytics.js)
-          const analyticsResult = refreshAnalyticsInternal(sheets);
-
-          if (analyticsResult.success) {
-            // Show summary dialog
-            const analytics = analyticsResult.data;
-            const topPerformer = analytics.salespersonMetrics[0] || {
-              displayCode: 'N/A',
-              totalSales: 0,
-            };
-
-            ui.alert(
-              'Update Complete',
-              'MTD and Analytics have been updated successfully!\n\n' +
-              'MTD Recalculation:\n' +
-              `• Found ${totalSalespersonErrors} salesperson code errors in MONTHLY\n` +
-              '• Non-delivered deals highlighted\n' +
-              '• Leaderboard updated\n\n' +
-              'Monthly Analytics:\n' +
-              `• Total Delivered: ${analytics.totals.delivered || 0}\n` +
-              `• New: ${analytics.totals.newDelivered || 0}\n` +
-              `• Used: ${analytics.totals.usedDelivered || 0}\n` +
-              `• Top Performer: ${topPerformer.displayCode} (${topPerformer.totalSales} units)`,
-              ui.ButtonSet.OK
-            );
-
-            toastInfo('MTD and Analytics update complete!', 'Complete', 5);
-          } else {
-            // Analytics failed but MTD succeeded
-            alertError(
-              'Analytics Update Failed\n\n' +
-              'MTD recalculation completed successfully, but analytics ' +
-              'update encountered an error:\n\n' +
-              (analyticsResult.error || 'Unknown error') +
-              '\n\n' +
-              'Your MTD and formatting updates have been saved.\n\n' +
-              'You can refresh analytics manually later via the menu.'
-            );
-            toastInfo('MTD complete. Analytics update failed.', 'Warning', 5);
-          }
-        } catch (analyticsError) {
-          // Log but don't fail the whole operation since MTD succeeded
-          Logger.log('Analytics refresh error after MTD: ' + analyticsError);
-          alertError(
-            'Analytics update failed: ' +
-            analyticsError.message +
-            '\n\n' +
-            'MTD recalculation was successful.'
-          );
-          toastInfo('MTD complete. Analytics update failed.', 'Warning', 5);
-        }
-      } else {
-        // User declined analytics refresh
-        toastInfo(
-          'MTD recalculation complete. Analytics not updated.',
-          'Complete',
-          5
-        );
-      }
-      // === END NEW CODE ===
-    } catch (e) {
-      logError('recalcMtdFromMonthly', e);
-      alertError(
-        'Error during MTD recalculation: ' + e.toString(),
-        'Recalc Failed'
-      );
+    if (result.status === 'empty') {
+      toastInfo(result.message, 'Recalc Complete', 5);
+      return;
     }
-  });
+
+    if (!result.analyticsResult.success) {
+      alertError(
+        'MTD recalculation completed, but analytics could not be updated: ' +
+          (result.analyticsResult.error || 'Unknown error'),
+        'Analytics Update Failed'
+      );
+      toastInfo('MTD updated. Analytics update failed.', 'Warning', 5);
+      return;
+    }
+
+    toastInfo(
+      `MTD and analytics updated. Found ${result.totalSalespersonErrors} salesperson code errors in 'MONTHLY'.`,
+      'Update Complete',
+      5
+    );
+  } catch (e) {
+    logError('recalcMtdFromMonthly', e);
+    alertError(
+      'Error during MTD recalculation: ' + e.toString(),
+      'Recalc Failed'
+    );
+  }
 }
 
 function rolloverMonth() {
-  withScriptLock(() => {
-    const ui = SpreadsheetApp.getUi();
-    const response = ui.alert(
-      'Confirm Month Rollover',
-      'This will:\n' +
+  const ui = SpreadsheetApp.getUi();
+  const response = ui.alert(
+    'Confirm Month Rollover',
+    'This will:\n' +
       '1. Archive the current "MONTHLY" sheet (e.g., as "5/25").\n' +
       '2. Copy the final leaderboard to the archive.\n' +
       '3. Clear the "MONTHLY" sheet for the new month.\n' +
       '4. Clear MTD sales (Column Q) on the "TODAY" sheet.\n' +
       '5. Recalculate 3-Month Rolling Averages (Column R) on "TODAY".\n\n' +
       'Are you sure you want to proceed?',
-      ui.ButtonSet.YES_NO
-    );
-    if (response !== ui.Button.YES) {
-      toastInfo('Rollover cancelled.', 'Cancelled');
-      return;
-    }
+    ui.ButtonSet.YES_NO
+  );
+  if (response !== ui.Button.YES) {
+    toastInfo('Rollover cancelled.', 'Cancelled');
+    return;
+  }
 
-    toastInfo('Starting month rollover...', 'Working (1/5)');
-    try {
+  try {
+    const rolloverResult = withScriptLock(() => {
+      toastInfo('Starting month rollover...', 'Working (1/5)');
       const sheets = getSheets();
       const currentDate = new Date();
       let archiveYear = currentDate.getFullYear();
@@ -3234,10 +3173,9 @@ function rolloverMonth() {
       ).padStart(2, '0')}`;
 
       if (SS.getSheetByName(archiveSheetName)) {
-        alertError(
+        throw new Error(
           `Archive "${archiveSheetName}" already exists. Rollover aborted.`
         );
-        return;
       }
 
       // Recalculate final analytics before archiving for accuracy
@@ -3264,19 +3202,14 @@ function rolloverMonth() {
           'Working (2/5)'
         );
       } catch (e) {
-        logError('rolloverMonth', e, {
-          operation: 'rename_archive',
-          archiveName: archiveSheetName,
-        });
-        alertError(
-          `Error renaming archive: ${e}. Try deleting partial archive.`
-        );
         try {
           SS.deleteSheet(archiveSheet);
         } catch (delErr) {
           Logger.log(`Failed to delete partial: ${delErr}`);
         }
-        return;
+        throw new Error(
+          `Error renaming archive: ${e}. Partial archive cleanup was attempted.`
+        );
       }
 
       const lbRangeToday = sheets.today.getRange(RANGES.leaderboard);
@@ -3328,21 +3261,23 @@ function rolloverMonth() {
         .setValues(avgValues)
         .setNumberFormat('0.#');
       toastInfo('MTD cleared & Averages recalculated.', 'Working (5/5)');
-      reapplyCF();
+      reapplyCF({ throwOnError: true });
       SpreadsheetApp.flush();
-      ui.alert(
-        'Month Rollover Complete!',
-        `"${archiveSheetName}" created. "MONTHLY" & MTD reset. Averages updated.`,
-        ui.ButtonSet.OK
-      );
-    } catch (e) {
-      logError('rolloverMonth', e);
-      alertError(
-        'Error during month rollover: ' + e.toString(),
-        'Rollover Failed'
-      );
-    }
-  });
+      return { archiveSheetName };
+    });
+
+    ui.alert(
+      'Month Rollover Complete!',
+      `"${rolloverResult.archiveSheetName}" created. "MONTHLY" & MTD reset. Averages updated.`,
+      ui.ButtonSet.OK
+    );
+  } catch (e) {
+    logError('rolloverMonth', e);
+    alertError(
+      'Error during month rollover: ' + e.toString(),
+      'Rollover Failed'
+    );
+  }
 }
 
 // ============================================================================
