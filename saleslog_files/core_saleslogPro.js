@@ -2743,12 +2743,12 @@ function reapplyCF() {
         .replace(/\s+/g, '')
         .toUpperCase();
     const managedStockRuleSignatures = [
-      /^=COUNTIF\(\$(E|L)\$2:\$\1\$101,\$\1\d+\)>1$/,
-      /^=AND\(\$(E|L)(\d+)<>"",COUNTIF\(\$\1\$2:\$\1\$101,\$\1\2\)>1\)$/,
+      /^=COUNTIF\(\$(E|L)\$2:\$\1\$101,\$(E|L)\d+\)>1$/,
+      /^=AND\(\$(E|L)\d+<>"",COUNTIF\(\$(E|L)\$2:\$\2\$101,\$(E|L)\d+\)>1\)$/,
     ];
     const managedDepositRuleSignatures = [
       /^=COUNTIF\(INDIRECT\("DEPOSITS!G:G"\),\$(E|L)\d+\)>0$/,
-      /^=AND\(\$(E|L)(\d+)<>"",COUNTIF\(INDIRECT\("DEPOSITS!G:G"\),\$\1\2\)>0\)$/,
+      /^=AND\(\$(E|L)\d+<>"",COUNTIF\(INDIRECT\("DEPOSITS!G:G"\),\$(E|L)\d+\)>0\)$/,
     ];
     const paceNumberPattern = '-?\\d+(?:\\.\\d+)?';
     const managedPaceRuleSignatures = [
@@ -2789,14 +2789,13 @@ function reapplyCF() {
         : null;
 
       if (isCustomFormula) {
-        const isManagedDepositRule = managedDepositRuleSignatures.some(
-          (signature) => signature.test(currentFormulaNormalized)
-        );
         const isManagedStockRule = managedStockRuleSignatures.some(
           (signature) => signature.test(currentFormulaNormalized)
         );
-        shouldRemove =
-          isManagedDepositRule || isManagedStockRule;
+        const isManagedDepositRule = managedDepositRuleSignatures.some(
+          (signature) => signature.test(currentFormulaNormalized)
+        );
+        shouldRemove = isManagedDepositRule || isManagedStockRule;
       }
 
       const hasManagedLeaderboardRange =
@@ -2832,6 +2831,7 @@ function reapplyCF() {
       }
     });
 
+    const removedRuleCount = existingRules.length - rulesToKeep.length;
     const newRules = [...rulesToKeep];
 
     let allMtdAreZero = true;
@@ -2952,10 +2952,19 @@ function reapplyCF() {
     );
 
     setCFRulesSheet(todaySheet, newRules);
+    Logger.log(
+      `[reapplyCF] existing=${existingRules.length} removed=${removedRuleCount} retained=${rulesToKeep.length} final=${newRules.length}`
+    );
     toastInfo(
-      'Conditional formatting updated for Leaderboard and Data Entry.',
+      `Conditional formatting updated. Replaced ${removedRuleCount} managed rules; ${newRules.length} total rules remain.`,
       'CF Updated'
     );
+    return {
+      existingCount: existingRules.length,
+      removedCount: removedRuleCount,
+      retainedCount: rulesToKeep.length,
+      finalCount: newRules.length,
+    };
   } catch (e) {
     logError('reapplyCF', e);
     alertError('Error reapplying CF: ' + e.toString(), 'CF Error');
