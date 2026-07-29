@@ -10,7 +10,7 @@
  * A caller that cannot acquire the lock within this window fails without
  * entering its critical section and can be retried by the user or trigger.
  */
-const LOCK_ACQUISITION_TIMEOUT_MS = 10_000;
+const LOCK_ACQUISITION_TIMEOUT_MS = 10000;
 
 /**
  * Acquires the project script lock within one overall deadline.
