@@ -2743,27 +2743,9 @@ function reapplyCF() {
         .replace(/\s+/g, '')
         .toUpperCase();
     const managedStockRuleSignatures = [
-      {
-        range: RANGES.todayNewCarDataRange,
-        background: DUPLICATE_FILL_COLOR.toUpperCase(),
-        formulas: [
-          '=COUNTIF($E$2:$E$101,$E2)>1',
-          '=AND($E2<>"",COUNTIF($E$2:$E$101,$E2)>1)',
-        ],
-      },
-      {
-        range: RANGES.todayUsedCarDataRange,
-        background: DUPLICATE_FILL_COLOR.toUpperCase(),
-        formulas: [
-          '=COUNTIF($L$2:$L$101,$L2)>1',
-          '=AND($L2<>"",COUNTIF($L$2:$L$101,$L2)>1)',
-        ],
-      },
-    ].map((signature) => ({
-      range: signature.range,
-      background: signature.background,
-      formulas: signature.formulas.map(normalizeFormula),
-    }));
+      /^=COUNTIF\(\$(E|L)\$2:\$\1\$101,\$\1\d+\)>1$/,
+      /^=AND\(\$(E|L)(\d+)<>"",COUNTIF\(\$\1\$2:\$\1\$101,\$\1\2\)>1\)$/,
+    ];
     const managedDepositRuleSignatures = [
       /^=COUNTIF\(INDIRECT\("DEPOSITS!G:G"\),\$(E|L)\d+\)>0$/,
       /^=AND\(\$(E|L)(\d+)<>"",COUNTIF\(INDIRECT\("DEPOSITS!G:G"\),\$\1\2\)>0\)$/,
@@ -2807,19 +2789,14 @@ function reapplyCF() {
         : null;
 
       if (isCustomFormula) {
-        const isManagedDepositRule =
-          ruleBg === DUPLICATE_FILL_COLOR.toUpperCase() &&
-          managedDepositRuleSignatures.some((signature) =>
-            signature.test(currentFormulaNormalized)
-          );
+        const isManagedDepositRule = managedDepositRuleSignatures.some(
+          (signature) => signature.test(currentFormulaNormalized)
+        );
+        const isManagedStockRule = managedStockRuleSignatures.some(
+          (signature) => signature.test(currentFormulaNormalized)
+        );
         shouldRemove =
-          isManagedDepositRule ||
-          managedStockRuleSignatures.some((signature) =>
-            ruleBg === signature.background &&
-            signature.formulas.includes(currentFormulaNormalized) &&
-            ranges.length === 1 &&
-            ranges[0].getA1Notation() === signature.range
-          );
+          isManagedDepositRule || isManagedStockRule;
       }
 
       const hasManagedLeaderboardRange =
