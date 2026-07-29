@@ -789,15 +789,15 @@ function setCFRulesSheet(sheet, rules) {
 
 // lockOps
 /**
- * Executes a function with script lock protection using exponential backoff retry
+ * Executes a function with bounded script-lock protection.
  * Prevents concurrent executions and ensures operation atomicity
  * Automatically releases lock after function completes or throws error
  * @param {Function} fn - Function to execute with lock protection
  * @returns {*} Return value from the executed function
- * @throws {Error} If lock cannot be acquired after maximum retries
+ * @throws {Error} If the lock cannot be acquired within the configured deadline
  */
 function withScriptLock(fn) {
-  // Acquire lock with exponential backoff retry logic
+  // Fail closed if another operation still holds the lock after the deadline.
   const lockResult = acquireScriptLockWithRetry();
 
   // Check if lock acquisition was successful
@@ -2129,10 +2129,10 @@ function findLastRowInCols(sheet, startCol, endCol) {
 /**
  * Creates a timeout manager for tracking execution time
  * @param {number} thresholdMinutes - Threshold in minutes (default: 5.0)
+ * @param {number} startTime - Execution start timestamp, including lock wait
  * @returns {Object} Manager with checkTime() and getElapsed() methods
  */
-function createTimeoutManager(thresholdMinutes = 5.0) {
-  const startTime = Date.now();
+function createTimeoutManager(thresholdMinutes = 5.0, startTime = Date.now()) {
   const thresholdMs = thresholdMinutes * 60 * 1000;
 
   return {
@@ -2364,8 +2364,9 @@ function recoverAnalyticsForCheckpoint(checkpoint) {
 
 // Main flows
 function processDaily() {
+  const operationStartTime = Date.now();
   withScriptLock(() => {
-    const timer = createTimeoutManager(5.0); // 5-minute threshold, 1-min safety margin
+    const timer = createTimeoutManager(5.0, operationStartTime);
     let analyticsSkipped = false;
 
     // Check if Sundays should be skipped based on configuration
