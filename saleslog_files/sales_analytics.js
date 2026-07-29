@@ -44,11 +44,20 @@ function calculateMonthlyAnalytics() {
     const cached = CACHE.get(CACHE_KEY_ANALYTICS);
     if (cached) {
       try {
-        return JSON.parse(cached);
+        const cachedAnalytics = JSON.parse(cached);
+        const cacheValidationErrors = validateAnalyticsData(cachedAnalytics);
+        if (cacheValidationErrors.length === 0) {
+          return cachedAnalytics;
+        }
+        logWarning('calculateMonthlyAnalytics', 'Invalid analytics cache', {
+          errors: cacheValidationErrors,
+        });
+        CACHE.remove(CACHE_KEY_ANALYTICS);
       } catch (e) {
         logWarning('calculateMonthlyAnalytics', 'Analytics cache parse error', {
           error: e.toString(),
         });
+        CACHE.remove(CACHE_KEY_ANALYTICS);
       }
     }
 
@@ -93,9 +102,10 @@ function calculateMonthlyAnalytics() {
     // Validate before returning
     const validationErrors = validateAnalyticsData(analyticsData);
     if (validationErrors.length > 0) {
-      logWarning('calculateMonthlyAnalytics', 'Analytics validation warnings', {
+      logError('calculateMonthlyAnalytics', 'Analytics validation failed', {
         errors: validationErrors,
       });
+      return null;
     }
 
     // Cache the result
@@ -137,30 +147,28 @@ function calculateMonthlyAnalytics() {
  */
 function writeAnalyticsToMonthly(analyticsData, monthlySheet) {
   if (!analyticsData || !monthlySheet) {
-    Logger.log('writeAnalyticsToMonthly: Invalid parameters');
-    return;
+    throw new Error('writeAnalyticsToMonthly: Invalid parameters');
   }
 
   try {
-    // Clear existing analytics columns (S:X)
-    const maxRows = monthlySheet.getMaxRows();
-    monthlySheet
-      .getRange(1, ANALYTICS_START_COL, maxRows, ANALYTICS_COL_COUNT)
-      .clear();
+    const validationErrors = validateAnalyticsData(analyticsData);
+    if (validationErrors.length > 0) {
+      throw new Error(`Invalid analytics data: ${validationErrors.join('; ')}`);
+    }
 
-    // Build summary section (rows 1-8)
+    // Build and validate all replacement data before touching the sheet.
     const summaryData = buildSummarySection(analyticsData);
+    const salespersonData = buildSalespersonSection(analyticsData);
+    const previousLastRow = findLastRowInCols(
+      monthlySheet,
+      ANALYTICS_START_COL,
+      ANALYTICS_START_COL + ANALYTICS_COL_COUNT - 1
+    );
 
     // Write summary section
     monthlySheet
       .getRange(1, ANALYTICS_START_COL, summaryData.length, ANALYTICS_COL_COUNT)
       .setValues(summaryData);
-
-    // Apply summary formatting
-    formatSummarySection(monthlySheet);
-
-    // Build salesperson data array
-    const salespersonData = buildSalespersonSection(analyticsData);
 
     // Write salesperson data starting at row 9
     if (salespersonData.length > 0) {
@@ -173,8 +181,23 @@ function writeAnalyticsToMonthly(analyticsData, monthlySheet) {
         )
         .setValues(salespersonData);
 
-      // Apply salesperson data formatting
-      formatSalespersonSection(monthlySheet, salespersonData.length);
+    }
+
+    // Apply formatting only after all values were written successfully.
+    formatSummarySection(monthlySheet);
+    formatSalespersonSection(monthlySheet, salespersonData.length);
+
+    // Remove only stale rows left below the new analytics output.
+    const outputLastRow = summaryData.length + salespersonData.length;
+    if (previousLastRow > outputLastRow) {
+      monthlySheet
+        .getRange(
+          outputLastRow + 1,
+          ANALYTICS_START_COL,
+          previousLastRow - outputLastRow,
+          ANALYTICS_COL_COUNT
+        )
+        .clear();
     }
 
     SpreadsheetApp.flush();
@@ -683,17 +706,27 @@ function validateAnalyticsData(analyticsData) {
     return errors;
   }
 
+  if (analyticsData.version !== '1.0') {
+    errors.push('Invalid analytics version');
+  }
+  if (
+    typeof analyticsData.timestamp !== 'string' ||
+    Number.isNaN(Date.parse(analyticsData.timestamp))
+  ) {
+    errors.push('Invalid analytics timestamp');
+  }
+
   // Validate totals
   if (!analyticsData.totals) {
     errors.push('Missing totals object');
   } else {
-    if (typeof analyticsData.totals.delivered !== 'number') {
+    if (!Number.isFinite(analyticsData.totals.delivered)) {
       errors.push('Invalid delivered count');
     }
-    if (typeof analyticsData.totals.newDelivered !== 'number') {
+    if (!Number.isFinite(analyticsData.totals.newDelivered)) {
       errors.push('Invalid newDelivered count');
     }
-    if (typeof analyticsData.totals.usedDelivered !== 'number') {
+    if (!Number.isFinite(analyticsData.totals.usedDelivered)) {
       errors.push('Invalid usedDelivered count');
     }
 
@@ -714,18 +747,57 @@ function validateAnalyticsData(analyticsData) {
     }
   }
 
+  // Validate team metrics used by the summary builder.
+  if (!analyticsData.teamMetrics) {
+    errors.push('Missing teamMetrics object');
+  } else {
+    ['sellingDays', 'newPerDay', 'usedPerDay'].forEach((field) => {
+      const value = analyticsData.teamMetrics[field];
+      if (!Number.isFinite(value) || value < 0) {
+        errors.push(`Invalid teamMetrics.${field}`);
+      }
+    });
+  }
+
   // Validate salesperson metrics
   if (!Array.isArray(analyticsData.salespersonMetrics)) {
     errors.push('salespersonMetrics is not an array');
   } else {
     analyticsData.salespersonMetrics.forEach((person, index) => {
+      if (!person || typeof person !== 'object') {
+        errors.push(`Invalid salesperson entry at index ${index}`);
+        return;
+      }
       if (!person.displayCode) {
         errors.push(`Salesperson at index ${index} missing displayCode`);
       }
-      if (typeof person.totalSales !== 'number' || person.totalSales < 0) {
-        errors.push(`Invalid totalSales for ${person.displayCode || index}`);
-      }
+      ['newSales', 'usedSales', 'totalSales', 'percentOfTeam', 'rank'].forEach(
+        (field) => {
+          const value = person[field];
+          if (!Number.isFinite(value) || value < 0) {
+            errors.push(
+              `Invalid ${field} for ${person.displayCode || index}`
+            );
+          }
+        }
+      );
     });
+  }
+
+  if (!analyticsData.dataQuality) {
+    errors.push('Missing dataQuality object');
+  } else {
+    if (!Array.isArray(analyticsData.dataQuality.unknownSalespeople)) {
+      errors.push('Invalid dataQuality.unknownSalespeople');
+    }
+    ['totalRowsProcessed', 'deliveredRowsProcessed', 'errorCount'].forEach(
+      (field) => {
+        const value = analyticsData.dataQuality[field];
+        if (!Number.isFinite(value) || value < 0) {
+          errors.push(`Invalid dataQuality.${field}`);
+        }
+      }
+    );
   }
 
   return errors;
@@ -748,6 +820,11 @@ function createEmptyAnalytics() {
       delivered: 0,
       newDelivered: 0,
       usedDelivered: 0,
+    },
+    teamMetrics: {
+      sellingDays: 0,
+      newPerDay: 0,
+      usedPerDay: 0,
     },
     salespersonMetrics: [],
     dataQuality: {
