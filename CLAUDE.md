@@ -69,7 +69,7 @@ pushed to the live script.
   as historical reference, not a description of current behavior; verify against actual code before relying
   on them.
 
-## GAS coding rules (from agents.md / .agent/rules/gas.md / .roo/rules)
+## GAS coding rules (from AGENTS.md / .agent/rules/gas.md / .roo/rules)
 
 These constraints are enforced by existing repo conventions — follow them for any new/modified code:
 

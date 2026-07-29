@@ -2707,9 +2707,6 @@ function processDaily() {
 /**
  * Reapplies conditional formatting rules to the TODAY sheet.
  */
-/**
- * Reapplies conditional formatting rules to the TODAY sheet.
- */
 function reapplyCF() {
   try {
     // Get configured colors and thresholds
@@ -2722,9 +2719,10 @@ function reapplyCF() {
 
     const sheets = getSheets();
     const todaySheet = sheets.today;
+    const leaderboardRanges = getDynamicLeaderboardRanges();
 
-    let existingRules = todaySheet.getConditionalFormatRules();
-    let rulesToKeep = [];
+    const existingRules = todaySheet.getConditionalFormatRules();
+    const rulesToKeep = [];
 
     const now = new Date();
     const { daysElapsed, totalDays } = memoizedGetSellingDays(
@@ -2740,71 +2738,139 @@ function reapplyCF() {
     const PACE_COLORS_UPPER = ['#70AD47', '#FFEE32', '#C00000'].map((c) =>
       c.toUpperCase()
     );
+    const normalizeFormula = (formula) =>
+      String(formula || '')
+        .replace(/\s+/g, '')
+        .toUpperCase();
+    const managedStockRuleSignatures = [
+      {
+        range: RANGES.todayNewCarDataRange,
+        background: DUPLICATE_FILL_COLOR.toUpperCase(),
+        formulas: [
+          '=COUNTIF($E$2:$E$101,$E2)>1',
+          '=AND($E2<>"",COUNTIF($E$2:$E$101,$E2)>1)',
+        ],
+      },
+      {
+        range: RANGES.todayUsedCarDataRange,
+        background: DUPLICATE_FILL_COLOR.toUpperCase(),
+        formulas: [
+          '=COUNTIF($L$2:$L$101,$L2)>1',
+          '=AND($L2<>"",COUNTIF($L$2:$L$101,$L2)>1)',
+        ],
+      },
+      {
+        range: RANGES.todayNewCarDataRange,
+        background: DUPLICATE_FILL_COLOR.toUpperCase(),
+        formulas: [
+          '=COUNTIF(INDIRECT("DEPOSITS!G:G"),$E2)>0',
+          '=AND($E2<>"",COUNTIF(INDIRECT("DEPOSITS!G:G"),$E2)>0)',
+        ],
+      },
+      {
+        range: RANGES.todayUsedCarDataRange,
+        background: DUPLICATE_FILL_COLOR.toUpperCase(),
+        formulas: [
+          '=COUNTIF(INDIRECT("DEPOSITS!G:G"),$L2)>0',
+          '=AND($L2<>"",COUNTIF(INDIRECT("DEPOSITS!G:G"),$L2)>0)',
+        ],
+      },
+    ].map((signature) => ({
+      range: signature.range,
+      background: signature.background,
+      formulas: signature.formulas.map(normalizeFormula),
+    }));
+    const paceNumberPattern = '-?\\d+(?:\\.\\d+)?';
+    const managedPaceRuleSignatures = [
+      {
+        background: PACE_COLORS_UPPER[0],
+        formula: new RegExp(
+          `^=\\(\\$Q2\\/${paceNumberPattern}\\*${paceNumberPattern}\\)>=${paceNumberPattern}$`
+        ),
+      },
+      {
+        background: PACE_COLORS_UPPER[1],
+        formula: new RegExp(
+          `^=AND\\(\\(\\$Q2\\/${paceNumberPattern}\\*${paceNumberPattern}\\)>=${paceNumberPattern},\\(\\$Q2\\/${paceNumberPattern}\\*${paceNumberPattern}\\)<${paceNumberPattern}\\)$`
+        ),
+      },
+      {
+        background: PACE_COLORS_UPPER[2],
+        formula: new RegExp(
+          `^=\\(\\$Q2\\/${paceNumberPattern}\\*${paceNumberPattern}\\)<${paceNumberPattern}$`
+        ),
+      },
+    ];
 
     // Filter out existing rules that should be replaced
     existingRules.forEach((rule) => {
       let shouldRemove = false;
       const ranges = rule.getRanges();
+      const bc = rule.getBooleanCondition();
+      const isCustomFormula =
+        bc &&
+        bc.getCriteriaType() === SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA;
+      const currentFormulaFull = isCustomFormula
+        ? String(bc.getCriteriaValues()[0] || '')
+        : '';
+      const currentFormulaNormalized = normalizeFormula(currentFormulaFull);
+      const ruleBg = isCustomFormula && bc.getBackground()
+        ? bc.getBackground().toUpperCase()
+        : null;
 
-      // Check if any range in this rule intersects with Leaderboard columns (P, Q, R -> 16, 17, 18)
-      const intersectsLeaderboard = ranges.some((range) => {
-        const startCol = range.getColumn();
-        const endCol = range.getLastColumn();
-        // Check intersection with columns 16, 17, 18 (P, Q, R)
-        return Math.max(startCol, 16) <= Math.min(endCol, 18);
-      });
+      if (isCustomFormula) {
+        shouldRemove = managedStockRuleSignatures.some((signature) =>
+          ruleBg === signature.background &&
+          signature.formulas.includes(currentFormulaNormalized) &&
+          ranges.length === 1 &&
+          ranges[0].getA1Notation() === signature.range
+        );
+      }
 
-      if (intersectsLeaderboard) {
-        const bc = rule.getBooleanCondition();
+      const hasManagedLeaderboardRange =
+        ranges.length === 1 && /^P2:R\d+$/.test(ranges[0].getA1Notation());
+
+      if (hasManagedLeaderboardRange && isCustomFormula) {
+        // Check for "Blue" zero-sales rule
         if (
-          bc &&
-          bc.getCriteriaType() === SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA
+          currentFormulaNormalized ===
+          managedLeaderboardBlueRuleSignature.formula &&
+          ruleBg === managedLeaderboardBlueRuleSignature.background
         ) {
-          const currentFormulaFull = bc.getCriteriaValues()[0].toString();
-          const currentFormulaNormalized = currentFormulaFull.replace(
-            /\s+/g,
-            ''
+          shouldRemove = true;
+        }
+
+        const isManagedPaceRule = managedPaceRuleSignatures.some(
+          (signature) =>
+            ruleBg === signature.background &&
+            signature.formula.test(currentFormulaNormalized)
+        );
+        if (isManagedPaceRule) {
+          shouldRemove = true;
+          Logger.log(
+            `Removing old pace rule: ${currentFormulaFull} on range ${ranges
+              .map((r) => r.getA1Notation())
+              .join(',')}`
           );
-          const ruleBg = bc.getBackground()
-            ? bc.getBackground().toUpperCase()
-            : null;
-
-          // Check for "Blue" zero-sales rule
-          if (
-            currentFormulaNormalized ===
-            managedLeaderboardBlueRuleSignature.formula &&
-            ruleBg === managedLeaderboardBlueRuleSignature.background
-          ) {
-            shouldRemove = true;
-          }
-
-          // Check for Pace rules (Green, Yellow, Red)
-          // Identify by color AND formula content (referencing column Q)
-          if (
-            PACE_COLORS_UPPER.includes(ruleBg) &&
-            currentFormulaNormalized.includes('$Q')
-          ) {
-            shouldRemove = true;
-            Logger.log(
-              `Removing old pace rule: ${currentFormulaFull} on range ${ranges
-                .map((r) => r.getA1Notation())
-                .join(',')}`
-            );
-          }
         }
       }
 
       if (!shouldRemove) {
-        rulesToKeep.push(rule.copy().build());
+        rulesToKeep.push(rule);
       }
     });
 
-    let newRules = [...rulesToKeep];
+    const newRules = [...rulesToKeep];
 
     let allMtdAreZero = true;
     try {
-      if (RANGES.mtd && RANGES.mtd.match(/^[A-Z]+\d+:[A-Z]+\d+$/)) {
-        const mtdRangeValues = todaySheet.getRange(RANGES.mtd).getValues();
+      if (
+        leaderboardRanges.mtd &&
+        leaderboardRanges.mtd.match(/^[A-Z]+\d+:[A-Z]+\d+$/)
+      ) {
+        const mtdRangeValues = todaySheet
+          .getRange(leaderboardRanges.mtd)
+          .getValues();
         for (const row of mtdRangeValues) {
           const value = Number(row[0]);
           if (!isNaN(value) && value > 0) {
@@ -2814,7 +2880,7 @@ function reapplyCF() {
         }
       } else {
         Logger.log(
-          `RANGES.mtd ("${RANGES.mtd}") is not defined or invalid. Defaulting to standard pace rules.`
+          `Leaderboard MTD range ("${leaderboardRanges.mtd}") is not defined or invalid. Defaulting to standard pace rules.`
         );
         allMtdAreZero = false;
       }
@@ -2827,7 +2893,9 @@ function reapplyCF() {
       allMtdAreZero = false;
     }
 
-    const cfLeaderboardRange = todaySheet.getRange(RANGES.leaderboard);
+    const cfLeaderboardRange = todaySheet.getRange(
+      leaderboardRanges.leaderboard
+    );
 
     if (allMtdAreZero) {
       Logger.log(
@@ -2876,7 +2944,7 @@ function reapplyCF() {
 
     newRules.push(
       SpreadsheetApp.newConditionalFormatRule()
-        .whenFormulaSatisfied('=COUNTIF($E$2:$E$101,$E2)>1')
+        .whenFormulaSatisfied('=AND($E2<>"",COUNTIF($E$2:$E$101,$E2)>1)')
         .setFontColor(DUPLICATE_TEXT_COLOR)
         .setBackground(DUPLICATE_FILL_COLOR)
         .setRanges([todayNewCarRange])
@@ -2884,7 +2952,7 @@ function reapplyCF() {
     );
     newRules.push(
       SpreadsheetApp.newConditionalFormatRule()
-        .whenFormulaSatisfied('=COUNTIF($L$2:$L$101,$L2)>1')
+        .whenFormulaSatisfied('=AND($L2<>"",COUNTIF($L$2:$L$101,$L2)>1)')
         .setFontColor(DUPLICATE_TEXT_COLOR)
         .setBackground(DUPLICATE_FILL_COLOR)
         .setRanges([todayUsedCarRange])
@@ -2892,7 +2960,9 @@ function reapplyCF() {
     );
     newRules.push(
       SpreadsheetApp.newConditionalFormatRule()
-        .whenFormulaSatisfied('=COUNTIF(INDIRECT("DEPOSITS!G:G"),$E2)>0')
+        .whenFormulaSatisfied(
+          '=AND($E2<>"",COUNTIF(INDIRECT("DEPOSITS!G:G"),$E2)>0)'
+        )
         .setFontColor(DUPLICATE_TEXT_COLOR)
         .setBackground(DUPLICATE_FILL_COLOR)
         .setRanges([todayNewCarRange])
@@ -2900,7 +2970,9 @@ function reapplyCF() {
     );
     newRules.push(
       SpreadsheetApp.newConditionalFormatRule()
-        .whenFormulaSatisfied('=COUNTIF(INDIRECT("DEPOSITS!G:G"),$L2)>0')
+        .whenFormulaSatisfied(
+          '=AND($L2<>"",COUNTIF(INDIRECT("DEPOSITS!G:G"),$L2)>0)'
+        )
         .setFontColor(DUPLICATE_TEXT_COLOR)
         .setBackground(DUPLICATE_FILL_COLOR)
         .setRanges([todayUsedCarRange])

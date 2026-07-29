@@ -1,4 +1,4 @@
-# agents.md — Google Apps Script (GAS) Best-Practices Contract for Codex
+# AGENTS.md — Google Apps Script (GAS) Best-Practices Contract for Codex
 
 You are writing **Google Apps Script** code. Follow this file as a hard contract.
 
