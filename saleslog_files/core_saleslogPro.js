@@ -2759,27 +2759,15 @@ function reapplyCF() {
           '=AND($L2<>"",COUNTIF($L$2:$L$101,$L2)>1)',
         ],
       },
-      {
-        range: RANGES.todayNewCarDataRange,
-        background: DUPLICATE_FILL_COLOR.toUpperCase(),
-        formulas: [
-          '=COUNTIF(INDIRECT("DEPOSITS!G:G"),$E2)>0',
-          '=AND($E2<>"",COUNTIF(INDIRECT("DEPOSITS!G:G"),$E2)>0)',
-        ],
-      },
-      {
-        range: RANGES.todayUsedCarDataRange,
-        background: DUPLICATE_FILL_COLOR.toUpperCase(),
-        formulas: [
-          '=COUNTIF(INDIRECT("DEPOSITS!G:G"),$L2)>0',
-          '=AND($L2<>"",COUNTIF(INDIRECT("DEPOSITS!G:G"),$L2)>0)',
-        ],
-      },
     ].map((signature) => ({
       range: signature.range,
       background: signature.background,
       formulas: signature.formulas.map(normalizeFormula),
     }));
+    const managedDepositRuleSignatures = [
+      /^=COUNTIF\(INDIRECT\("DEPOSITS!G:G"\),\$(E|L)\d+\)>0$/,
+      /^=AND\(\$(E|L)(\d+)<>"",COUNTIF\(INDIRECT\("DEPOSITS!G:G"\),\$\1\2\)>0\)$/,
+    ];
     const paceNumberPattern = '-?\\d+(?:\\.\\d+)?';
     const managedPaceRuleSignatures = [
       {
@@ -2819,12 +2807,19 @@ function reapplyCF() {
         : null;
 
       if (isCustomFormula) {
-        shouldRemove = managedStockRuleSignatures.some((signature) =>
-          ruleBg === signature.background &&
-          signature.formulas.includes(currentFormulaNormalized) &&
-          ranges.length === 1 &&
-          ranges[0].getA1Notation() === signature.range
-        );
+        const isManagedDepositRule =
+          ruleBg === DUPLICATE_FILL_COLOR.toUpperCase() &&
+          managedDepositRuleSignatures.some((signature) =>
+            signature.test(currentFormulaNormalized)
+          );
+        shouldRemove =
+          isManagedDepositRule ||
+          managedStockRuleSignatures.some((signature) =>
+            ruleBg === signature.background &&
+            signature.formulas.includes(currentFormulaNormalized) &&
+            ranges.length === 1 &&
+            ranges[0].getA1Notation() === signature.range
+          );
       }
 
       const hasManagedLeaderboardRange =
