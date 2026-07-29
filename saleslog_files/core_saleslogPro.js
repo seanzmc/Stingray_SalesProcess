@@ -2715,6 +2715,8 @@ function reapplyCF() {
       LEADERBOARD_ZERO_BG_COLOR.toUpperCase();
     const DUPLICATE_FILL_COLOR = getColor('duplicateStockFillColor');
     const DUPLICATE_TEXT_COLOR = getColor('duplicateStockTextColor');
+    const DUPLICATE_FILL_COLOR_UPPER = DUPLICATE_FILL_COLOR.toUpperCase();
+    const DUPLICATE_TEXT_COLOR_UPPER = DUPLICATE_TEXT_COLOR.toUpperCase();
     const paceThresholds = getPaceThresholds();
 
     const sheets = getSheets();
@@ -2787,6 +2789,12 @@ function reapplyCF() {
       const ruleBg = isCustomFormula && bc.getBackground()
         ? bc.getBackground().toUpperCase()
         : null;
+      const ruleFontColor =
+        isCustomFormula &&
+        typeof bc.getFontColor === 'function' &&
+        bc.getFontColor()
+          ? bc.getFontColor().toUpperCase()
+          : null;
 
       if (isCustomFormula) {
         const isManagedStockRule = managedStockRuleSignatures.some(
@@ -2795,7 +2803,18 @@ function reapplyCF() {
         const isManagedDepositRule = managedDepositRuleSignatures.some(
           (signature) => signature.test(currentFormulaNormalized)
         );
-        shouldRemove = isManagedDepositRule || isManagedStockRule;
+        const intersectsDataEntryColumns = ranges.some(
+          (range) => range.getColumn() <= 14 && range.getLastColumn() >= 2
+        );
+        const isManagedStyledCountifDebris =
+          currentFormulaNormalized.includes('COUNTIF(') &&
+          ruleBg === DUPLICATE_FILL_COLOR_UPPER &&
+          ruleFontColor === DUPLICATE_TEXT_COLOR_UPPER &&
+          intersectsDataEntryColumns;
+        shouldRemove =
+          isManagedDepositRule ||
+          isManagedStockRule ||
+          isManagedStyledCountifDebris;
       }
 
       const hasManagedLeaderboardRange =
