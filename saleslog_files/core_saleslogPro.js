@@ -1472,7 +1472,9 @@ function collectMonthlyRowsWithDates_(monthlySheet) {
   return rowsWithDates;
 }
 
-function appendTradesToRecon_(candidates, options) {
+const RECON_LOCK_CAPABILITY = Object.freeze({});
+
+function appendTradesToRecon_(candidates, options, lockCapability) {
   const opts = options || {};
   const dryRun = !!opts.dryRun;
   if (!candidates || !candidates.length) {
@@ -1688,10 +1690,17 @@ function appendTradesToRecon_(candidates, options) {
   if (dryRun) {
     return runSection(false);
   }
+  if (lockCapability === RECON_LOCK_CAPABILITY) {
+    return runSection(true);
+  }
   return withScriptLock(() => runSection(true));
 }
 
 function exportTradesToReconLog(options) {
+  return exportTradesToReconLog_(options);
+}
+
+function exportTradesToReconLog_(options, lockCapability) {
   const opts = options || {};
   const dryRun = !!opts.dryRun;
   const sideDefs = [
@@ -1747,7 +1756,9 @@ function exportTradesToReconLog(options) {
     });
   });
 
-  const appendResult = appendTradesToRecon_(candidates, { dryRun: dryRun });
+  const appendResult = appendTradesToRecon_(candidates, {
+    dryRun: dryRun,
+  }, lockCapability);
   Logger.log(
     [
       'exportTradesToReconLog summary:',
@@ -2174,12 +2185,13 @@ function createTimeoutManager(thresholdMinutes = 5.0, startTime = Date.now()) {
 // ============================================================================
 
 /**
- * Checkpoint system for atomic operations in processDaily()
- * Stores operation state to enable recovery if analytics fail
+ * Checkpoint state machine for resumable, idempotent processDaily() operations.
  */
 
 const CHECKPOINT_KEY = 'DAILY_OPERATION_CHECKPOINT';
-const CHECKPOINT_RETENTION_HOURS = 24; // Keep checkpoints for 24 hours
+const CHECKPOINT_VERSION = 2;
+const CHECKPOINT_STALE_HOURS = 24;
+const DAILY_OPERATION_NOTE_PREFIX = 'DAILY_OPERATION:';
 
 /**
  * Creates a checkpoint before modifying MONTHLY sheet
@@ -2187,13 +2199,31 @@ const CHECKPOINT_RETENTION_HOURS = 24; // Keep checkpoints for 24 hours
  */
 function createOperationCheckpoint(operationData) {
   try {
+    const dateIso =
+      operationData.dateIso || normalizeDealDateIso_(operationData.dateStr);
+    const dataHash = generateDataHash(operationData.rows);
+    if (
+      !dateIso ||
+      !operationData.rowCount ||
+      !dataHash ||
+      !Array.isArray(operationData.sourceRows) ||
+      operationData.sourceRows.length !== operationData.rowCount ||
+      !Number.isInteger(operationData.monthlySheetId)
+    ) {
+      throw new Error('Checkpoint identity is incomplete.');
+    }
     const checkpoint = {
+      version: CHECKPOINT_VERSION,
       timestamp: new Date().toISOString(),
       dateProcessed: operationData.dateStr,
+      dateIso: dateIso,
       rowCount: operationData.rowCount,
       status: 'STARTED',
       phase: 'PRE_MONTHLY_WRITE',
-      dataHash: generateDataHash(operationData.rows),
+      dataHash: dataHash,
+      operationId: Utilities.getUuid(),
+      sourceRows: operationData.sourceRows,
+      monthlySheetId: operationData.monthlySheetId,
     };
 
     PropertiesService.getScriptProperties().setProperty(
@@ -2207,13 +2237,13 @@ function createOperationCheckpoint(operationData) {
     return true;
   } catch (e) {
     Logger.log(`⚠️ Failed to create checkpoint: ${e.toString()}`);
-    return false; // Non-fatal - operation can continue
+    return false;
   }
 }
 
 /**
  * Updates checkpoint status as operation progresses
- * @param {string} phase - Current phase (MONTHLY_WRITTEN, ANALYTICS_PENDING, COMPLETE, ANALYTICS_FAILED)
+ * @param {string} phase - Current durable operation phase
  * @param {Object} additionalData - Optional additional data to store
  */
 function updateCheckpoint(phase, additionalData = {}) {
@@ -2268,51 +2298,380 @@ function getOperationCheckpoint() {
 
     const checkpoint = JSON.parse(checkpointStr);
 
-    // Check if checkpoint is too old
+    // Never discard an unfinished operation automatically. Doing so could make a
+    // later retry append the same MONTHLY block again.
     const checkpointAge = Date.now() - new Date(checkpoint.timestamp).getTime();
-    const maxAge = CHECKPOINT_RETENTION_HOURS * 60 * 60 * 1000;
+    const maxAge = CHECKPOINT_STALE_HOURS * 60 * 60 * 1000;
 
     if (checkpointAge > maxAge) {
       Logger.log(
         `⚠️ Checkpoint is ${(checkpointAge / 3600000).toFixed(
           1
-        )}h old - discarding`
+        )}h old; retaining it for safe recovery`
       );
-      clearOperationCheckpoint();
-      return null;
+      checkpoint.isStale = true;
     }
 
     return checkpoint;
   } catch (e) {
     Logger.log(`⚠️ Failed to retrieve checkpoint: ${e.toString()}`);
-    return null;
+    throw new Error('Unable to read the daily operation checkpoint safely.');
   }
 }
 
+function assertCheckpointMonthlySheet_(monthlySheet, checkpoint) {
+  if (
+    checkpoint &&
+    checkpoint.monthlySheetId !== monthlySheet.getSheetId()
+  ) {
+    throw new Error(
+      `Checkpoint ${checkpoint.operationId || '(legacy)'} belongs to a different MONTHLY sheet. ` +
+        'Resolve the pending daily operation before month rollover.'
+    );
+  }
+}
+
+function normalizeDailyHashValue_(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) {
+    return `date:${value.getTime()}`;
+  }
+  if (value === null || value === undefined || value === '') return 'blank:';
+  return `${typeof value}:${String(value)}`;
+}
+
 /**
- * Generates a simple hash of row data for verification
- * @param {Array} rows - Array of row data
- * @returns {string} Hash string
+ * Generates a stable SHA-256 identity for daily business data in columns B:N.
+ * Column A is excluded because processDaily renumbers it before MONTHLY insertion.
+ * @param {Array<Array>} rows - Daily rows to identify
+ * @returns {string} Lowercase hexadecimal SHA-256 digest
  */
 function generateDataHash(rows) {
-  try {
-    // Simple hash: rowCount + first/last row checksums
-    const rowCount = rows.length;
-    const firstRow = rows[0] ? JSON.stringify(rows[0]).slice(0, 50) : '';
-    const lastRow = rows[rows.length - 1]
-      ? JSON.stringify(rows[rows.length - 1]).slice(0, 50)
-      : '';
-    return `${rowCount}|${firstRow}|${lastRow}`;
-  } catch (e) {
-    return 'hash_error';
+  const normalizedRows = (rows || []).map((row) => {
+    const values = [];
+    for (let columnIndex = 1; columnIndex < 14; columnIndex++) {
+      values.push(normalizeDailyHashValue_(row[columnIndex]));
+    }
+    return values;
+  });
+  const digest = Utilities.computeDigest(
+    Utilities.DigestAlgorithm.SHA_256,
+    JSON.stringify(normalizedRows),
+    Utilities.Charset.UTF_8
+  );
+  return digest
+    .map((byte) => ((byte + 256) % 256).toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function dailyCheckpointDateMatches_(value, checkpoint) {
+  if (
+    String(value == null ? '' : value).trim() ===
+    String(checkpoint.dateProcessed || '').trim()
+  ) {
+    return true;
   }
+  return normalizeDealDateIso_(value) === checkpoint.dateIso;
+}
+
+function findMonthlyCheckpointMarkerRows_(monthlySheet, checkpoint) {
+  if (!checkpoint || !checkpoint.operationId) return [];
+  const lastRow = findLastRowInCols(monthlySheet, 1, 14);
+  if (lastRow < 1) return [];
+  const expectedNote = `${DAILY_OPERATION_NOTE_PREFIX}${checkpoint.operationId}`;
+  return monthlySheet
+    .getRange(1, 1, lastRow, 1)
+    .getNotes()
+    .map((row, index) => (row[0] === expectedNote ? index + 1 : 0))
+    .filter((row) => row > 0);
+}
+
+function dailyRowHasActivity_(row) {
+  return (
+    row.slice(1, 7).some((cell) => cell && String(cell).trim() !== '') ||
+    row.slice(8, 14).some((cell) => cell && String(cell).trim() !== '')
+  );
+}
+
+function selectCheckpointSourceRows_(
+  allDailyData,
+  allDailyFontColors,
+  allDailyBackgrounds,
+  dailyStartRow,
+  checkpoint
+) {
+  if (!Array.isArray(checkpoint.sourceRows) || !checkpoint.sourceRows.length) {
+    throw new Error('Checkpoint is missing TODAY row identities.');
+  }
+
+  const rows = [];
+  const fontColors = [];
+  const backgrounds = [];
+  const conflicts = [];
+  checkpoint.sourceRows.forEach((sourceRow) => {
+    const rowIndex = sourceRow.sheetRow - dailyStartRow;
+    if (
+      rowIndex < 0 ||
+      rowIndex >= allDailyData.length ||
+      generateDataHash([allDailyData[rowIndex]]) !== sourceRow.dataHash
+    ) {
+      conflicts.push(sourceRow.sheetRow);
+      return;
+    }
+    rows.push([...allDailyData[rowIndex]]);
+    fontColors.push([...allDailyFontColors[rowIndex]]);
+    backgrounds.push([...allDailyBackgrounds[rowIndex]]);
+  });
+
+  if (conflicts.length) {
+    throw new Error(
+      `TODAY checkpoint source rows changed: ${conflicts.join(', ')}. ` +
+        'Processing stopped without changing either sheet.'
+    );
+  }
+  return { rows, fontColors, backgrounds };
+}
+
+function reconcileTodayClear_(todaySheet, checkpoint) {
+  if (!Array.isArray(checkpoint.sourceRows) || !checkpoint.sourceRows.length) {
+    throw new Error('Checkpoint is missing TODAY row identities.');
+  }
+
+  const dailyRange = todaySheet.getRange(RANGES.dailyData);
+  const startRow = dailyRange.getRow();
+  const values = dailyRange.getValues();
+  const rowsToClear = [];
+  const conflicts = [];
+
+  checkpoint.sourceRows.forEach((sourceRow) => {
+    const rowIndex = sourceRow.sheetRow - startRow;
+    if (rowIndex < 0 || rowIndex >= values.length) {
+      conflicts.push(sourceRow.sheetRow);
+      return;
+    }
+
+    const currentRow = values[rowIndex];
+    if (generateDataHash([currentRow]) === sourceRow.dataHash) {
+      rowsToClear.push(sourceRow.sheetRow);
+      return;
+    }
+
+    if (dailyRowHasActivity_(currentRow)) conflicts.push(sourceRow.sheetRow);
+  });
+
+  if (conflicts.length) {
+    throw new Error(
+      `TODAY rows changed after processing began: ${conflicts.join(', ')}. ` +
+        'The checkpoint was preserved and no newer data was cleared.'
+    );
+  }
+
+  if (rowsToClear.length) {
+    const rowRanges = rowsToClear.map((row) => `B${row}:N${row}`);
+    todaySheet.getRangeList(rowRanges).clearContent();
+  }
+
+  const sourceRowRanges = checkpoint.sourceRows.map(
+    (sourceRow) => `B${sourceRow.sheetRow}:N${sourceRow.sheetRow}`
+  );
+  const sourceRangeList = todaySheet.getRangeList(sourceRowRanges);
+  sourceRangeList.setBackground(null);
+  sourceRangeList.setFontColor(null);
+
+  const verifiedValues = dailyRange.getValues();
+  const unclearedRows = checkpoint.sourceRows
+    .filter((sourceRow) => {
+      const rowIndex = sourceRow.sheetRow - startRow;
+      return dailyRowHasActivity_(verifiedValues[rowIndex]);
+    })
+    .map((sourceRow) => sourceRow.sheetRow);
+  if (unclearedRows.length) {
+    throw new Error(
+      `TODAY clear verification failed for rows: ${unclearedRows.join(', ')}.`
+    );
+  }
+
+  return { clearedRows: rowsToClear.length };
+}
+
+/**
+ * Finds a previously written MONTHLY block for a daily operation checkpoint.
+ * A block is reusable only when its date, row count, and full B:N hash match.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} monthlySheet MONTHLY sheet
+ * @param {Object} checkpoint Daily operation checkpoint
+ * @returns {?{headerRow: number, dataInsertRow: number, rows: Array<Array>}}
+ */
+function findMonthlyCheckpointBlock_(monthlySheet, checkpoint) {
+  if (
+    !checkpoint ||
+    !checkpoint.dateIso ||
+    !checkpoint.dataHash ||
+    !checkpoint.operationId ||
+    !Number.isInteger(checkpoint.rowCount) ||
+    checkpoint.rowCount < 1
+  ) {
+    return null;
+  }
+
+  const lastRow = findLastRowInCols(monthlySheet, 1, 14);
+  if (lastRow < 2) return null;
+
+  const values = monthlySheet.getRange(1, 1, lastRow, 14).getValues();
+  const headerNotes = monthlySheet.getRange(1, 1, lastRow, 1).getNotes();
+  const headerRows = monthlySheet
+    .getRange(1, 1, lastRow, 1)
+    .getMergedRanges()
+    .filter(
+      (range) =>
+        range.getRow() > 0 &&
+        range.getColumn() === 1 &&
+        range.getWidth() >= 14
+    )
+    .map((range) => range.getRow())
+    .sort((a, b) => a - b);
+  const expectedNote = `${DAILY_OPERATION_NOTE_PREFIX}${checkpoint.operationId}`;
+  const matchingMarkerRows = headerNotes
+    .map((row, index) => (row[0] === expectedNote ? index + 1 : 0))
+    .filter((row) => row > 0);
+  if (matchingMarkerRows.length > 1) {
+    throw new Error(
+      `Multiple MONTHLY rows use checkpoint marker ${checkpoint.operationId}.`
+    );
+  }
+
+  for (let index = 0; index < headerRows.length; index++) {
+    const headerRow = headerRows[index];
+    if (headerNotes[headerRow - 1][0] !== expectedNote) continue;
+    if (!dailyCheckpointDateMatches_(values[headerRow - 1][0], checkpoint)) {
+      continue;
+    }
+
+    const nextHeaderRow =
+      index + 1 < headerRows.length ? headerRows[index + 1] : lastRow + 1;
+    const sectionRowCount = nextHeaderRow - headerRow - 1;
+    if (sectionRowCount !== checkpoint.rowCount) continue;
+
+    const rows = values.slice(headerRow, headerRow + checkpoint.rowCount);
+    if (generateDataHash(rows) !== checkpoint.dataHash) continue;
+
+    return {
+      headerRow: headerRow,
+      dataInsertRow: headerRow + 1,
+      rows: rows,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Clears an exact marked tail block when MONTHLY writing stopped before all
+ * expected data rows were written. Non-tail or nonmatching content is unchanged.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} monthlySheet MONTHLY sheet
+ * @param {Object} checkpoint Daily operation checkpoint
+ * @param {Array<Array>} expectedRows Checkpoint-owned rows expected in the block
+ * @returns {boolean} Whether an incomplete header row was cleared
+ */
+function removeIncompleteMonthlyWrite_(monthlySheet, checkpoint, expectedRows) {
+  if (
+    !checkpoint ||
+    checkpoint.phase !== 'MONTHLY_WRITE_STARTED' ||
+    !Number.isInteger(checkpoint.headerInsertRow) ||
+    !Number.isInteger(checkpoint.rowsInserted) ||
+    checkpoint.rowsInserted < 1
+  ) {
+    return false;
+  }
+
+  const lastRow = findLastRowInCols(monthlySheet, 1, 14);
+  const headerRow = checkpoint.headerInsertRow;
+  const expectedLastRow = headerRow + checkpoint.rowsInserted;
+  if (lastRow < headerRow || lastRow >= expectedLastRow) return false;
+
+  const cleanupRange = monthlySheet.getRange(
+    headerRow,
+    1,
+    checkpoint.rowsInserted + 1,
+    14
+  );
+  const mergedRanges = cleanupRange.getMergedRanges();
+  const headerRange = monthlySheet.getRange(headerRow, 1, 1, 14);
+  const isMergedHeader = headerRange.getMergedRanges().some(
+    (range) =>
+      range.getRow() === headerRow &&
+      range.getColumn() === 1 &&
+      range.getWidth() === 14
+  );
+  if (
+    !isMergedHeader ||
+    mergedRanges.some(
+      (range) =>
+        range.getRow() !== headerRow ||
+        range.getColumn() !== 1 ||
+        range.getWidth() !== 14
+    )
+  ) {
+    return false;
+  }
+  const headerValue = headerRange.getValues()[0][0];
+  if (!dailyCheckpointDateMatches_(headerValue, checkpoint)) return false;
+  const headerNote = headerRange.getNotes()[0][0];
+  if (headerNote !== `${DAILY_OPERATION_NOTE_PREFIX}${checkpoint.operationId}`) {
+    return false;
+  }
+
+  const partialRowCount = lastRow - headerRow;
+  if (partialRowCount > 0) {
+    if (
+      !Array.isArray(expectedRows) ||
+      expectedRows.length !== checkpoint.rowsInserted
+    ) {
+      return false;
+    }
+    const partialRows = monthlySheet
+      .getRange(headerRow + 1, 1, partialRowCount, 14)
+      .getValues();
+    const hasUnexpectedContent = partialRows.some((row, index) => {
+      if (!row.some((cell) => cell !== '' && cell != null)) return false;
+      const expectedRow = expectedRows[index];
+      return (
+        normalizeDailyHashValue_(row[0]) !==
+          normalizeDailyHashValue_(expectedRow[0]) ||
+        generateDataHash([row]) !== generateDataHash([expectedRow])
+      );
+    });
+    if (hasUnexpectedContent) return false;
+  }
+
+  cleanupRange.clearContent().setNote('').breakApart();
+  Logger.log(
+    `Cleared incomplete MONTHLY block at rows ${headerRow}-${expectedLastRow}.`
+  );
+  return true;
+}
+
+function recoverReconForCheckpoint_(checkpoint, sheets) {
+  const monthlyBlock = findMonthlyCheckpointBlock_(sheets.monthly, checkpoint);
+  if (!monthlyBlock) {
+    throw new Error(
+      `Checkpoint ${checkpoint.operationId} has no verified MONTHLY block for Recon export.`
+    );
+  }
+
+  return exportTradesToReconLog_(
+    {
+      rows: monthlyBlock.rows,
+      dealDateDisplay: checkpoint.dateProcessed,
+      dryRun: false,
+    },
+    RECON_LOCK_CAPABILITY
+  );
 }
 
 /**
  * Recovers analytics for a checkpoint operation
  * @param {Object} checkpoint - The checkpoint to recover from
  */
-function recoverAnalyticsForCheckpoint(checkpoint) {
+function recoverAnalyticsForCheckpoint_(checkpoint) {
   try {
     toastInfo('Recovering analytics...', 'Recovery In Progress');
     Logger.log(`Starting analytics recovery for ${checkpoint.dateProcessed}`);
@@ -2323,7 +2682,9 @@ function recoverAnalyticsForCheckpoint(checkpoint) {
 
     if (analyticsData) {
       writeAnalyticsToMonthly(analyticsData, sheets.monthly);
-      clearOperationCheckpoint();
+      if (!clearOperationCheckpoint()) {
+        throw new Error('Analytics recovered, but the checkpoint could not be cleared.');
+      }
 
       toastInfo(
         `Analytics successfully recovered for ${checkpoint.dateProcessed}`,
@@ -2335,7 +2696,7 @@ function recoverAnalyticsForCheckpoint(checkpoint) {
       updateCheckpoint('ANALYTICS_FAILED', {
         recoveryAttempts: (checkpoint.recoveryAttempts || 0) + 1,
       });
-      alertError(
+      toastInfo(
         'Analytics recovery failed. You can try "Recalculate MTD & Check Formats" from the menu to retry.',
         'Recovery Failed'
       );
@@ -2350,7 +2711,7 @@ function recoverAnalyticsForCheckpoint(checkpoint) {
       error: e.toString(),
       recoveryAttempts: (checkpoint.recoveryAttempts || 0) + 1,
     });
-    alertError(
+    toastInfo(
       'Error during analytics recovery: ' + e.toString(),
       'Recovery Error'
     );
@@ -2365,26 +2726,10 @@ function recoverAnalyticsForCheckpoint(checkpoint) {
 // Main flows
 function processDaily() {
   const operationStartTime = Date.now();
+  let pendingAlert = null;
   withScriptLock(() => {
     const timer = createTimeoutManager(5.0, operationStartTime);
     let analyticsSkipped = false;
-
-    // Check if Sundays should be skipped based on configuration
-    const today = new Date();
-    const skipSundays = shouldSkipSundays();
-
-    // In Google Apps Script, Sunday is 0, Monday is 1, ..., Saturday is 6
-    if (skipSundays && today.getDay() === 0) {
-      // 0 represents Sunday
-      Logger.log(
-        'Today is Sunday and skipSundays is enabled. Skipping processDaily execution.'
-      );
-      toastInfo(
-        'Sunday is configured as a non-sales day. No processing performed.',
-        'Sunday Skip'
-      );
-      return; // Exit the function if it's Sunday and skipSundays is true
-    }
 
     toastInfo('Processing daily sales...', 'Working');
     let errorSheetRows = [];
@@ -2393,6 +2738,47 @@ function processDaily() {
 
     try {
       const sheets = getSheets();
+      let operationCheckpoint = getOperationCheckpoint();
+      if (operationCheckpoint) {
+        assertCheckpointMonthlySheet_(sheets.monthly, operationCheckpoint);
+      }
+      if (
+        operationCheckpoint &&
+        operationCheckpoint.phase === 'RECON_PENDING'
+      ) {
+        recoverReconForCheckpoint_(operationCheckpoint, sheets);
+        if (!updateCheckpoint('ANALYTICS_PENDING')) {
+          throw new Error('Could not checkpoint the completed Recon export.');
+        }
+        recoverAnalyticsForCheckpoint_(getOperationCheckpoint());
+        return;
+      }
+      if (
+        operationCheckpoint &&
+        ['ANALYTICS_PENDING', 'ANALYTICS_FAILED'].includes(
+          operationCheckpoint.phase
+        )
+      ) {
+        recoverAnalyticsForCheckpoint_(operationCheckpoint);
+        return;
+      }
+
+      const today = new Date();
+      if (
+        !operationCheckpoint &&
+        shouldSkipSundays() &&
+        today.getDay() === 0
+      ) {
+        Logger.log(
+          'Today is Sunday and skipSundays is enabled. Skipping processDaily execution.'
+        );
+        toastInfo(
+          'Sunday is configured as a non-sales day. No processing performed.',
+          'Sunday Skip'
+        );
+        return;
+      }
+
       const dailyRange = sheets.today.getRange(RANGES.dailyData); // A2:N51
       const allDailyData = dailyRange.getValues();
       const allDailyFontColors = dailyRange.getFontColors(); // *** NEW: Get font colors ***
@@ -2401,26 +2787,77 @@ function processDaily() {
       let rowsToLogToMonthly = [];
       let fontColorsToLogToMonthly = []; // *** NEW: Array for corresponding font colors ***
       let backgroundsToLogToMonthly = []; // *** NEW: Array for corresponding background colors ***
+      const sourceRowIdentities = [];
+      const dailyStartRow = dailyRange.getRow();
 
-      allDailyData.forEach((row, index) => {
-        const hasNewActivity = row
-          .slice(1, 7)
-          .some((cell) => cell && String(cell).trim() !== '');
-        const hasUsedActivity = row
-          .slice(8, 14)
-          .some((cell) => cell && String(cell).trim() !== '');
-        if (hasNewActivity || hasUsedActivity) {
-          rowsToLogToMonthly.push([...row]); // Push a copy of the row
-          fontColorsToLogToMonthly.push([...allDailyFontColors[index]]); // Push a copy of the font color row
-          backgroundsToLogToMonthly.push([...allDailyBackgrounds[index]]); // Push a copy of the background color row
+      if (
+        operationCheckpoint &&
+        operationCheckpoint.phase !== 'TODAY_CLEAR_PENDING'
+      ) {
+        const selectedSource = selectCheckpointSourceRows_(
+          allDailyData,
+          allDailyFontColors,
+          allDailyBackgrounds,
+          dailyStartRow,
+          operationCheckpoint
+        );
+        rowsToLogToMonthly = selectedSource.rows;
+        fontColorsToLogToMonthly = selectedSource.fontColors;
+        backgroundsToLogToMonthly = selectedSource.backgrounds;
+      } else if (!operationCheckpoint) {
+        allDailyData.forEach((row, index) => {
+          if (dailyRowHasActivity_(row)) {
+            rowsToLogToMonthly.push([...row]);
+            fontColorsToLogToMonthly.push([...allDailyFontColors[index]]);
+            backgroundsToLogToMonthly.push([...allDailyBackgrounds[index]]);
+            sourceRowIdentities.push({
+              sheetRow: dailyStartRow + index,
+              dataHash: generateDataHash([row]),
+            });
+          }
+        });
+      }
+
+      if (
+        operationCheckpoint &&
+        operationCheckpoint.phase === 'TODAY_CLEAR_PENDING'
+      ) {
+        reconcileTodayClear_(sheets.today, operationCheckpoint);
+        if (!updateCheckpoint('RECON_PENDING')) {
+          throw new Error('Could not checkpoint the completed TODAY clear.');
         }
-      });
+        recoverReconForCheckpoint_(getOperationCheckpoint(), sheets);
+        if (!updateCheckpoint('ANALYTICS_PENDING')) {
+          throw new Error('Could not checkpoint the completed Recon export.');
+        }
+        recoverAnalyticsForCheckpoint_(getOperationCheckpoint());
+        return;
+      }
+
+      if (!rowsToLogToMonthly.length && operationCheckpoint) {
+        const recoveredBlock = findMonthlyCheckpointBlock_(
+          sheets.monthly,
+          operationCheckpoint
+        );
+        if (!recoveredBlock) {
+          throw new Error(
+            `Checkpoint ${operationCheckpoint.operationId || '(legacy)'} cannot be resumed: ` +
+              'TODAY data is empty and no matching MONTHLY block exists.'
+          );
+        }
+        rowsToLogToMonthly = recoveredBlock.rows.map((row) => [...row]);
+        Logger.log(
+          `Resuming checkpoint from existing MONTHLY rows ${recoveredBlock.dataInsertRow}-${
+            recoveredBlock.dataInsertRow + recoveredBlock.rows.length - 1
+          }.`
+        );
+      }
 
       if (!rowsToLogToMonthly.length) {
-        showCustomAlert(
-          'Process Complete',
-          'No sales activity found on the TODAY sheet to log to monthly.'
-        );
+        pendingAlert = {
+          title: 'Process Complete',
+          message: 'No sales activity found on the TODAY sheet to log to monthly.',
+        };
         sheets.today
           .getRange(RANGES.dailyClear)
           .setBackground(null)
@@ -2430,32 +2867,46 @@ function processDaily() {
 
       // CHECKPOINT 1: Before MONTHLY operations (critical)
       if (!timer.checkTime('Before MONTHLY write')) {
-        alertError(
-          'Processing time too close to limit. Please retry when system load is lower.',
-          'Timeout Prevention'
-        );
+        pendingAlert = {
+          title: 'Timeout Prevention',
+          message:
+            'Processing time too close to limit. Please retry when system load is lower.',
+        };
         return; // Exit before any changes
       }
 
-      // CREATE OPERATION CHECKPOINT before any modifications
-      const dateStr = formatDateOffset(1);
-      createOperationCheckpoint({
-        dateStr: dateStr,
-        rowCount: rowsToLogToMonthly.length,
-        rows: rowsToLogToMonthly,
-      });
+      const dateStr = operationCheckpoint
+        ? operationCheckpoint.dateProcessed
+        : formatDateOffset(1);
+      const dateIso = normalizeDealDateIso_(dateStr);
+      const dataHash = generateDataHash(rowsToLogToMonthly);
 
-      try {
-        exportTradesToReconLog({
-          rows: rowsToLogToMonthly,
-          dealDateDisplay: dateStr,
-          dryRun: false,
-        });
-      } catch (e) {
-        logWarning('processDaily', 'Trade export failed; continuing.', {
-          error: e && e.message ? e.message : String(e),
-        });
-        logError('exportTradesToReconLog', e, { phase: 'processDaily' });
+      if (operationCheckpoint) {
+        if (
+          operationCheckpoint.version !== CHECKPOINT_VERSION ||
+          operationCheckpoint.dateIso !== dateIso ||
+          operationCheckpoint.dataHash !== dataHash ||
+          operationCheckpoint.rowCount !== rowsToLogToMonthly.length
+        ) {
+          throw new Error(
+            'An unfinished daily checkpoint does not match the current TODAY data. ' +
+              'Processing stopped without changing either sheet.'
+          );
+        }
+      } else {
+        if (
+          !createOperationCheckpoint({
+            dateStr: dateStr,
+            dateIso: dateIso,
+            rowCount: rowsToLogToMonthly.length,
+            rows: rowsToLogToMonthly,
+            sourceRows: sourceRowIdentities,
+            monthlySheetId: sheets.monthly.getSheetId(),
+          })
+        ) {
+          throw new Error('Could not create the daily operation checkpoint.');
+        }
+        operationCheckpoint = getOperationCheckpoint();
       }
 
       // Modify Column A
@@ -2465,34 +2916,78 @@ function processDaily() {
       });
       // Note: fontColorsToLogToMonthly does not need Column A modified, it's just colors.
 
-      // MODIFIED: Use the new function to find the last row specifically within columns A:N
-      const lastRowMonthly = findLastRowInCols(sheets.monthly, 1, 14);
-      const headerInsertRow = lastRowMonthly + 1;
-      const dataInsertRow = headerInsertRow + 1;
-
-      sheets.monthly.insertRowBefore(headerInsertRow);
-      sheets.monthly
-        .getRange(headerInsertRow, 1, 1, 14)
-        .merge()
-        .setValue(dateStr)
-        .setHorizontalAlignment('center')
-        .setFontFamily('Calibri')
-        .setFontSize(10)
-        .setFontWeight('bold')
-        .setBackground('#FFFF00')
-        .setBorder(
-          true,
-          true,
-          true,
-          true,
-          true,
-          true,
-          '#000000',
-          SpreadsheetApp.BorderStyle.SOLID_MEDIUM
-        );
-
       const numRowsToInsert = rowsToLogToMonthly.length;
       const numColsToInsert = 14;
+      const existingMonthlyBlock = findMonthlyCheckpointBlock_(
+        sheets.monthly,
+        operationCheckpoint
+      );
+      let headerInsertRow;
+      let dataInsertRow;
+
+      if (existingMonthlyBlock) {
+        headerInsertRow = existingMonthlyBlock.headerRow;
+        dataInsertRow = existingMonthlyBlock.dataInsertRow;
+        rowsToLogToMonthly = existingMonthlyBlock.rows.map((row) => [...row]);
+        Logger.log(
+          `✓ Reusing existing MONTHLY block for ${operationCheckpoint.operationId}`
+        );
+      } else {
+        removeIncompleteMonthlyWrite_(
+          sheets.monthly,
+          operationCheckpoint,
+          rowsToLogToMonthly
+        );
+        const remainingMarkerRows = findMonthlyCheckpointMarkerRows_(
+          sheets.monthly,
+          operationCheckpoint
+        );
+        if (remainingMarkerRows.length) {
+          throw new Error(
+            `Checkpoint marker remains on invalid MONTHLY rows ${remainingMarkerRows.join(
+              ', '
+            )}; refusing to append a duplicate block.`
+          );
+        }
+        const lastRowMonthly = findLastRowInCols(sheets.monthly, 1, 14);
+        headerInsertRow = lastRowMonthly + 1;
+        dataInsertRow = headerInsertRow + 1;
+        if (
+          !updateCheckpoint('MONTHLY_WRITE_STARTED', {
+            headerInsertRow: headerInsertRow,
+            monthlyInsertRow: dataInsertRow,
+            rowsInserted: numRowsToInsert,
+          })
+        ) {
+          throw new Error('Could not checkpoint the pending MONTHLY write.');
+        }
+
+        const requiredLastRow = dataInsertRow + numRowsToInsert - 1;
+        const maxRows = sheets.monthly.getMaxRows();
+        if (requiredLastRow > maxRows) {
+          sheets.monthly.insertRowsAfter(maxRows, requiredLastRow - maxRows);
+        }
+        sheets.monthly
+          .getRange(headerInsertRow, 1, 1, 14)
+          .merge()
+          .setNote(`${DAILY_OPERATION_NOTE_PREFIX}${operationCheckpoint.operationId}`)
+          .setValue(dateStr)
+          .setHorizontalAlignment('center')
+          .setFontFamily('Calibri')
+          .setFontSize(10)
+          .setFontWeight('bold')
+          .setBackground('#FFFF00')
+          .setBorder(
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            '#000000',
+            SpreadsheetApp.BorderStyle.SOLID_MEDIUM
+          );
+      }
 
       const monthlyDataRange = sheets.monthly.getRange(
         dataInsertRow,
@@ -2500,8 +2995,21 @@ function processDaily() {
         numRowsToInsert,
         numColsToInsert
       );
-      monthlyDataRange.setValues(rowsToLogToMonthly);
-      SpreadsheetApp.flush();
+      if (!existingMonthlyBlock) {
+        monthlyDataRange.setValues(rowsToLogToMonthly);
+        SpreadsheetApp.flush();
+        const writtenHeader = sheets.monthly
+          .getRange(headerInsertRow, 1, 1, 1)
+          .getNotes()[0][0];
+        const writtenRows = monthlyDataRange.getValues();
+        if (
+          writtenHeader !==
+            `${DAILY_OPERATION_NOTE_PREFIX}${operationCheckpoint.operationId}` ||
+          generateDataHash(writtenRows) !== operationCheckpoint.dataHash
+        ) {
+          throw new Error('MONTHLY write verification failed.');
+        }
+      }
 
       // Apply general formatting (font family, size, borders) to B:N
       sheets.monthly
@@ -2580,10 +3088,14 @@ function processDaily() {
       );
 
       // Update checkpoint: MONTHLY data written successfully
-      updateCheckpoint('MONTHLY_WRITTEN', {
-        monthlyInsertRow: dataInsertRow,
-        rowsInserted: numRowsToInsert,
-      });
+      if (
+        !updateCheckpoint('MONTHLY_WRITTEN', {
+          monthlyInsertRow: dataInsertRow,
+          rowsInserted: numRowsToInsert,
+        })
+      ) {
+        throw new Error('Could not checkpoint the completed MONTHLY write.');
+      }
 
       const sidesToTally = [
         { fiIdx: 2, saleIdx: 6 },
@@ -2597,21 +3109,37 @@ function processDaily() {
       countsByFullName = tallyResult.counts;
       unknownInputs = tallyResult.unknownInputs;
 
+      // Rebuild absolute MTD totals from MONTHLY so this phase is safe to rerun.
+      const allMonthlyRows = collectMonthlyRowsWithDates_(sheets.monthly).map(
+        (entry) => entry.row
+      );
+      const monthlyTally = tallyCounts(
+        allMonthlyRows,
+        aliasMap,
+        sidesToTally
+      );
       const lbRange = sheets.today.getRange(RANGES.leaderboard);
-      updateLeaderboardFromCounts_(lbRange, countsByFullName, { mode: 'add' });
+      updateLeaderboardFromCounts_(lbRange, monthlyTally.counts, { mode: 'set' });
 
       sheets.today.getRange(RANGES.mtd).setNumberFormat('0.#');
       sheets.today.getRange(RANGES.avg).setNumberFormat('0.#');
-      reapplyCF();
+      reapplyCF({ throwOnError: true });
 
       // --- Clean Up TODAY Sheet ---
-      const dailyClearRange = sheets.today.getRange(RANGES.dailyClear);
-      dailyClearRange.clearContent();
-      dailyClearRange.setBackground(null);
-      dailyClearRange.setFontColor(null); // *** NEW: Reset font color to default ***
+      if (!updateCheckpoint('TODAY_CLEAR_PENDING')) {
+        throw new Error('Could not checkpoint the pending TODAY clear.');
+      }
+      reconcileTodayClear_(sheets.today, getOperationCheckpoint());
+
+      if (!updateCheckpoint('RECON_PENDING')) {
+        throw new Error('Could not checkpoint the pending Recon export.');
+      }
+      recoverReconForCheckpoint_(getOperationCheckpoint(), sheets);
 
       // Update checkpoint: Core operations complete, analytics pending
-      updateCheckpoint('ANALYTICS_PENDING');
+      if (!updateCheckpoint('ANALYTICS_PENDING')) {
+        throw new Error('Could not checkpoint the completed Recon export.');
+      }
 
       // CHECKPOINT 2: Before optional analytics (after critical operations)
       if (!timer.checkTime('Before analytics calculation')) {
@@ -2628,7 +3156,11 @@ function processDaily() {
             writeAnalyticsToMonthly(analyticsData, sheets.monthly);
             Logger.log('✓ Monthly analytics calculation successful');
             // Clear checkpoint - operation fully complete
-            clearOperationCheckpoint();
+            if (!clearOperationCheckpoint()) {
+              throw new Error(
+                'Analytics completed, but the checkpoint could not be cleared.'
+              );
+            }
           } else {
             updateCheckpoint('ANALYTICS_FAILED', {
               reason: 'no_data_generated',
@@ -2688,21 +3220,23 @@ function processDaily() {
       if (analyticsSkipped) {
         summaryMsg +=
           '\n\n⚠️ Analytics calculation was skipped due to time constraints. ' +
-          "Use 'Sales Tools > Recalculate MTD & Check Formats' and confirm analytics refresh when prompted.";
+          "Run 'Process Daily' again to resume analytics, or use 'Sales Tools > Recalculate MTD & Check Formats'.";
       }
 
-      // NOW show the complete message to user
-      showCustomAlert(summaryTitle, summaryMsg);
+      pendingAlert = { title: summaryTitle, message: summaryMsg };
 
       Logger.log('Daily processing complete.');
     } catch (e) {
       logError('processDaily', e);
-      alertError(
-        'Error during daily processing: ' + e.toString(),
-        'Processing Failed'
-      );
+      pendingAlert = {
+        title: 'Processing Failed',
+        message: 'Error during daily processing: ' + e.toString(),
+      };
     }
   });
+  if (pendingAlert) {
+    showCustomAlert(pendingAlert.title, pendingAlert.message);
+  }
 }
 
 /**
@@ -3162,6 +3696,15 @@ function rolloverMonth() {
     const rolloverResult = withScriptLock(() => {
       toastInfo('Starting month rollover...', 'Working (1/5)');
       const sheets = getSheets();
+      const pendingCheckpoint = getOperationCheckpoint();
+      if (pendingCheckpoint) {
+        throw new Error(
+          `Rollover aborted: unfinished daily checkpoint ${
+            pendingCheckpoint.operationId || '(legacy)'
+          } is in phase ${pendingCheckpoint.phase || 'unknown'}. ` +
+            'Run Process Daily to finish recovery before rolling over the month.'
+        );
+      }
       const currentDate = new Date();
       let archiveYear = currentDate.getFullYear();
       let archiveMonth = currentDate.getMonth() - 1;
