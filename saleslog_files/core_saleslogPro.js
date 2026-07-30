@@ -2392,6 +2392,328 @@ function generateDataHash(rows) {
     .join('');
 }
 
+/**
+ * Recreates the weak identity used by checkpoints written before version 2.
+ * It is used only to prove that a legacy checkpoint, its saved MONTHLY block,
+ * and the still-present TODAY rows describe the same old operation.
+ * @param {Array<Array>} rows Legacy daily rows
+ * @returns {string} Legacy row-count/JSON-slice identity
+ */
+function generateLegacyDataHash_(rows) {
+  try {
+    const data = rows || [];
+    const firstRow = data[0] ? JSON.stringify(data[0]).slice(0, 50) : '';
+    const lastRow = data[data.length - 1]
+      ? JSON.stringify(data[data.length - 1]).slice(0, 50)
+      : '';
+    return `${data.length}|${firstRow}|${lastRow}`;
+  } catch (e) {
+    return 'hash_error';
+  }
+}
+
+/**
+ * Reads the exact block recorded by a legacy MONTHLY_WRITTEN checkpoint.
+ * No search or best-effort matching is allowed: the saved coordinates, date,
+ * merged header, row count, and exact tail position must all agree. The old
+ * hash is checked against TODAY because the legacy writer rewrote MONTHLY A.
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} monthlySheet MONTHLY sheet
+ * @param {Object} checkpoint Legacy or in-progress adoption checkpoint
+ * @param {string} expectedHeaderNote Marker allowed during adoption retry
+ * @returns {{headerRow: number, dataInsertRow: number, rows: Array<Array>, headerNote: string}}
+ */
+function getLegacyMonthlyWrittenBlock_(
+  monthlySheet,
+  checkpoint,
+  expectedHeaderNote = ''
+) {
+  const rowCount = Number(checkpoint && checkpoint.rowCount);
+  const dataInsertRow = Number(checkpoint && checkpoint.monthlyInsertRow);
+  const rowsInserted = Number(checkpoint && checkpoint.rowsInserted);
+  if (
+    !Number.isInteger(rowCount) ||
+    rowCount < 1 ||
+    !Number.isInteger(dataInsertRow) ||
+    dataInsertRow < 2 ||
+    rowsInserted !== rowCount
+  ) {
+    throw new Error(
+      'Legacy MONTHLY_WRITTEN checkpoint is missing exact MONTHLY row coordinates.'
+    );
+  }
+
+  const headerRow = dataInsertRow - 1;
+  const requiredLastRow = dataInsertRow + rowCount - 1;
+  if (requiredLastRow > monthlySheet.getMaxRows()) {
+    throw new Error('Legacy checkpoint MONTHLY rows are outside the sheet bounds.');
+  }
+  if (findLastRowInCols(monthlySheet, 1, 14) !== requiredLastRow) {
+    throw new Error(
+      'Legacy checkpoint MONTHLY block is no longer the exact A:N tail block.'
+    );
+  }
+
+  const headerRange = monthlySheet.getRange(headerRow, 1, 1, 14);
+  const hasExactMergedHeader = headerRange.getMergedRanges().some(
+    (range) =>
+      range.getRow() === headerRow &&
+      range.getColumn() === 1 &&
+      range.getNumRows() === 1 &&
+      range.getNumColumns() === 14
+  );
+  if (!hasExactMergedHeader) {
+    throw new Error(
+      `Legacy checkpoint row ${headerRow} is not the expected merged date header.`
+    );
+  }
+
+  const checkpointDateIso =
+    checkpoint.dateIso || normalizeDealDateIso_(checkpoint.dateProcessed);
+  if (
+    !checkpointDateIso ||
+    normalizeDealDateIso_(headerRange.getValue()) !== checkpointDateIso
+  ) {
+    throw new Error(
+      `Legacy checkpoint MONTHLY date header at row ${headerRow} does not match.`
+    );
+  }
+
+  const headerNote = headerRange.getNotes()[0][0] || '';
+  if (headerNote && headerNote !== expectedHeaderNote) {
+    throw new Error(
+      `Legacy checkpoint MONTHLY header row ${headerRow} has an unexpected note.`
+    );
+  }
+
+  const rows = monthlySheet
+    .getRange(dataInsertRow, 1, rowCount, 14)
+    .getValues();
+  if (rows.some((row) => !dailyRowHasActivity_(row))) {
+    throw new Error('Legacy checkpoint MONTHLY block contains an empty sales row.');
+  }
+
+  return {
+    headerRow: headerRow,
+    dataInsertRow: dataInsertRow,
+    rows: rows,
+    headerNote: headerNote,
+  };
+}
+
+/**
+ * Maps every row in a verified legacy MONTHLY block to one unique unchanged
+ * TODAY row. Rows with unrelated hashes are left outside the checkpoint so
+ * newer sales remain untouched. Missing or duplicate matches fail closed.
+ * @param {Array<Array>} allDailyData Current TODAY data range values
+ * @param {number} dailyStartRow First sheet row represented by allDailyData
+ * @param {Array<Array>} monthlyRows Verified legacy MONTHLY rows
+ * @param {string} legacyDataHash Legacy checkpoint identity
+ * @returns {{rows: Array<Array>, sourceRows: Array<Object>}}
+ */
+function matchLegacyMonthlyWrittenSourceRows_(
+  allDailyData,
+  dailyStartRow,
+  monthlyRows,
+  legacyDataHash
+) {
+  const candidatesByHash = new Map();
+  (allDailyData || []).forEach((row, index) => {
+    if (!dailyRowHasActivity_(row)) return;
+    const rowHash = generateDataHash([row]);
+    if (!candidatesByHash.has(rowHash)) candidatesByHash.set(rowHash, []);
+    candidatesByHash.get(rowHash).push({
+      row: [...row],
+      sheetRow: dailyStartRow + index,
+    });
+  });
+
+  const expectedCounts = new Map();
+  monthlyRows.forEach((row) => {
+    const rowHash = generateDataHash([row]);
+    expectedCounts.set(rowHash, (expectedCounts.get(rowHash) || 0) + 1);
+  });
+  expectedCounts.forEach((expectedCount, rowHash) => {
+    const candidateCount = (candidatesByHash.get(rowHash) || []).length;
+    if (candidateCount !== expectedCount) {
+      throw new Error(
+        'Legacy MONTHLY_WRITTEN checkpoint cannot uniquely match its TODAY rows. ' +
+          'No TODAY data was cleared.'
+      );
+    }
+  });
+
+  const nextCandidateIndex = new Map();
+  const matchedRows = monthlyRows.map((monthlyRow) => {
+    const rowHash = generateDataHash([monthlyRow]);
+    const candidateIndex = nextCandidateIndex.get(rowHash) || 0;
+    nextCandidateIndex.set(rowHash, candidateIndex + 1);
+    return candidatesByHash.get(rowHash)[candidateIndex];
+  });
+  const rows = matchedRows.map((entry) => entry.row);
+  if (generateLegacyDataHash_(rows) !== legacyDataHash) {
+    throw new Error(
+      'Legacy checkpoint hash does not match the uniquely selected TODAY rows.'
+    );
+  }
+  if (generateDataHash(rows) !== generateDataHash(monthlyRows)) {
+    throw new Error('Legacy TODAY and MONTHLY business data do not match.');
+  }
+
+  return {
+    rows: rows,
+    sourceRows: matchedRows.map((entry) => ({
+      sheetRow: entry.sheetRow,
+      dataHash: generateDataHash([entry.row]),
+    })),
+  };
+}
+
+/**
+ * Persists a version-2 adoption checkpoint before adding any marker to a
+ * previously written legacy block. This makes every later step retryable.
+ * @param {Object} sheets Sales-log sheets
+ * @param {Object} checkpoint Legacy MONTHLY_WRITTEN checkpoint
+ * @returns {Object} Persisted adoption checkpoint
+ */
+function prepareLegacyMonthlyWrittenCheckpoint_(sheets, checkpoint) {
+  if (
+    !checkpoint ||
+    checkpoint.version !== undefined ||
+    checkpoint.phase !== 'MONTHLY_WRITTEN'
+  ) {
+    return checkpoint;
+  }
+
+  const block = getLegacyMonthlyWrittenBlock_(sheets.monthly, checkpoint, '');
+  const dailyRange = sheets.today.getRange(RANGES.dailyData);
+  const matchedSource = matchLegacyMonthlyWrittenSourceRows_(
+    dailyRange.getValues(),
+    dailyRange.getRow(),
+    block.rows,
+    checkpoint.dataHash
+  );
+  const operationId = Utilities.getUuid();
+  const dateIso = normalizeDealDateIso_(checkpoint.dateProcessed);
+  const adoptionData = {
+    version: CHECKPOINT_VERSION,
+    dateIso: dateIso,
+    dataHash: generateDataHash(block.rows),
+    operationId: operationId,
+    sourceRows: matchedSource.sourceRows,
+    monthlySheetId: sheets.monthly.getSheetId(),
+    headerInsertRow: block.headerRow,
+    monthlyInsertRow: block.dataInsertRow,
+    rowsInserted: block.rows.length,
+    legacyDataHash: checkpoint.dataHash,
+    legacyPhase: checkpoint.phase,
+  };
+  if (!updateCheckpoint('LEGACY_ADOPTION_STARTED', adoptionData)) {
+    throw new Error('Could not checkpoint the legacy MONTHLY block adoption.');
+  }
+
+  const preparedCheckpoint = getOperationCheckpoint();
+  if (
+    !preparedCheckpoint ||
+    preparedCheckpoint.operationId !== operationId ||
+    preparedCheckpoint.phase !== 'LEGACY_ADOPTION_STARTED'
+  ) {
+    throw new Error('Legacy MONTHLY block adoption checkpoint verification failed.');
+  }
+  Logger.log(
+    `✓ Prepared legacy MONTHLY checkpoint adoption for rows ${block.dataInsertRow}-${
+      block.dataInsertRow + block.rows.length - 1
+    }.`
+  );
+  return preparedCheckpoint;
+}
+
+/**
+ * Adds the version-2 marker to a verified legacy block and only then advances
+ * it to MONTHLY_WRITTEN, where the normal idempotent resume path takes over.
+ * @param {Object} sheets Sales-log sheets
+ * @param {Object} checkpoint Version-2 adoption checkpoint
+ * @returns {Object} Persisted MONTHLY_WRITTEN checkpoint
+ */
+function completeLegacyMonthlyWrittenCheckpoint_(sheets, checkpoint) {
+  if (!checkpoint || checkpoint.phase !== 'LEGACY_ADOPTION_STARTED') {
+    return checkpoint;
+  }
+  if (
+    checkpoint.version !== CHECKPOINT_VERSION ||
+    !checkpoint.operationId ||
+    !checkpoint.dateIso ||
+    !checkpoint.dataHash ||
+    !checkpoint.legacyDataHash ||
+    !Number.isInteger(checkpoint.rowCount) ||
+    !Array.isArray(checkpoint.sourceRows) ||
+    checkpoint.sourceRows.length !== checkpoint.rowCount
+  ) {
+    throw new Error('Legacy MONTHLY block adoption identity is incomplete.');
+  }
+
+  assertCheckpointMonthlySheet_(sheets.monthly, checkpoint);
+  const expectedMarker = `${DAILY_OPERATION_NOTE_PREFIX}${checkpoint.operationId}`;
+  const block = getLegacyMonthlyWrittenBlock_(
+    sheets.monthly,
+    checkpoint,
+    expectedMarker
+  );
+  if (generateDataHash(block.rows) !== checkpoint.dataHash) {
+    throw new Error('Adopted legacy MONTHLY block changed before marker recovery.');
+  }
+
+  const dailyRange = sheets.today.getRange(RANGES.dailyData);
+  const matchedSource = matchLegacyMonthlyWrittenSourceRows_(
+    dailyRange.getValues(),
+    dailyRange.getRow(),
+    block.rows,
+    checkpoint.legacyDataHash
+  );
+  if (
+    JSON.stringify(matchedSource.sourceRows) !==
+    JSON.stringify(checkpoint.sourceRows)
+  ) {
+    throw new Error('Legacy TODAY row identities changed during checkpoint adoption.');
+  }
+
+  const headerRange = sheets.monthly.getRange(block.headerRow, 1, 1, 14);
+  if (!block.headerNote) {
+    headerRange.setNote(expectedMarker);
+    SpreadsheetApp.flush();
+  }
+  const verifiedBlock = getLegacyMonthlyWrittenBlock_(
+    sheets.monthly,
+    checkpoint,
+    expectedMarker
+  );
+  if (
+    verifiedBlock.headerNote !== expectedMarker ||
+    generateDataHash(verifiedBlock.rows) !== checkpoint.dataHash
+  ) {
+    throw new Error('Legacy MONTHLY block marker verification failed.');
+  }
+
+  if (
+    !updateCheckpoint('MONTHLY_WRITTEN', {
+      legacyAdoptedAt: new Date().toISOString(),
+    })
+  ) {
+    throw new Error('Could not checkpoint the adopted legacy MONTHLY block.');
+  }
+  const completedCheckpoint = getOperationCheckpoint();
+  if (
+    !completedCheckpoint ||
+    completedCheckpoint.operationId !== checkpoint.operationId ||
+    completedCheckpoint.phase !== 'MONTHLY_WRITTEN'
+  ) {
+    throw new Error('Adopted legacy MONTHLY checkpoint verification failed.');
+  }
+  Logger.log(
+    `✓ Adopted legacy MONTHLY block as operation ${checkpoint.operationId}.`
+  );
+  return completedCheckpoint;
+}
+
 function dailyCheckpointDateMatches_(value, checkpoint) {
   if (
     String(value == null ? '' : value).trim() ===
@@ -2768,6 +3090,14 @@ function processDaily() {
     try {
       const sheets = getSheets();
       let operationCheckpoint = getOperationCheckpoint();
+      operationCheckpoint = prepareLegacyMonthlyWrittenCheckpoint_(
+        sheets,
+        operationCheckpoint
+      );
+      operationCheckpoint = completeLegacyMonthlyWrittenCheckpoint_(
+        sheets,
+        operationCheckpoint
+      );
       if (operationCheckpoint) {
         assertCheckpointMonthlySheet_(sheets.monthly, operationCheckpoint);
       }
