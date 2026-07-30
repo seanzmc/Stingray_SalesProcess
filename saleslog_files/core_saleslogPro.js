@@ -2320,12 +2320,41 @@ function getOperationCheckpoint() {
 }
 
 function assertCheckpointMonthlySheet_(monthlySheet, checkpoint) {
-  if (
-    checkpoint &&
-    checkpoint.monthlySheetId !== monthlySheet.getSheetId()
-  ) {
+  if (!checkpoint) return;
+
+  const isLegacyCheckpoint = checkpoint.version === undefined;
+  const isLegacyAnalyticsCheckpoint =
+    isLegacyCheckpoint &&
+    ['ANALYTICS_PENDING', 'ANALYTICS_FAILED'].includes(checkpoint.phase);
+  if (isLegacyAnalyticsCheckpoint) {
+    Logger.log(
+      `⚠️ Resuming legacy analytics checkpoint in phase ${checkpoint.phase}; ` +
+        'the previous checkpoint format did not record a MONTHLY sheet identity.'
+    );
+    return;
+  }
+
+  if (isLegacyCheckpoint) {
     throw new Error(
-      `Checkpoint ${checkpoint.operationId || '(legacy)'} belongs to a different MONTHLY sheet. ` +
+      `Legacy checkpoint in phase ${checkpoint.phase || 'unknown'} cannot be resumed automatically. ` +
+        'Inspect TODAY and MONTHLY before resolving the checkpoint.'
+    );
+  }
+  if (checkpoint.version !== CHECKPOINT_VERSION) {
+    throw new Error(
+      `Checkpoint ${checkpoint.operationId || '(unknown)'} uses unsupported version ` +
+        `${checkpoint.version} and cannot be resumed automatically.`
+    );
+  }
+  if (!Number.isInteger(checkpoint.monthlySheetId)) {
+    throw new Error(
+      `Checkpoint ${checkpoint.operationId || '(unknown)'} is missing its MONTHLY sheet identity. ` +
+        'Processing stopped without changing either sheet.'
+    );
+  }
+  if (checkpoint.monthlySheetId !== monthlySheet.getSheetId()) {
+    throw new Error(
+      `Checkpoint ${checkpoint.operationId} belongs to a different MONTHLY sheet. ` +
         'Resolve the pending daily operation before month rollover.'
     );
   }
