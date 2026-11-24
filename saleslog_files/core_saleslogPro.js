@@ -76,12 +76,6 @@ const RANGES = {
     return getDynamicLeaderboardRanges().avg;
   },
 };
-const RECON_SPREADSHEET_ID = '1REAs1ySLZFAHylXWrvoG8N3cvj_iLlNiPVWArT3EEvw';
-const RECON_SHEET_NAME = 'RECON_IMPORT';
-const RECON_SOURCEKEY_HEADER = 'SourceKey';
-const RECON_IMPORTEDAT_HEADER = 'ImportedAt';
-const RECON_SOURCEKEY_COL_CACHE_KEY = 'RECON_SOURCEKEY_COL_CACHE';
-
 // Default color constants (used as fallbacks if configuration not available)
 const DEFAULT_COLORS = {
   nonDeliveredColor: '#FF0000',
@@ -678,58 +672,6 @@ function manualRefreshLeaderboard() {
   }
 }
 
-function menuExportTradesToReconLog() {
-  try {
-    const result = exportTradesToReconLog({ scanMonthly: true, dryRun: false });
-    if (result) {
-      toastInfo(
-        `Trades exported: ${result.appended}. Duplicates skipped: ${result.skippedDuplicates}.`,
-        'Recon Export'
-      );
-    }
-  } catch (e) {
-    logError('menuExportTradesToReconLog', e);
-    alertError(
-      'Trade export failed. Check logs for details.',
-      'Recon Export Failed'
-    );
-  }
-}
-
-function menuExportTradesToReconLogDryRun() {
-  try {
-    const result = exportTradesToReconLog({ scanMonthly: true, dryRun: true });
-    if (result) {
-      const wouldAppend = Math.max(
-        0,
-        (result.candidateTrades || 0) - (result.skippedDuplicates || 0)
-      );
-      toastInfo(
-        `Dry run: ${result.candidateTrades} candidates, ${result.skippedDuplicates} duplicates, ${wouldAppend} would append.`,
-        'Recon Export'
-      );
-    }
-  } catch (e) {
-    logError('menuExportTradesToReconLogDryRun', e);
-    alertError(
-      'Trade export dry run failed. Check logs for details.',
-      'Recon Export Failed'
-    );
-  }
-}
-
-function authorizeReconAccess() {
-  const reconSS = SpreadsheetApp.openById(RECON_SPREADSHEET_ID);
-  let reconSheet = getReconSheet_(reconSS);
-  if (!reconSheet) {
-    reconSheet = reconSS.insertSheet(RECON_SHEET_NAME);
-  }
-  const cell = reconSheet.getRange('A1');
-  const currentValue = cell.getValue();
-  cell.setValue(currentValue);
-  Logger.log('authorizeReconAccess: Recon spreadsheet access confirmed.');
-}
-
 // Basic utilities
 /**
  * Rounds a number to the nearest 0.5 (half unit)
@@ -985,44 +927,6 @@ function summarizeRows(rows) {
   return { newCount, usedCount, tradeCount };
 }
 
-function parseTradeStocksDetailed(cellValue) {
-  const raw = String(cellValue == null ? '' : cellValue).trim();
-  if (!raw) return { valid: [], invalid: [] };
-
-  const upper = raw.toUpperCase();
-  if (upper === 'NT') return { valid: [], invalid: [] };
-
-  // Convert any non-alphanumeric separators to spaces, then extract tokens.
-  // This handles commas, slashes, ampersands, newlines, and plain spaces.
-  const cleaned = upper.replace(/[^A-Z0-9]+/g, ' ');
-  const tokens = cleaned.match(/[A-Z0-9]+/g) || [];
-
-  const validSet = new Set();
-  const invalidSet = new Set();
-
-  tokens.forEach((token) => {
-    const t = String(token || '').trim();
-    if (!t) return;
-    if (/^\d+$/.test(t) || t.length === 8) {
-      validSet.add(t);
-      return;
-    }
-    // If it looks like an attempted stock number, track it as invalid so we can flag it.
-    if (t.length >= 4 && t.length <= 12) {
-      invalidSet.add(t);
-    }
-  });
-
-  return {
-    valid: Array.from(validSet),
-    invalid: Array.from(invalidSet),
-  };
-}
-
-function parseTradeStocks(cellValue) {
-  return parseTradeStocksDetailed(cellValue).valid;
-}
-
 function normalizeDealDateIso_(dealDateDisplay) {
   if (!dealDateDisplay) return '';
   if (dealDateDisplay instanceof Date && !isNaN(dealDateDisplay.getTime())) {
@@ -1084,322 +988,6 @@ function normalizeDealDateIso_(dealDateDisplay) {
   return '';
 }
 
-function formatReconDealDate_(dealDateDisplay, dateISO) {
-  const normalizedIso = dateISO || normalizeDealDateIso_(dealDateDisplay);
-  if (!normalizedIso) return '';
-  const parts = normalizedIso.split('-');
-  if (parts.length !== 3) return '';
-  const year = Number(parts[0]);
-  const month = Number(parts[1]);
-  const day = Number(parts[2]);
-  if (!year || !month || !day) return '';
-  const dateObj = new Date(year, month - 1, day);
-  if (isNaN(dateObj.getTime())) return '';
-  return Utilities.formatDate(
-    dateObj,
-    Session.getScriptTimeZone(),
-    'EEE MMM dd yyyy'
-  );
-}
-
-function normalizeHeader_(header) {
-  return _normalizeHeaderImpl_(header);
-}
-
-function _normalizeHeaderImpl_(header) {
-  return String(header == null ? '' : header)
-    .normalize('NFKC')
-    .replace(/\u00A0/g, ' ')
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase();
-}
-
-function getHeaderMap_(sheet, headerRow) {
-  const rowIndex = headerRow || 1;
-  const lastCol = sheet.getLastColumn();
-  if (lastCol < 1) return {};
-
-  const headerValues =
-    sheet.getRange(rowIndex, 1, 1, lastCol).getDisplayValues()[0] || [];
-
-  const headerMap = {};
-
-  // Deterministic mapping: normalized header -> 1-based column index.
-  // We intentionally overwrite on duplicates so the *last* occurrence wins.
-  for (let i = 0; i < headerValues.length; i++) {
-    const normalized = _normalizeHeaderImpl_(headerValues[i]);
-    if (!normalized) continue;
-    const col = i + 1;
-    headerMap[normalized] = col;
-  }
-
-  // Final sanity: remove any impossible values (should never happen, but keeps callers safe).
-  Object.keys(headerMap).forEach((k) => {
-    const v = Number(headerMap[k]);
-    if (!v || v < 1) delete headerMap[k];
-    else headerMap[k] = v;
-  });
-
-  return headerMap;
-}
-
-function findReconHeaderRow_(sheet, requiredHeaders) {
-  const required = (requiredHeaders || []).map((h) => normalizeHeader_(h)).filter(Boolean);
-  const lastCol = sheet.getLastColumn();
-  if (lastCol < 1) return 1;
-
-  // Scan first few rows to find the row that contains the most required headers.
-  const maxScanRows = Math.min(10, sheet.getLastRow() || 10);
-  let bestRow = 1;
-  let bestScore = -1;
-
-  for (let r = 1; r <= maxScanRows; r++) {
-    const rowValues = sheet.getRange(r, 1, 1, lastCol).getDisplayValues()[0] || [];
-    const rowSet = new Set(rowValues.map((v) => normalizeHeader_(v)).filter(Boolean));
-    let score = 0;
-    required.forEach((h) => {
-      if (rowSet.has(h)) score++;
-    });
-    if (score > bestScore) {
-      bestScore = score;
-      bestRow = r;
-      if (bestScore === required.length) break; // perfect match
-    }
-  }
-
-  return bestRow;
-}
-
-function getRequiredCol_(headerMap, headerName) {
-  if (!headerMap || typeof headerMap !== 'object') {
-    throw new Error(`Missing required column: ${headerName}. Header map not available.`);
-  }
-
-  const normalized = _normalizeHeaderImpl_(headerName);
-  const compact = normalized.replace(/[^a-z0-9]/g, '');
-
-  // 1) Fast path: direct key lookup.
-  if (Object.prototype.hasOwnProperty.call(headerMap, normalized)) {
-    const direct = Number(headerMap[normalized]);
-    if (direct && direct >= 1) return direct;
-  }
-
-  // 2) Robust path: iterate keys and compare normalized forms.
-  // This defends against hidden/unusual whitespace or unicode edge cases.
-  let matchedKey = null;
-  const keys = Object.keys(headerMap);
-  for (let i = 0; i < keys.length; i++) {
-    const k = keys[i];
-    if (!k) continue;
-    const kn = _normalizeHeaderImpl_(k);
-    if (kn === normalized) {
-      matchedKey = k;
-      break;
-    }
-  }
-
-  // 3) Fallback: compact comparison (ignores spaces/punctuation).
-  if (!matchedKey) {
-    matchedKey = keys.find((k) => {
-      const kn = _normalizeHeaderImpl_(k);
-      return kn && kn.replace(/[^a-z0-9]/g, '') === compact;
-    });
-  }
-
-  const colIndex = matchedKey ? Number(headerMap[matchedKey]) : 0;
-  if (!colIndex || colIndex < 1) {
-    const keysPreview = keys.slice(0, 50).join(', ');
-    const message = `Missing required column: ${headerName}. Available normalized headers: ${keysPreview}`;
-    logWarning('getRequiredCol_', message, {
-      headerName,
-      normalized,
-      compact,
-      matchedKey: matchedKey || null,
-    });
-    throw new Error(message);
-  }
-
-  return colIndex;
-}
-
-function normalizeSourceKey_(value) {
-  return String(value == null ? '' : value)
-    .replace(/\u00A0/g, ' ')
-    .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    .replace(/\s+/g, '')
-    .trim()
-    .toUpperCase();
-}
-
-function detectSourceKeyCol_(sheet, lastRow, lastCol, headerMap) {
-  const headerMappedCol = headerMap[normalizeHeader_(RECON_SOURCEKEY_HEADER)] || 0;
-  const sheetId = sheet.getSheetId();
-  const props = PropertiesService.getScriptProperties();
-  const keyPattern = /^\d{4}-\d{2}-\d{2}\|[A-Z0-9]{8}$/;
-  const sampleLimit = Math.min(lastRow, 200);
-  const scanLimit = Math.min(lastRow, 250);
-  const sampleRowCount = Math.max(0, sampleLimit - 1);
-  const scanRowCount = Math.max(0, scanLimit - 1);
-
-  const matchesSampleThreshold_ = (matchCount, nonEmptyCount) => {
-    if (matchCount >= 10) return true;
-    return nonEmptyCount > 0 && matchCount / nonEmptyCount >= 0.2;
-  };
-
-  const sampleColumn_ = (colIndex) => {
-    if (!colIndex || colIndex < 1 || colIndex > lastCol || sampleRowCount < 1) {
-      return { matches: 0, nonEmpty: 0 };
-    }
-    const values = sheet
-      .getRange(2, colIndex, sampleRowCount, 1)
-      .getDisplayValues();
-    let matches = 0;
-    let nonEmpty = 0;
-    for (let i = 0; i < values.length; i++) {
-      const raw = String(values[i][0] == null ? '' : values[i][0]).trim();
-      if (raw) nonEmpty++;
-      const normalized = normalizeSourceKey_(raw);
-      if (normalized && keyPattern.test(normalized)) matches++;
-    }
-    return { matches: matches, nonEmpty: nonEmpty };
-  };
-
-  if (lastRow < 2) {
-    if (headerMappedCol) return headerMappedCol;
-    throw new Error(
-      `Unable to detect SourceKey column: ${sheet.getName()} has no data rows.`
-    );
-  }
-
-  const cachedStr = props.getProperty(RECON_SOURCEKEY_COL_CACHE_KEY);
-  if (cachedStr) {
-    try {
-      const cached = JSON.parse(cachedStr);
-      if (cached && cached.sheetId === sheetId) {
-        const cachedCol = Number(cached.col);
-        const cachedSample = sampleColumn_(cachedCol);
-        if (matchesSampleThreshold_(cachedSample.matches, cachedSample.nonEmpty)) {
-          Logger.log(
-            `Detected SourceKey column = ${cachedCol} (matches=${cachedSample.matches}, headerMapped=${headerMappedCol}).`
-          );
-          return cachedCol;
-        }
-      }
-    } catch (e) {
-      Logger.log('detectSourceKeyCol_: cache parse failed: ' + e);
-    }
-  }
-
-  if (headerMappedCol) {
-    const headerSample = sampleColumn_(headerMappedCol);
-    if (matchesSampleThreshold_(headerSample.matches, headerSample.nonEmpty)) {
-      props.setProperty(
-        RECON_SOURCEKEY_COL_CACHE_KEY,
-        JSON.stringify({ col: headerMappedCol, sheetId: sheetId, ts: Date.now() })
-      );
-      Logger.log(
-        `Detected SourceKey column = ${headerMappedCol} (matches=${headerSample.matches}, headerMapped=${headerMappedCol}).`
-      );
-      return headerMappedCol;
-    }
-  }
-
-  if (scanRowCount < 1 || lastCol < 1) {
-    throw new Error(
-      `Unable to detect SourceKey column: ${sheet.getName()} has no scannable data.`
-    );
-  }
-
-  const allValues = sheet.getRange(2, 1, scanRowCount, lastCol).getDisplayValues();
-  let bestCol = 0;
-  let bestMatches = 0;
-  for (let c = 0; c < lastCol; c++) {
-    let matches = 0;
-    for (let r = 0; r < scanRowCount; r++) {
-      const raw = String(allValues[r][c] == null ? '' : allValues[r][c]).trim();
-      if (!raw) continue;
-      const normalized = normalizeSourceKey_(raw);
-      if (normalized && keyPattern.test(normalized)) matches++;
-    }
-    if (matches > bestMatches) {
-      bestMatches = matches;
-      bestCol = c + 1;
-    }
-  }
-
-  if (!bestCol || bestMatches <= 0) {
-    throw new Error(
-      `Unable to detect SourceKey column in ${sheet.getName()}: no matching keys found.`
-    );
-  }
-
-  props.setProperty(
-    RECON_SOURCEKEY_COL_CACHE_KEY,
-    JSON.stringify({ col: bestCol, sheetId: sheetId, ts: Date.now() })
-  );
-  Logger.log(
-    `Detected SourceKey column = ${bestCol} (matches=${bestMatches}, headerMapped=${headerMappedCol}).`
-  );
-  return bestCol;
-}
-
-function getReconSheet_(spreadsheet) {
-  const direct = spreadsheet.getSheetByName(RECON_SHEET_NAME);
-  if (direct) return direct;
-  const targetName = normalizeHeader_(RECON_SHEET_NAME);
-  return spreadsheet
-    .getSheets()
-    .find((sheet) => normalizeHeader_(sheet.getName()) === targetName);
-}
-
-function buildTradeExportCandidatesFromRow_(row, dealDateDisplay, side) {
-  const result = [];
-  const fiFlag =
-    row.length > side.fiIdx
-      ? String(row[side.fiIdx] || '')
-        .trim()
-        .toUpperCase()
-      : '';
-  if (!isValidFIFlag(fiFlag)) return result;
-
-  const tradeCell = row.length > side.tradeIdx ? row[side.tradeIdx] : '';
-  const tradeRaw = String(tradeCell || '').trim();
-  if (!tradeRaw || tradeRaw.toUpperCase() === 'NT') return result;
-
-  const parsedStocks = parseTradeStocksDetailed(tradeRaw);
-  if (!parsedStocks.valid.length && !parsedStocks.invalid.length) return result;
-
-  const dateISO = normalizeDealDateIso_(dealDateDisplay);
-  if (!dateISO) return result;
-
-  const salesperson =
-    row.length > side.salesIdx ? String(row[side.salesIdx] || '').trim() : '';
-  const dateDisplay = String(dealDateDisplay || '').trim();
-  parsedStocks.valid.forEach((stock) => {
-    result.push({
-      dateISO: dateISO,
-      dateDisplay: dateDisplay,
-      stock: stock,
-      salesperson: salesperson,
-      key: `${dateISO}|${stock}`,
-    });
-  });
-  parsedStocks.invalid.forEach((token) => {
-    result.push({
-      dateISO: dateISO,
-      dateDisplay: dateDisplay,
-      stock: token,
-      salesperson: salesperson,
-      notes: `INVALID STOCK LENGTH: ${token}`,
-      key: `${dateISO}|INVALID|${token}`,
-      isInvalid: true,
-    });
-  });
-  return result;
-}
-
 function rowHasSalesActivity_(row) {
   if (!row || !row.length) return false;
   const hasNewActivity =
@@ -1413,15 +1001,6 @@ function rowHasSalesActivity_(row) {
       .slice(8, Math.min(14, row.length))
       .some((val) => val && String(val).trim() !== '');
   return hasNewActivity || hasUsedActivity;
-}
-
-function sideHasActivity_(row, side) {
-  if (!row || !row.length) return false;
-  const endIdx = Math.min(side.dataEndIdx, row.length);
-  if (endIdx <= side.dataStartIdx) return false;
-  return row
-    .slice(side.dataStartIdx, endIdx)
-    .some((val) => val && String(val).trim() !== '');
 }
 
 function collectMonthlyRowsWithDates_(monthlySheet, snapshot = null) {
@@ -1443,9 +1022,7 @@ function collectMonthlyRowsWithDates_(monthlySheet, snapshot = null) {
 
   const rowsWithDates = [];
   if (!dateHeaderRows.length) {
-    Logger.log(
-      'exportTradesToReconLog: No distinct date headers found in MONTHLY.'
-    );
+    Logger.log('No distinct date headers found in MONTHLY.');
     return rowsWithDates;
   }
 
@@ -1469,331 +1046,6 @@ function collectMonthlyRowsWithDates_(monthlySheet, snapshot = null) {
   }
 
   return rowsWithDates;
-}
-
-const RECON_LOCK_CAPABILITY = Object.freeze({});
-
-function appendTradesToRecon_(candidates, options, lockCapability) {
-  const opts = options || {};
-  const dryRun = !!opts.dryRun;
-  if (!candidates || !candidates.length) {
-    return {
-      appended: 0,
-      skippedDuplicates: 0,
-      invalidAppended: 0,
-      invalidSkippedDuplicates: 0,
-      totalCandidates: 0,
-    };
-  }
-
-  const reconSS = SpreadsheetApp.openById(RECON_SPREADSHEET_ID);
-  const reconSheet = getReconSheet_(reconSS);
-  if (!reconSheet) {
-    throw new Error(`Missing destination sheet: ${RECON_SHEET_NAME}`);
-  }
-
-  const lastRow = reconSheet.getLastRow();
-  const lastCol = reconSheet.getLastColumn();
-
-  // Header row can move (service may insert rows / rename sections). Detect it dynamically.
-  const headerRow = findReconHeaderRow_(reconSheet, [
-    'Deal Date',
-    'Stock #',
-    'Salesperson',
-    'Location',
-    RECON_SOURCEKEY_HEADER,
-  ]);
-  const headers = reconSheet
-    .getRange(headerRow, 1, 1, lastCol)
-    .getDisplayValues()[0] || [];
-  const headerMap = getHeaderMap_(reconSheet, headerRow);
-
-  const sourceKeyCol = detectSourceKeyCol_(
-    reconSheet,
-    lastRow,
-    lastCol,
-    headerMap
-  );
-  // ImportedAt is optional; do not warn if the destination sheet doesn't use it.
-  const hasImportedAt = !!headerMap[normalizeHeader_(RECON_IMPORTEDAT_HEADER)];
-
-  // Debug log: print the detected header row and visible headers in that row.
-  try {
-    Logger.log('appendTradesToRecon_: detected headerRow=' + headerRow + ' headers=' + JSON.stringify(headers));
-  } catch (e) {
-    Logger.log('appendTradesToRecon_: header preview failed: ' + e);
-  }
-
-
-  // Resolve required destination columns by header name (robust to column moves).
-  function findHeaderCol_(headers, label) {
-    const target = String(label).trim().toLowerCase();
-    for (let i = 0; i < headers.length; i++) {
-      if (String(headers[i]).trim().toLowerCase() === target) {
-        return i + 1; // 1-based
-      }
-    }
-    return 0;
-  }
-
-  function requireHeaderCol_(headers, label) {
-    const col = findHeaderCol_(headers, label);
-    if (!col) throw new Error(`Missing required column: ${label}`);
-    return col;
-  }
-
-  const dealDateCol     = requireHeaderCol_(headers, 'Deal Date');
-  const stockCol        = findHeaderCol_(headers, 'Stock #');
-  const salespersonCol  = requireHeaderCol_(headers, 'Salesperson');
-  const locationCol     = requireHeaderCol_(headers, 'Location');
-  const notesCol        = 0;
-  if (!stockCol) throw new Error('Missing required column: Stock #');
-
-  // If headerMap says SourceKey is a different column than our detected sourceKeyCol, prefer detection.
-  // (Detection is based on actual key pattern in the data.)
-  const runSection = (shouldWrite) => {
-    // Re-read under the lock (or at call time for dry runs) so rows appended by a
-    // concurrent export during setup are visible to both scans below.
-    const lockedLastRow = reconSheet.getLastRow();
-    const existingKeys = new Set();
-
-    // Read SourceKey column as the primary source of truth.
-    let keyValues = [];
-    if (lockedLastRow >= 2) {
-      keyValues = reconSheet.getRange(2, sourceKeyCol, lockedLastRow - 1, 1).getValues();
-      keyValues.forEach((row) => {
-        const key = normalizeSourceKey_(row[0]);
-        if (key) existingKeys.add(key);
-      });
-    }
-
-    // Scan the full used range of the Stock column (bounded by the sheet's actual
-    // last row, not an arbitrary cap) so real data past row 3,000 is never
-    // mistaken for an empty sheet and overwritten.
-    let lastDataRow = 0;
-    if (lockedLastRow >= 2) {
-      const stockValues = reconSheet
-        .getRange(2, stockCol, lockedLastRow - 1, 1)
-        .getDisplayValues();
-      for (let i = stockValues.length - 1; i >= 0; i--) {
-        if (String(stockValues[i][0]).trim()) {
-          lastDataRow = i + 2;
-          break;
-        }
-      }
-    }
-    const appendRow = lastDataRow ? lastDataRow + 1 : headerRow + 1;
-    Logger.log(
-      'appendTradesToRecon_: stockCol=' +
-        stockCol +
-        ' appendRow=' +
-        appendRow +
-        ' lastDataRow=' +
-        lastDataRow +
-        ' headerRow=' +
-        headerRow
-    );
-
-    const rowsToAppend = [];
-    let skippedDuplicates = 0;
-    let invalidSkippedDuplicates = 0;
-    let invalidAppended = 0;
-    const importedAt = Utilities.formatDate(
-      new Date(),
-      Session.getScriptTimeZone(),
-      'yyyy-MM-dd HH:mm:ss'
-    );
-    candidates.forEach((candidate) => {
-      const key = normalizeSourceKey_(candidate && candidate.key);
-      const isInvalid = !!(candidate && candidate.isInvalid);
-      if (!key || existingKeys.has(key)) {
-        skippedDuplicates++;
-        if (isInvalid) invalidSkippedDuplicates++;
-        return;
-      }
-      existingKeys.add(key);
-      if (isInvalid) invalidAppended++;
-
-      const notes = candidate && candidate.notes ? String(candidate.notes) : '';
-
-      // Deal date formatting for recon sheet (no time / timezone).
-      const reconDateDisplay =
-        formatReconDealDate_(candidate.dateDisplay, candidate.dateISO) ||
-        candidate.dateISO ||
-        '';
-
-      const rowValues = new Array(lastCol).fill('');
-
-      // Always write SourceKey to the detected SourceKey column.
-      rowValues[sourceKeyCol - 1] = key;
-
-      // Write required fields by resolved header columns.
-      rowValues[dealDateCol - 1] = reconDateDisplay;
-      rowValues[stockCol - 1] = candidate.stock || '';
-      rowValues[salespersonCol - 1] = candidate.salesperson || '';
-
-      // Default location for all imported rows.
-      rowValues[locationCol - 1] = 'Plant City';
-
-      // Notes is optional.
-      if (notesCol) rowValues[notesCol - 1] = notes;
-
-      // ImportedAt is optional.
-      if (hasImportedAt) {
-        const importedAtCol = headerMap[normalizeHeader_(RECON_IMPORTEDAT_HEADER)];
-        if (importedAtCol) rowValues[importedAtCol - 1] = importedAt;
-      }
-
-      rowsToAppend.push(rowValues);
-    });
-
-    if (rowsToAppend.length && shouldWrite) {
-      reconSheet
-        .getRange(appendRow, 1, rowsToAppend.length, lastCol)
-        .setValues(rowsToAppend);
-      try {
-        const sourceKeyColToHide = sourceKeyCol;
-        const importedAtColToHide =
-          headerMap[normalizeHeader_(RECON_IMPORTEDAT_HEADER)];
-        if (sourceKeyColToHide && importedAtColToHide) {
-          if (Math.abs(sourceKeyColToHide - importedAtColToHide) === 1) {
-            reconSheet.hideColumns(
-              Math.min(sourceKeyColToHide, importedAtColToHide),
-              2
-            );
-          } else {
-            reconSheet.hideColumns(sourceKeyColToHide);
-            reconSheet.hideColumns(importedAtColToHide);
-          }
-        } else if (sourceKeyColToHide) {
-          reconSheet.hideColumns(sourceKeyColToHide);
-        } else if (importedAtColToHide) {
-          reconSheet.hideColumns(importedAtColToHide);
-        }
-      } catch (e) {
-        logWarning('appendTradesToRecon_', 'Column hide failed; continuing.', {
-          error: String(e),
-        });
-      }
-    }
-
-    return {
-      appended: rowsToAppend.length,
-      skippedDuplicates: skippedDuplicates,
-      invalidAppended: invalidAppended,
-      invalidSkippedDuplicates: invalidSkippedDuplicates,
-      totalCandidates: candidates.length,
-    };
-  };
-
-  if (dryRun) {
-    return runSection(false);
-  }
-  if (lockCapability === RECON_LOCK_CAPABILITY) {
-    return runSection(true);
-  }
-  return withScriptLock(() => runSection(true));
-}
-
-function exportTradesToReconLog(options) {
-  const opts = { ...(options || {}) };
-  if (opts.scanMonthly) {
-    opts.rowsWithDates = withScriptLock(
-      () => collectMonthlyRowsWithDates_(getSheets().monthly),
-      { suppressAlert: true }
-    );
-  }
-  return _withReconLock(() => exportTradesToReconLog_(opts, RECON_LOCK_CAPABILITY));
-}
-
-function exportTradesToReconLog_(options, lockCapability) {
-  const opts = options || {};
-  const dryRun = !!opts.dryRun;
-  const sideDefs = [
-    { fiIdx: 2, tradeIdx: 5, salesIdx: 6, dataStartIdx: 1, dataEndIdx: 7 },
-    { fiIdx: 9, tradeIdx: 12, salesIdx: 13, dataStartIdx: 8, dataEndIdx: 14 },
-  ];
-
-  let rowsWithDates = [];
-  if (opts.rowsWithDates) {
-    rowsWithDates = opts.rowsWithDates;
-  } else if (opts.rows && opts.dealDateDisplay) {
-    rowsWithDates = (opts.rows || []).map((row) => ({
-      row: row,
-      dateDisplay: opts.dealDateDisplay,
-    }));
-  } else if (opts.scanMonthly) {
-    const sheets = getSheets();
-    rowsWithDates = collectMonthlyRowsWithDates_(sheets.monthly);
-  } else {
-    Logger.log(
-      'exportTradesToReconLog: No rows provided and scanMonthly not set.'
-    );
-    return null;
-  }
-
-  let scannedRows = 0;
-  let candidateTrades = 0;
-  let invalidTokensFound = 0;
-  let skippedInvalid = 0;
-  const candidates = [];
-
-  rowsWithDates.forEach((entry) => {
-    const row = entry.row || [];
-    const dealDateDisplay = entry.dateDisplay;
-    if (!rowHasSalesActivity_(row)) return;
-    scannedRows++;
-    sideDefs.forEach((side) => {
-      if (!sideHasActivity_(row, side)) return;
-      const sideCandidates = buildTradeExportCandidatesFromRow_(
-        row,
-        dealDateDisplay,
-        side
-      );
-      if (sideCandidates.length) {
-        const invalidCount = sideCandidates.reduce(
-          (count, candidate) => (candidate && candidate.isInvalid ? count + 1 : count),
-          0
-        );
-        candidateTrades += sideCandidates.length - invalidCount;
-        invalidTokensFound += invalidCount;
-        candidates.push(...sideCandidates);
-      } else {
-        skippedInvalid++;
-      }
-    });
-  });
-
-  const appendResult = appendTradesToRecon_(candidates, {
-    dryRun: dryRun,
-  }, lockCapability);
-  Logger.log(
-    [
-      'exportTradesToReconLog summary:',
-      `scanned rows: ${scannedRows}`,
-      `candidate trades: ${candidateTrades}`,
-      `invalid tokens found: ${invalidTokensFound}`,
-      `appended: ${appendResult.appended || 0}`,
-      `skipped duplicates: ${appendResult.skippedDuplicates || 0}`,
-      `invalid rows appended: ${appendResult.invalidAppended || 0}`,
-      `invalid rows skipped duplicates: ${
-        appendResult.invalidSkippedDuplicates || 0
-      }`,
-      `skipped invalid/not delivered/no trade: ${skippedInvalid}`,
-    ].join(' ')
-  );
-
-  return {
-    scannedRows: scannedRows,
-    candidateTrades: candidateTrades,
-    invalidTokensFound: invalidTokensFound,
-    appended: appendResult.appended || 0,
-    skippedDuplicates: appendResult.skippedDuplicates || 0,
-    invalidRowsAppended: appendResult.invalidAppended || 0,
-    invalidRowsSkippedDuplicates: appendResult.invalidSkippedDuplicates || 0,
-    skippedInvalid: skippedInvalid,
-    dryRun: dryRun,
-  };
 }
 
 /**
@@ -3016,24 +2268,6 @@ function removeIncompleteMonthlyWrite_(monthlySheet, checkpoint, expectedRows) {
   return true;
 }
 
-function recoverReconForCheckpoint_(checkpoint, sheets) {
-  const monthlyBlock = findMonthlyCheckpointBlock_(sheets.monthly, checkpoint);
-  if (!monthlyBlock) {
-    throw new Error(
-      `Checkpoint ${checkpoint.operationId} has no verified MONTHLY block for Recon export.`
-    );
-  }
-
-  return exportTradesToReconLog_(
-    {
-      rows: monthlyBlock.rows,
-      dealDateDisplay: checkpoint.dateProcessed,
-      dryRun: false,
-    },
-    RECON_LOCK_CAPABILITY
-  );
-}
-
 /**
  * Recovers analytics for a checkpoint operation
  * @param {Object} checkpoint - The checkpoint to recover from
@@ -3097,7 +2331,6 @@ function processDaily(options = {}) {
   const suppressAlert = !!(options.suppressAlert || options.triggerUid);
   const trace = _createDailyTrace(operationStartTime);
   let pendingAlert = null;
-  let reconReady = false;
   let failureRecovery = "";
   try {
     withScriptLock(() => {
@@ -3127,21 +2360,15 @@ function processDaily(options = {}) {
       );
       if (operationCheckpoint) {
         assertCheckpointMonthlySheet_(sheets.monthly, operationCheckpoint);
-        operationCheckpoint = _reconcileDailyCheckpoint(sheets, operationCheckpoint);
-        if (!operationCheckpoint) reconReady = true;
-      }
-      if (
-        operationCheckpoint &&
-        operationCheckpoint.phase === 'RECON_PENDING'
-      ) {
-        // Recon now runs independently; MONTHLY remains its durable source.
-        if (!updateCheckpoint('ANALYTICS_PENDING')) {
-          throw new Error('Could not checkpoint pending sales analytics.');
+        if (operationCheckpoint.phase === 'RECON_PENDING') {
+          // Older runs saved this phase after clearing TODAY. Only analytics remain.
+          if (!updateCheckpoint('ANALYTICS_PENDING')) {
+            throw new Error('Could not checkpoint pending sales analytics.');
+          }
+          operationCheckpoint.phase = 'ANALYTICS_PENDING';
+        } else {
+          operationCheckpoint = _reconcileDailyCheckpoint(sheets, operationCheckpoint);
         }
-        trace.next('analytics_recovery');
-        _requireDailyAnalyticsRecovery(getOperationCheckpoint());
-        reconReady = true;
-        return;
       }
       if (
         operationCheckpoint &&
@@ -3151,7 +2378,6 @@ function processDaily(options = {}) {
       ) {
         trace.next('analytics_recovery');
         _requireDailyAnalyticsRecovery(operationCheckpoint);
-        reconReady = true;
         return;
       }
 
@@ -3235,16 +2461,11 @@ function processDaily(options = {}) {
       ) {
         trace.next('today_clear_recovery');
         reconcileTodayClear_(sheets.today, operationCheckpoint, sheets.monthly);
-        if (!updateCheckpoint('RECON_PENDING')) {
-          throw new Error('Could not checkpoint the completed TODAY clear.');
-        }
-        // Recon is handled by the independent scheduled exporter.
         if (!updateCheckpoint('ANALYTICS_PENDING')) {
           throw new Error('Could not checkpoint pending sales analytics.');
         }
         trace.next('analytics_recovery');
         _requireDailyAnalyticsRecovery(getOperationCheckpoint());
-        reconReady = true;
         return;
       }
 
@@ -3475,11 +2696,6 @@ function processDaily(options = {}) {
       }
       reconcileTodayClear_(sheets.today, getOperationCheckpoint(), sheets.monthly);
 
-      if (!updateCheckpoint('RECON_PENDING')) {
-        throw new Error('Could not checkpoint the pending Recon export.');
-      }
-      // The independent Recon exporter reads committed MONTHLY sales.
-
       // Update checkpoint: Core operations complete, analytics pending
       if (!updateCheckpoint('ANALYTICS_PENDING')) {
         throw new Error('Could not checkpoint pending sales analytics.');
@@ -3575,7 +2791,6 @@ function processDaily(options = {}) {
       }
       pendingAlert = { title: summaryTitle, message: summaryMsg };
 
-      reconReady = true;
       Logger.log('Daily processing complete.');
       } catch (error) {
         try { failureRecovery = _rollbackUnclearedDaily(); }
@@ -3595,7 +2810,6 @@ function processDaily(options = {}) {
     }
     throw error;
   }
-  if (reconReady) _queueReconAfterDaily();
   if (pendingAlert && !suppressAlert) {
     _showDailyResult(pendingAlert.title, pendingAlert.message);
   }
@@ -4057,7 +3271,7 @@ function rolloverMonth() {
   try {
     // Finish any safely resumable daily operation before taking the rollover
     // lock. processDaily() owns its own lock and clears the checkpoint only
-    // after the MONTHLY write, TODAY clear, Recon export, and analytics recover.
+    // after the MONTHLY write, TODAY clear, and analytics recover.
     if (getOperationCheckpoint()) {
       toastInfo(
         'Finishing the previous daily operation before rollover...',
@@ -4227,7 +3441,6 @@ function onOpen() {
     const ui = SpreadsheetApp.getUi();
     const menu = ui.createMenu('SalesLog Tools');
 
-    // 1. SalesLog Tools (admin) Submenu
     const analyticsMenu = ui.createMenu('Sales Tools');
     analyticsMenu
       .addItem("Log Yesterday's Sales", 'processDaily')
@@ -4238,23 +3451,7 @@ function onOpen() {
       .addSeparator()
       .addItem('Refresh Salespeople List', 'manualRefreshLeaderboard');
 
-    menu.addSubMenu(analyticsMenu).addSeparator();
-
-    // 2. Service Tools Submenu
-    const serviceMenu = ui.createMenu('Service Tools');
-    serviceMenu
-      .addItem('Authorize Recon Access', 'authorizeReconAccess')
-      .addSeparator()
-      .addItem('Export Trades to Recon Log', 'menuExportTradesToReconLog')
-      .addSeparator()
-      .addItem(
-        'Dry Run: Export Trades to Recon Log',
-        'menuExportTradesToReconLogDryRun'
-      );
-
-    menu.addSubMenu(serviceMenu);
-
-    menu.addToUi();
+    menu.addSubMenu(analyticsMenu).addToUi();
   } catch (e) {
     // Log error with full context for debugging
     try {
@@ -4279,6 +3476,3 @@ function onOpen() {
     Logger.log('[onOpen] Trigger execution completed');
   }
 }
-
-// Duplicate normalizeHeader_ definitions: replace with delegating one-liners to _normalizeHeaderImpl_
-// (If any exist elsewhere in the file, e.g., function normalizeHeader_(header) { ... }, replace body with the below)

@@ -18,7 +18,7 @@ function setup() {
     })},
     HtmlService: {createHtmlOutput: html => ({html, setWidth() {return this;}, setHeight() {return this;}})},
   });
-  for (const file of ['error_logger.js', 'core_saleslogPro.js', 'daily_diagnostics.js', 'recon_job.js', 'daily_rollback.js', 'daily_recovery.js']) {
+  for (const file of ['error_logger.js', 'core_saleslogPro.js', 'daily_diagnostics.js', 'daily_rollback.js', 'daily_recovery.js']) {
     vm.runInContext(fs.readFileSync(path.join(__dirname, '..', file), 'utf8'), c);
   }
   c.acquireScriptLockWithRetry = () => ({success: true, attempts: 1, lock: {releaseLock() {released = true;}}});
@@ -89,70 +89,46 @@ for (const hasSales of [false, true]) {
 }
 console.log('PASS: failure propagation, severity, lock release/contention, trigger suppression, recovery outcomes, HTML escaping, and notification failure isolation.');
 
-// An old Recon checkpoint must advance analytics without reaching Recon.
-{
+// A saved post-clear checkpoint from the previous script must only finish analytics.
+for (const analyticsAvailable of [true, false]) {
   const t = setup();
-  let phase = 'RECON_PENDING', recovered = false;
-  t.c.getSheets = () => ({monthly: {}});
-  t.c.getOperationCheckpoint = () => ({phase});
-  t.c.prepareLegacyMonthlyWrittenCheckpoint_ = (_, cp) => cp;
-  t.c.completeLegacyMonthlyWrittenCheckpoint_ = (_, cp) => cp;
-  t.c.assertCheckpointMonthlySheet_ = () => {};
-  t.c.recoverReconForCheckpoint_ = () => { throw new Error('Recon must not run'); };
-  t.c.updateCheckpoint = next => {phase = next; return true;};
-  t.c.recoverAnalyticsForCheckpoint_ = () => { recovered = true; return true; };
-  assert.doesNotThrow(() => t.c.processDaily({triggerUid: 'scheduled'}));
-  assert(recovered);
-  assert.equal(phase, 'ANALYTICS_PENDING');
-}
-
-{
-  const t = setup();
-  const properties = new Map();
-  let created = 0, exports = 0, deleted = 0;
-  let clock = {day: '2026-09-09', morning: true};
-  t.c._reconClock = () => clock;
+  const phases = [];
+  let checkpoint = {version: 2, phase: 'RECON_PENDING', monthlySheetId: 42,
+    dateProcessed: '9/7/2026', sourceRows: [{sheetRow: 2, dataHash: 'previous-sale'}]};
   t.c.PropertiesService = {getScriptProperties: () => ({
-    getProperty: key => properties.get(key) || null,
-    setProperty: (key, value) => properties.set(key, value),
-    deleteProperty: key => properties.delete(key)
+    getProperty: () => checkpoint ? JSON.stringify(checkpoint) : null,
+    setProperty: (key, value) => {
+      assert.equal(key, 'DAILY_OPERATION_CHECKPOINT');
+      checkpoint = JSON.parse(value);
+      phases.push(checkpoint.phase);
+    },
+    deleteProperty: key => {
+      assert.equal(key, 'DAILY_OPERATION_CHECKPOINT');
+      checkpoint = null;
+    },
   })};
-  t.c.ScriptApp = {
-    newTrigger: () => ({timeBased() {return this;}, after(ms) {assert.equal(ms, 60000); return this;},
-      create() {created++; return {getUniqueId: () => String(created)};}}),
-    getProjectTriggers: () => [{getHandlerFunction: () => 'processRecon'}],
-    deleteTrigger: () => {deleted++;}
-  };
-  t.c.exportTradesToReconLog = () => {exports++; throw new Error('Recon unavailable');};
-  t.c._queueReconAfterDaily(); t.c._queueReconAfterDaily();
-  assert.equal(created, 1);
-  t.c.processRecon({triggerUid: 'old-recurring-trigger'});
-  assert.equal(exports, 0);
-  assert.throws(() => t.c.processRecon({triggerUid: '1'}), /Recon unavailable/);
-  t.c.processRecon({triggerUid: '1'}); t.c._queueReconAfterDaily();
-  assert.equal(exports, 1); assert.equal(created, 1);
-  clock = {day: '2026-09-10', morning: false};
-  t.c._queueReconAfterDaily(); assert.equal(created, 1);
-  clock.morning = true;
-  t.c._queueReconAfterDaily(); assert.equal(created, 2);
-  clock.morning = false;
-  t.c.processRecon({triggerUid: '2'}); assert.equal(exports, 1);
-  t.c.setupReconAutomation(); assert.equal(deleted, 1);
-  assert.equal(properties.has('RECON:pending'), false);
-  t.c.ScriptApp.newTrigger = () => {throw new Error('Trigger quota');};
-  clock = {day: '2026-09-11', morning: true};
-  assert.doesNotThrow(() => t.c._queueReconAfterDaily());
-}
-console.log('PASS: morning-only one-shot scheduling, once-per-day failed attempts, old-trigger rejection, schedule removal, and queue failure isolation.');
+  // Any attempt to reprocess TODAY or append to MONTHLY would fail on these sheet mocks.
+  t.c.getSheets = () => ({monthly: {getSheetId: () => 42}});
+  t.c.invalidateAnalyticsCache = () => {};
+  t.c.calculateMonthlyAnalytics = () => analyticsAvailable ? {count: 1} : null;
+  let reportsWritten = 0;
+  t.c.writeAnalyticsToMonthly = () => { reportsWritten++; };
 
-{
-  const t = setup();
-  for (const value of [1234567, '1234567', '00123456', 12345678]) {
-    assert.equal(t.c.parseTradeStocksDetailed(value).valid[0], String(value));
-    assert.equal(t.c.parseTradeStocksDetailed(value).invalid.length, 0);
+  if (analyticsAvailable) {
+    t.c.processDaily({triggerUid: 'scheduled'});
+    assert.deepEqual(phases, ['ANALYTICS_PENDING']);
+    assert.equal(checkpoint, null);
+    assert.equal(reportsWritten, 1);
+  } else {
+    assert.throws(() => t.c.processDaily({triggerUid: 'scheduled'}), /Analytics recovery failed/);
+    assert.deepEqual(phases, ['ANALYTICS_PENDING', 'ANALYTICS_FAILED']);
+    assert.equal(checkpoint.phase, 'ANALYTICS_FAILED');
+    assert.equal(reportsWritten, 0);
   }
-  assert.equal(t.c.parseTradeStocksDetailed('BAD123').invalid[0], 'BAD123');
+  assert(t.released());
 }
+console.log('PASS: a previously cleared day resumes analytics and retains failed work for retry.');
+
 for (const state of ['safe','edited','committed','interrupted']) {
   const t = setup();
   let phase = state === 'committed' ? 'ANALYTICS_FAILED' : state === 'interrupted' ? 'ROLLBACK_PENDING' : 'TODAY_CLEAR_PENDING';
@@ -178,7 +154,7 @@ for (const state of ['safe','edited','committed','interrupted']) {
   if (state === 'safe' || state === 'interrupted') {assert(deleted);assert(rebuilt);assert(result.includes('rolled back'));}
   else {assert(!cleared);assert(!deleted);assert(!rebuilt);}
 }
-console.log('PASS: numeric stock identifiers, safe rollback, interrupted rollback completion, edited TODAY protection, and post-clear checkpoint retention.');
+console.log('PASS: safe rollback, interrupted rollback completion, edited TODAY protection, and post-clear checkpoint retention.');
 
 // A missing or modified durable copy must never allow a TODAY clear.
 {
@@ -231,21 +207,49 @@ for (const mode of ['success','edit','reports_fail']) {
   assert(!sourceCleared);
 }
 console.log('PASS: automatic recovery of replaced/moved/removed sales, saved dates, concurrent edits, and report failures without user overrides.');
-// Finishing a prior transfer still schedules Recon through the existing daily path.
+// On resuming a pending TODAY clear, persist the analytics checkpoint immediately after the clear.
 {
-  const t=setup(); let queued=0;
-  const row=Array(14).fill('');
-  const range={getValues:()=>[row],getFontColors:()=>[row],getBackgrounds:()=>[row],getRow:()=>2,
-    setBackground(){return this;},setFontColor(){return this;}};
-  t.c.getSheets=()=>({today:{getRange:()=>range},monthly:{}});
-  t.c.getOperationCheckpoint=()=>({phase:'TODAY_CLEAR_PENDING'});
-  t.c.prepareLegacyMonthlyWrittenCheckpoint_=(_,cp)=>cp;
-  t.c.completeLegacyMonthlyWrittenCheckpoint_=(_,cp)=>cp;
-  t.c.assertCheckpointMonthlySheet_=()=>{};
-  t.c._reconcileDailyCheckpoint=()=>null;
-  t.c.shouldSkipSundays=()=>false;
-  t.c._queueReconAfterDaily=()=>{assert(t.released());queued++;};
-  t.c.processDaily({suppressAlert:true});
-  assert.equal(queued,1);
+  const t = setup();
+  const steps = [];
+  const checkpoint = {version: 2, phase: 'TODAY_CLEAR_PENDING', monthlySheetId: 42};
+  const range = {getValues: () => [], getFontColors: () => [], getBackgrounds: () => [], getRow: () => 2};
+  t.c.getSheets = () => ({today: {getRange: () => range}, monthly: {getSheetId: () => 42}});
+  t.c.getOperationCheckpoint = () => ({...checkpoint});
+  t.c.findMonthlyCheckpointBlock_ = () => null;
+  t.c.reconcileTodayClear_ = () => steps.push('clear');
+  t.c.updateCheckpoint = phase => { steps.push(phase); checkpoint.phase = phase; return true; };
+  t.c.recoverAnalyticsForCheckpoint_ = saved => {
+    assert.equal(saved.phase, 'ANALYTICS_PENDING');
+    steps.push('analytics');
+    return true;
+  };
+  t.c.processDaily({triggerUid: 'scheduled'});
+  assert.deepEqual(steps, ['clear', 'ANALYTICS_PENDING', 'analytics']);
+  assert(t.released());
 }
-console.log('PASS: automatic recovery preserves independent Recon scheduling after releasing the sales lock.');
+console.log('PASS: a resumed TODAY clear goes directly to analytics.');
+
+{
+  const t = setup();
+  const menus = [];
+  const handlers = [];
+  let attached = false;
+  t.c.SpreadsheetApp.getActiveSpreadsheet = () => ({getSheetByName: () => ({})});
+  t.c.SpreadsheetApp.getUi = () => ({
+    createMenu: name => {
+      menus.push(name);
+      return {
+        addItem(label, handler) { handlers.push(handler); return this; },
+        addSeparator() { return this; },
+        addSubMenu() { return this; },
+        addToUi() { attached = true; },
+      };
+    },
+  });
+  t.c.onOpen();
+  assert(attached);
+  assert.deepEqual(menus, ['SalesLog Tools', 'Sales Tools']);
+  assert.deepEqual(handlers, ['processDaily', 'recalcMtdFromMonthly', 'rolloverMonth', 'manualRefreshLeaderboard']);
+  for (const handler of handlers) assert.equal(typeof t.c[handler], 'function');
+}
+console.log('PASS: the spreadsheet menu exposes the four working sales commands.');
