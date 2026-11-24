@@ -29,6 +29,7 @@ const CACHE_TTL_ANALYTICS = 300; // 5 minutes (consistent with existing patterns
  *
  * Uses existing utilities: getSalespersonMaps(), tallyCounts(), findLastRowInCols()
  *
+ * @param {Object|null} snapshot Optional fresh A:N snapshot from this execution.
  * @returns {Object|null} Analytics summary object containing:
  *   - totals: {Object} Month-level totals (delivered, newDelivered, usedDelivered)
  *   - teamMetrics: {Object} Team-level metrics (sellingDays, newPerDay, usedPerDay)
@@ -38,10 +39,10 @@ const CACHE_TTL_ANALYTICS = 300; // 5 minutes (consistent with existing patterns
  *
  * @throws {Error} If MONTHLY sheet is missing or has insufficient columns
  */
-function calculateMonthlyAnalytics() {
+function calculateMonthlyAnalytics(snapshot = null) {
   try {
     // Check cache first
-    const cached = CACHE.get(CACHE_KEY_ANALYTICS);
+    const cached = snapshot ? null : CACHE.get(CACHE_KEY_ANALYTICS);
     if (cached) {
       try {
         const cachedAnalytics = JSON.parse(cached);
@@ -76,7 +77,8 @@ function calculateMonthlyAnalytics() {
     }
 
     // Find last row with data in columns A-N
-    const lastRow = findLastRowInCols(monthlySheet, 1, 14);
+    if (snapshot) _validateMonthlySalesSnapshot(monthlySheet, snapshot);
+    const lastRow = snapshot ? snapshot.values.length : findLastRowInCols(monthlySheet, 1, 14);
     if (lastRow < 2) {
       Logger.log('Analytics: MONTHLY sheet is empty, returning zero counts');
       return createEmptyAnalytics();
@@ -86,7 +88,7 @@ function calculateMonthlyAnalytics() {
     const { aliasMap, displayCodeMap } = getSalespersonMaps();
 
     // Batch read all MONTHLY data at once (columns A-N)
-    const monthlyData = monthlySheet
+    const monthlyData = snapshot ? snapshot.values.slice(1) : monthlySheet
       .getRange(2, 1, lastRow - 1, 14)
       .getValues();
 

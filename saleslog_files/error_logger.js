@@ -69,8 +69,8 @@ function logError(context, error, additionalData) {
 
   const fullLog = logParts.join('\n');
 
-  // Log to Apps Script logger
-  Logger.log(fullLog);
+  // Preserve the existing return contract while emitting ERROR severity.
+  console.error(fullLog);
 
   // Return both user-friendly message and full technical log
   return {
